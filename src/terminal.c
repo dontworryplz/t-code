@@ -234,7 +234,7 @@ static char *shell_directory(App *t)
 
 static void open_location(App *t, const char *location)
 {
-    char *colon = strchr(location, ':');
+    const char *colon = strchr(location, ':');
     char *name = g_strndup(location, colon - location);
     int line = 0, column = 0;
     char *dir = shell_directory(t);

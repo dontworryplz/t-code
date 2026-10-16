@@ -3,7 +3,7 @@ APP_SRC := $(wildcard src/*.c)
 FM_SRC  := $(wildcard src/fm/*.c)
 LSP_SRC := $(wildcard src/lsp/*.c)
 CFLAGS  ?= -O2 -g
-CFLAGS  += -Wall -Wextra -std=c17
+CFLAGS  += -Wall -Wextra -std=c23
 APP_CFLAGS := $(shell pkg-config --cflags $(PKGS))
 
 all: build/t-code build/t-code-fm build/t-code-lsp build/compile_commands.json
