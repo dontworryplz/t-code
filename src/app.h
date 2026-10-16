@@ -86,6 +86,7 @@ Tab *open_editor(App *t, const char *path, int line, int column, gboolean readon
 void open_file(App *t, const char *path);
 void open_file_at(App *t, const char *path, int line, int column);
 void open_to_side(App *t, const char *path);
+void feed_editor(Tab *tab, const char *keys);
 void editor_command(Tab *tab, const char *command);
 void set_split(App *t, gboolean split);
 void toggle_syntax(App *t);

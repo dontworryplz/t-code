@@ -312,12 +312,42 @@ Tab *open_editor(App *t, const char *path, int line, int column, gboolean readon
     return tab;
 }
 
-/* Runs a micro command in an editor (through its command bar, Ctrl+E; Escape first closes any active prompt). */
+typedef struct {
+    VteTerminal *term;
+    char *keys;
+} PendingKeys;
+
+static gboolean feed_pending_keys(gpointer data)
+{
+    PendingKeys *pending = data;
+
+    if (vte_terminal_get_pty(pending->term))
+        vte_terminal_feed_child(pending->term, pending->keys, -1);
+    g_object_unref(pending->term);
+    g_free(pending->keys);
+    g_free(pending);
+    return G_SOURCE_REMOVE;
+}
+
+/* Feeds keys to an editor after a lone Escape that closes any active prompt. The keys must come
+ * later than micro's escape timeout: an Escape directly followed by Ctrl+E reads as Alt+Ctrl+E,
+ * and the rest would then be typed into the file. */
+void feed_editor(Tab *tab, const char *keys)
+{
+    PendingKeys *pending = g_new(PendingKeys, 1);
+
+    vte_terminal_feed_child(tab->term, "\x1b", 1);
+    pending->term = g_object_ref(tab->term);
+    pending->keys = g_strdup(keys);
+    g_timeout_add(100, feed_pending_keys, pending);
+}
+
+/* Runs a micro command in an editor through its command bar (Ctrl+E). */
 void editor_command(Tab *tab, const char *command)
 {
-    char *keys = g_strdup_printf("\x1b\x05%s\r", command);
+    char *keys = g_strdup_printf("\x05%s\r", command);
 
-    vte_terminal_feed_child(tab->term, keys, -1);
+    feed_editor(tab, keys);
     g_free(keys);
 }
 
