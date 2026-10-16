@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=t-code
+Comment=Three terminals in one window: files, editor tabs (micro + clangd) and a shell
+Exec=@BIN@ %F
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;IDE;
+MimeType=text/x-csrc;text/x-chdr;text/plain;inode/directory;
+StartupWMClass=io.github.tcode
+StartupNotify=true

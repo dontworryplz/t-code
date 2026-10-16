@@ -1,0 +1,64 @@
+# C, colored like VS Code. Later rules win where matches overlap, so the general ones come first.
+filetype: c
+
+detect:
+    filename: "(\\.(c|C)$|\\.(h|H)$|\\.ii?$|\\.(def)$)"
+
+rules:
+    # Variables, then function names (the "(" is recolored by the bracket rule), then macros.
+    - identifier: "\\b[A-Za-z_][0-9A-Za-z_]*\\b"
+    - identifier.func: "\\b[A-Za-z_][0-9A-Za-z_]*[[:space:]]*\\("
+    - identifier.macro: "\\b[A-Z_][0-9A-Z_]+\\b"
+
+    - symbol.operator: "[-+*/%=<>.:;,~&|^!?]"
+    - symbol.brackets: "[(){}]|\\[|\\]"
+
+    # Named types: foo_t, struct/union/enum tags, FILE.
+    - type: "\\b[a-z_][0-9a-z_]*_t\\b"
+    - type: "\\b(struct|union|enum)[[:space:]]+[A-Za-z_][0-9A-Za-z_]*"
+    - type: "\\b(FILE|DIR|va_list|jmp_buf)\\b"
+
+    # Built-in types and storage keywords.
+    - type.keyword: "\\b(_Atomic|_BitInt|float|double|_Complex|_Imaginary|_Bool|bool|char|int|short|long|enum|void|struct|union|typedef|typeof|typeof_unqual|(un)?signed|inline|_Noreturn)\\b"
+    - type.keyword: "\\b(auto|volatile|register|restrict|_Alignas|alignas|_Alignof|alignof|static|const|constexpr|extern|_Thread_local|thread_local|sizeof|offsetof|_Generic|_Static_assert|static_assert)\\b"
+    - type.keyword: "__attribute__|__(aligned|asm|builtin|extension|hidden|inline|packed|restrict|section|typeof|weak)__"
+
+    # Control flow.
+    - statement: "\\b(for|if|while|do|else|case|default|switch|goto|continue|break|return|asm)\\b"
+
+    - constant.number: "(\\b([1-9][0-9]*|0[0-7]*|0[Xx][0-9A-Fa-f]+|0[Bb][01]+)([Uu][Ll]?[Ll]?|[Ll][Ll]?[Uu]?)?\\b)"
+    - constant.number: "(\\b(([0-9]*[.][0-9]+|[0-9]+[.][0-9]*)([Ee][+-]?[0-9]+)?|[0-9]+[Ee][+-]?[0-9]+)[FfLl]?\\b)"
+    - constant.number: "(\\b0[Xx]([0-9A-Za-z]*[.][0-9A-Za-z]+|[0-9A-Za-z]+[.][0-9A-Za-z]*)[Pp][+-]?[0-9]+[FfLl]?\\b)"
+    - constant.bool: "\\b(true|false|NULL|nullptr)\\b"
+
+    # Preprocessor: the header name is a string, the directive itself is a keyword.
+    - constant.string: "^[[:space:]]*#[[:space:]]*include[[:space:]]*<[^>]*>"
+    - preproc: "^[[:space:]]*#[[:space:]]*(define|embed|pragma|include|(un|ifn?)def|endif|el(if|ifdef|ifndef|se)|if|line|warning|error)\\b"
+    - preproc: "\\bdefined\\b"
+
+    - constant.string:
+        start: "\""
+        end: "\""
+        skip: "\\\\."
+        rules:
+            - constant.placeholder: "%[-+ #0]*([0-9]+|\\*)?(\\.([0-9]+|\\*))?(hh|h|ll|l|j|z|t|L)?[diouxXeEfFgGaAcspn%]"
+            - constant.specialChar: "\\\\([\"'abfnrtv\\\\?]|[0-3]?[0-7]{1,2}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})"
+
+    - constant.string:
+        start: "'"
+        end: "'"
+        skip: "\\\\."
+        rules:
+            - constant.specialChar: "\\\\([\"'abfnrtv\\\\?]|[0-3]?[0-7]{1,2}|x[0-9A-Fa-f]{1,2})"
+
+    - comment:
+        start: "//"
+        end: "$"
+        rules:
+            - todo: "(TODO|FIXME|XXX|NOTE):?"
+
+    - comment:
+        start: "/\\*"
+        end: "\\*/"
+        rules:
+            - todo: "(TODO|FIXME|XXX|NOTE):?"

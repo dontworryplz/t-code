@@ -1,0 +1,14 @@
+{
+    "colorscheme": "dark-modern",
+    "truecolor": "on",
+    "tabsize": 4,
+    "tabstospaces": true,
+    "autoindent": true,
+    "mkparents": true,
+    "savecursor": true,
+    "saveundo": true,
+    "lsp.server": "c=clangd --background-index --clang-tidy,c++=clangd --background-index --clang-tidy",
+    "lsp.formatOnSave": false,
+    "lsp.ignoreTriggerCharacters": "",
+    "autosave": 1
+}
