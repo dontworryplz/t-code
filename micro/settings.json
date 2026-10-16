@@ -10,5 +10,6 @@
     "lsp.server": "c=clangd --background-index --clang-tidy,c++=clangd --background-index --clang-tidy",
     "lsp.formatOnSave": false,
     "lsp.ignoreTriggerCharacters": "",
-    "autosave": 1
+    "autosave": 1,
+    "diffgutter": true
 }

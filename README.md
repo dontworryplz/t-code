@@ -106,7 +106,9 @@ a `CMakeLists.txt` is configured and built in `build/` and the newest program th
 `Makefile` runs `make`, then `make run` if there is a `run` target; otherwise the current C or C++
 file is compiled on its own (with AddressSanitizer and UBSan) into `build/` and run.
 
-The file manager colors files by their git state like VS Code (modified, added, untracked,
+In a git repository the editor marks changed lines in the gutter like VS Code, compared with the
+last commit: a blue bar for changed lines, green for added ones, and a red mark where lines were
+deleted. The file manager colors files by their git state like VS Code (modified, added, untracked,
 conflicted, ignored) and puts the letter at the end of the row.
 
 The **markdown preview** opens as a tab and follows the file as you type (autosave). Links to
