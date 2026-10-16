@@ -5,10 +5,15 @@
  */
 #include "app.h"
 
+#include <signal.h>
 #include <string.h>
 
 static void tab_free(Tab *tab)
 {
+    if (tab->pid > 0) {
+        kill(-tab->pid, SIGTERM);
+        kill(tab->pid, SIGTERM);
+    }
     if (tab->preview)
         preview_free(tab->preview);
     g_free(tab->compare_with);
@@ -228,6 +233,7 @@ void move_tab(Tab *tab, int to)
 
 static void on_editor_exited(VteTerminal *term G_GNUC_UNUSED, int status G_GNUC_UNUSED, Tab *tab)
 {
+    tab->pid = 0;
     if (tab->app->closing)
         return;
     if (tab->compare_with)
@@ -240,7 +246,15 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
     const char *title = vte_terminal_get_termprop_string(term, VTE_TERMPROP_XTERM_TITLE, NULL);
     int modified, line, column, errors, warnings, end = 0;
 
-    if (!title || !g_str_has_prefix(title, "t-code ") ||
+    if (!title)
+        return;
+    if (g_str_has_prefix(title, "t-code-open ")) {
+        if (sscanf(title + 12, "%d %d %n", &line, &column, &end) >= 2 &&
+            g_path_is_absolute(title + 12 + end))
+            open_file_at(tab->app, title + 12 + end, line, column);
+        return;
+    }
+    if (!g_str_has_prefix(title, "t-code ") ||
         sscanf(title + 7, "%d %d %d %d %d %n", &modified, &line, &column, &errors, &warnings, &end) < 5)
         return;
     tab->modified = modified != 0;
@@ -298,10 +312,10 @@ Tab *open_editor(App *t, const char *path, int line, int column, gboolean readon
     return tab;
 }
 
-/* Runs a micro command in an editor (through its command bar, Ctrl+E). */
+/* Runs a micro command in an editor (through its command bar, Ctrl+E; Escape first closes any active prompt). */
 void editor_command(Tab *tab, const char *command)
 {
-    char *keys = g_strdup_printf("\x05%s\r", command);
+    char *keys = g_strdup_printf("\x1b\x05%s\r", command);
 
     vte_terminal_feed_child(tab->term, keys, -1);
     g_free(keys);

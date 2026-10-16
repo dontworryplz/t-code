@@ -19,6 +19,14 @@ char *join(const char *dir, const char *name)
     return path;
 }
 
+void parent_dir(const char *path, char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", path);
+    char *slash = strrchr(out, '/');
+    if (slash)
+        slash[slash == out ? 1 : 0] = '\0';
+}
+
 int is_expanded(const char *path)
 {
     for (int i = 0; i < fm.nexpanded; i++)
@@ -115,8 +123,8 @@ static void scan(const char *dir, int depth)
     free(list);
 }
 
-/* Re-reads the tree and its git state, and puts the selection on `keep` when it is still there. */
-void rebuild(const char *keep)
+/* Re-reads the folder tree using the cached git state; puts the selection on `keep` when present. */
+void rebuild_rows(const char *keep)
 {
     char *wanted = keep ? strdup(keep) : NULL;
 
@@ -124,7 +132,6 @@ void rebuild(const char *keep)
         free(fm.rows[i].path);
     fm.nrows = 0;
     scan(fm.root, 0);
-    git_refresh();
     for (int i = 0; i < fm.nrows; i++)
         fm.rows[i].git = git_state_of(fm.rows[i].path, fm.rows[i].dir);
 
@@ -142,6 +149,16 @@ void rebuild(const char *keep)
     if (fm.sel < 0)
         fm.sel = 0;
     watch_sync();
+}
+
+/* Re-reads both git status and the folder tree. */
+void rebuild(const char *keep)
+{
+    char *wanted = keep ? strdup(keep) : NULL;
+
+    git_refresh();
+    rebuild_rows(wanted);
+    free(wanted);
 }
 
 /* Marks every directory between the root and path as expanded. */

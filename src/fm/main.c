@@ -2,6 +2,7 @@
 #include "fm.h"
 
 #include <errno.h>
+#include <locale.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -55,6 +56,7 @@ int main(void)
     unsigned char buf[512];
     bool refresh_pending = false;
 
+    setlocale(LC_CTYPE, "");
     if (!getcwd(fm.root, sizeof fm.root)) {
         perror("t-code-fm");
         return 1;

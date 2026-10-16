@@ -52,7 +52,7 @@ static void go_to_line(App *t)
 
     if (tab && tab->kind == TAB_EDITOR) {
         select_tab(tab);
-        vte_terminal_feed_child(tab->term, "\x05goto ", -1);
+        vte_terminal_feed_child(tab->term, "\x1b\x05goto ", -1);
     }
 }
 

@@ -7,7 +7,7 @@
     "mkparents": true,
     "savecursor": true,
     "saveundo": true,
-    "lsp.server": "c=clangd --background-index --clang-tidy,c++=clangd --background-index --clang-tidy",
+    "lsp.server": "c=clangd --background-index --clang-tidy --pch-storage=disk --malloc-trim -j=2 --limit-results=100,c++=clangd --background-index --clang-tidy --pch-storage=disk --malloc-trim -j=2 --limit-results=100",
     "lsp.formatOnSave": false,
     "lsp.ignoreTriggerCharacters": "",
     "autosave": 1,

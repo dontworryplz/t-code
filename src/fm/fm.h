@@ -89,8 +89,10 @@ void draw(const char *prompt, const char *input);
 
 /* tree.c */
 char *join(const char *dir, const char *name);
+void parent_dir(const char *path, char *out, size_t cap);
 int is_expanded(const char *path);
 void set_expanded(const char *path, bool on);
+void rebuild_rows(const char *keep);
 void rebuild(const char *keep);
 void reveal(const char *path);
 const char *selected_path(void);

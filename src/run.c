@@ -163,15 +163,21 @@ char *project_summary(App *t)
 typedef struct {
     App *app;
     char *command;
+    int tries;
 } PendingRun;
 
 static gboolean run_later(gpointer data)
 {
     PendingRun *run = data;
-    char *line = g_strdup_printf("clear; %s", run->command);
 
-    run_in_shell(run->app, line);
-    g_free(line);
+    if (!run->app->closing && any_unsaved(run->app) && ++run->tries < 15)
+        return G_SOURCE_CONTINUE;
+
+    if (!run->app->closing) {
+        char *line = g_strdup_printf("clear; %s", run->command);
+        run_in_shell(run->app, line);
+        g_free(line);
+    }
     g_free(run->command);
     g_free(run);
     return G_SOURCE_REMOVE;
@@ -182,6 +188,7 @@ void build_project(App *t, gboolean run)
     Project p = find_project(t);
     char *command;
     int n = tab_count(t);
+    gboolean saving = FALSE;
 
     switch (p.kind) {
     case PROJECT_CMAKE: command = cmake_command(p.root, run); break;
@@ -192,15 +199,20 @@ void build_project(App *t, gboolean run)
         break;
     }
 
-    /* Save every changed file first (Ctrl+S in micro), and give the saves a moment. */
+    /* Save every changed file first (Ctrl+S in micro), and wait for the saves to finish. */
     for (int i = 0; i < n; i++) {
         Tab *tab = tab_nth(t, i);
-        if (tab->kind == TAB_EDITOR && tab->modified)
+        if (tab->kind == TAB_EDITOR && tab->modified) {
             vte_terminal_feed_child(tab->term, "\x13", 1);
+            saving = TRUE;
+        }
     }
     PendingRun *pending = g_new0(PendingRun, 1);
     pending->app = t;
     pending->command = command;
-    g_timeout_add(250, run_later, pending);
+    if (saving)
+        g_timeout_add(30, run_later, pending);
+    else
+        run_later(pending);
     g_free(p.root);
 }

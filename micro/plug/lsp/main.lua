@@ -201,7 +201,6 @@ function onRedo(bp) onRune(bp); end
 function onIndent(bp) onRune(bp); end
 function onIndentSelection(bp) onRune(bp); end
 function onPaste(bp) onRune(bp); end
-function onSave(bp) onRune(bp); end
 
 function onEscape(bp) 
 	if splitBP ~= nil then
@@ -217,6 +216,14 @@ function preInsertNewline(bp)
 		local data = util.String(cur:GetSelection())
 		local file, line, character = data:match("(./[^:]+):([^:]+):([^:]+)")
 		local doc, _ = file:gsub("^file://", "")
+		if go_os.Getenv("TCODE_SOCKET") ~= "" then
+			local abs, err = filepath.Abs(doc)
+			if err == nil then doc = abs end
+			pcall(function () bp:Unsplit(); end)
+			splitBP = nil
+			go_os.Stdout:WriteString(fmt.Sprintf("\027]0;t-code-open %d %d %s\007", (line * 1) + 1, (character * 1) + 1, doc))
+			return false
+		end
 		buf, _ = buffer.NewBufferFromFile(doc)
 		bp:AddTab()
 		micro.CurPane():OpenBuffer(buf)
@@ -313,68 +320,78 @@ function isIgnoredMessage(msg)
 	return false -- show this message to user
 end
 
-function onStdout(filetype)
-	return function (text)
-		if text:starts("Content-Length:") then
-			message = text
-		else
-			message = message .. text
-		end
-		if not text:ends("}") then
-			return
-		end	
-		local data = message:parse()
-		if data == false then
-			return
-		end
-		
-		if data.method == "workspace/configuration" then
-		    -- actually needs to respond with the same ID as the received JSON
-			local message = fmt.Sprintf('{"jsonrpc": "2.0", "id": %.0f, "result": [{"enable": true}]}', data.id)
-			shell.JobSend(cmd[filetype], fmt.Sprintf('Content-Length: %.0f\n\n%s', #message, message))
-		elseif data.method == "textDocument/publishDiagnostics" or data.method == "textDocument\\/publishDiagnostics" then
-			-- react to server-published event
-			local bp = micro.CurPane().Buf
+local function handleMessage(filetype, raw)
+	local status, data = pcall(json.parse, raw)
+	if not status or type(data) ~= "table" then
+		return
+	end
+
+	if data.method == "workspace/configuration" then
+		local resp = fmt.Sprintf('{"jsonrpc": "2.0", "id": %.0f, "result": [{"enable": true}]}', data.id)
+		shell.JobSend(cmd[filetype], fmt.Sprintf('Content-Length: %.0f\r\n\r\n%s', #resp, resp))
+	elseif data.method == "textDocument/publishDiagnostics" or data.method == "textDocument\\/publishDiagnostics" then
+		local pane = micro.CurPane()
+		if not pane or not pane.Buf then return end
+		local bp = pane.Buf
+		local uri = getUriFromBuf(bp)
+		if data.params and data.params.uri == uri then
 			bp:ClearMessages("lsp")
 			bp:AddMessage(buffer.NewMessage("lsp", "", buffer.Loc(0, 10000000), buffer.Loc(0, 10000000), buffer.MTInfo))
-			local uri = getUriFromBuf(bp)
-			if data.params.uri == uri then
-				for _, diagnostic in ipairs(data.params.diagnostics) do
-					local type = buffer.MTInfo
-					if diagnostic.severity == 1 then
-						type = buffer.MTError
-					elseif diagnostic.severity == 2 then
-						type = buffer.MTWarning
-					end
-					local mstart = buffer.Loc(diagnostic.range.start.character, diagnostic.range.start.line)
-		            local mend = buffer.Loc(diagnostic.range["end"].character, diagnostic.range["end"].line)
-	
-					if not isIgnoredMessage(diagnostic.message) then
-						msg = buffer.NewMessage("lsp", diagnostic.message, mstart, mend, type)
-						bp:AddMessage(msg)
-		            end
+			for _, diagnostic in ipairs(data.params.diagnostics or {}) do
+				local type = buffer.MTInfo
+				if diagnostic.severity == 1 then
+					type = buffer.MTError
+				elseif diagnostic.severity == 2 then
+					type = buffer.MTWarning
+				end
+				local mstart = buffer.Loc(diagnostic.range.start.character, diagnostic.range.start.line)
+				local mend = buffer.Loc(diagnostic.range["end"].character, diagnostic.range["end"].line)
+				if not isIgnoredMessage(diagnostic.message) then
+					local msg = buffer.NewMessage("lsp", diagnostic.message, mstart, mend, type)
+					bp:AddMessage(msg)
 				end
 			end
-		elseif currentAction[filetype] and currentAction[filetype].method and not data.method and currentAction[filetype].response and data.jsonrpc then			-- react to custom action event
-			local bp = micro.CurPane()
-			micro.Log("Received message for ", filetype, data)
-			currentAction[filetype].response(bp, data)
-			currentAction[filetype] = {}
-		elseif data.method == "window/showMessage" or data.method == "window\\/showMessage" then
-			if filetype == micro.CurPane().Buf:FileType() then
-				micro.InfoBar():Message(data.params.message)
-			else
-				micro.Log(filetype .. " message " .. data.params.message)
-			end
-		elseif data.method == "window/logMessage" or data.method == "window\\/logMessage" then
-			micro.Log(data.params.message)
-		elseif message:starts("Content-Length:") then
-			if message:find('"') and not message:find('"result":null') then
-				micro.Log("Unhandled message 1", filetype, message)
-			end
+		end
+	elseif currentAction[filetype] and currentAction[filetype].method and not data.method and currentAction[filetype].response and data.jsonrpc then
+		local bp = micro.CurPane()
+		local action = currentAction[filetype]
+		currentAction[filetype] = {}
+		action.response(bp, data)
+	elseif data.method == "window/showMessage" or data.method == "window\\/showMessage" then
+		if filetype == micro.CurPane().Buf:FileType() then
+			micro.InfoBar():Message(data.params.message)
 		else
-			-- enable for debugging purposes
-			micro.Log("Unhandled message 2", filetype, message)
+			micro.Log(filetype .. " message " .. data.params.message)
+		end
+	elseif data.method == "window/logMessage" or data.method == "window\\/logMessage" then
+		micro.Log(data.params.message)
+	end
+end
+
+function onStdout(filetype)
+	return function (text)
+		message = message .. text
+		while true do
+			local hstart = message:find("Content%-Length:")
+			if not hstart then
+				if #message > 64 then message = "" end
+				break
+			end
+			local _, body_start = message:find("\r?\n\r?\n", hstart)
+			if not body_start then
+				break
+			end
+			local len_str = message:sub(hstart, body_start):match("Content%-Length:%s*(%d+)")
+			local content_len = tonumber(len_str)
+			if not content_len then
+				message = message:sub(body_start + 1)
+			elseif #message < body_start + content_len then
+				break
+			else
+				local body = message:sub(body_start + 1, body_start + content_len)
+				message = message:sub(body_start + content_len + 1)
+				handleMessage(filetype, body)
+			end
 		end
 	end
 end
@@ -441,7 +458,12 @@ function definitionActionResponse(bp, data)
 	local uri = (results[1].uri or results[1].targetUri)
 	local doc = uri:gsub("^file://", "")
 	local buf = bp.Buf
+	local range = results[1].range or results[1].targetSelectionRange
 	if file ~= doc then
+		if go_os.Getenv("TCODE_SOCKET") ~= "" then
+			go_os.Stdout:WriteString(fmt.Sprintf("\027]0;t-code-open %d %d %s\007", range.start.line + 1, range.start.character + 1, doc))
+			return
+		end
 		-- it's from a different file, so open it as a new tab
 		buf, _ = buffer.NewBufferFromFile(doc)
 		bp:AddTab()
@@ -457,7 +479,6 @@ function definitionActionResponse(bp, data)
 		  end
 		end
 	end
-	local range = results[1].range or results[1].targetSelectionRange
 	buf:GetActiveCursor():GotoLoc(buffer.Loc(range.start.character, range.start.line))
 	bp:Center()
 end
@@ -865,18 +886,28 @@ end
 
 -- Expects the given pos to be the first character after the opening quote.
 -- Returns val, pos; the returned pos is after the closing quote character.
-local function parse_str_val(str, pos, val)
-  val = val or ''
+local esc_map = {b = '\b', f = '\f', n = '\n', r = '\r', t = '\t'}
+local function parse_str_val(str, pos)
   local early_end_error = 'End of input found while parsing string.'
-  if pos > #str then error(early_end_error) end
-  local c = str:sub(pos, pos)
-  if c == '"'  then return val, pos + 1 end
-  if c ~= '\\' then return parse_str_val(str, pos + 1, val .. c) end
-  -- We must have a \ character.
-  local esc_map = {b = '\b', f = '\f', n = '\n', r = '\r', t = '\t'}
-  local nextc = str:sub(pos + 1, pos + 1)
-  if not nextc then error(early_end_error) end
-  return parse_str_val(str, pos + 2, val .. (esc_map[nextc] or nextc))
+  local parts = {}
+  local len = #str
+  while pos <= len do
+    local c = str:sub(pos, pos)
+    if c == '"' then
+      return table.concat(parts), pos + 1
+    elseif c == '\\' then
+      local nextc = str:sub(pos + 1, pos + 1)
+      if nextc == '' then error(early_end_error) end
+      parts[#parts + 1] = esc_map[nextc] or nextc
+      pos = pos + 2
+    else
+      local next_special = str:find('["\\]', pos)
+      if not next_special then error(early_end_error) end
+      parts[#parts + 1] = str:sub(pos, next_special - 1)
+      pos = next_special
+    end
+  end
+  error(early_end_error)
 end
 
 -- Returns val, pos; the returned pos is after the number's final character.

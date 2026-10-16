@@ -60,6 +60,8 @@ void update_status(App *t)
 
 /* Git branch, polled ----------------------------------------------------------------------------- */
 
+static gboolean branch_busy;
+
 static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
 {
     App *t = data;
@@ -70,6 +72,7 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
     char *branch = NULL;
     gboolean dirty = FALSE;
 
+    branch_busy = FALSE;
     if (ok && out && !t->closing) {
         char **lines = g_strsplit(out, "\n", -1);
         for (int i = 0; lines[i]; i++) {
@@ -99,9 +102,12 @@ static gboolean poll_branch(gpointer data)
 
     if (t->closing)
         return G_SOURCE_REMOVE;
+    if (branch_busy)
+        return G_SOURCE_CONTINUE;
     proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL,
                             "git", "-C", t->root, "status", "--porcelain=v2", "--branch", NULL);
     if (proc) {
+        branch_busy = TRUE;
         g_subprocess_communicate_utf8_async(proc, NULL, NULL, on_branch, t);
         g_object_unref(proc);
     }

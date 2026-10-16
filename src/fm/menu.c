@@ -226,9 +226,10 @@ static void run_action(int action, const Row *row)
             create_in(dir, action == ACT_NEW_FOLDER);
         break;
     case ACT_TERMINAL:
-        snprintf(dir, sizeof dir, "%s", row ? row->path : fm.root);
         if (row && !row->dir)
-            *strrchr(dir, '/') = '\0';
+            parent_dir(row->path, dir, sizeof dir);
+        else
+            snprintf(dir, sizeof dir, "%s", row ? row->path : fm.root);
         send_to_tcode("terminal", dir);
         break;
     case ACT_CUT:

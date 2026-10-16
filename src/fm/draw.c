@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <wchar.h>
 
 /* Output buffer ------------------------------------------------------------------------------ */
 
@@ -38,18 +39,34 @@ void buf_printf(Buf *b, const char *fmt, ...)
     buf_add(b, tmp, n < (int)sizeof tmp ? (size_t)n : sizeof tmp - 1);
 }
 
+static int next_char(const char *s, size_t *bytes)
+{
+    wchar_t wc;
+    mbstate_t st = { 0 };
+    size_t n = mbrtowc(&wc, s, 4, &st);
+
+    if (n == 0 || n == (size_t)-1 || n == (size_t)-2) {
+        *bytes = 1;
+        return 1;
+    }
+    *bytes = n;
+    int w = wcwidth(wc);
+    return w >= 0 ? w : 1;
+}
+
 /* Appends at most `cols` columns of UTF-8 text s; returns the columns used. */
 int buf_cols(Buf *b, const char *s, int cols)
 {
     int used = 0;
-    const char *p = s;
 
-    while (*p && used < cols) {
-        const char *start = p++;
-        while ((*p & 0xC0) == 0x80)
-            p++;
-        buf_add(b, start, p - start);
-        used++;
+    for (const char *p = s; *p;) {
+        size_t n;
+        int w = next_char(p, &n);
+        if (used + w > cols)
+            break;
+        buf_add(b, p, n);
+        used += w;
+        p += n;
     }
     return used;
 }
@@ -66,11 +83,14 @@ void buf_write(Buf *b)
 
 int utf8_cols(const char *s)
 {
-    int n = 0;
+    int cols = 0;
 
-    for (; *s; s++)
-        n += (*s & 0xC0) != 0x80;
-    return n;
+    for (const char *p = s; *p;) {
+        size_t n;
+        cols += next_char(p, &n);
+        p += n;
+    }
+    return cols;
 }
 
 /* The bottom line: a note until the next key. */

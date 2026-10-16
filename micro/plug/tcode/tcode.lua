@@ -48,6 +48,13 @@ local function diagnostics(buf)
     return errors, warnings
 end
 
+local function write_osc(text)
+    local _, err = goos.Stdout:WriteString(text)
+    if err ~= nil then
+        goos.Exit(0)
+    end
+end
+
 local function report()
     local bp = current()
     if bp == nil then
@@ -60,7 +67,7 @@ local function report()
                                 cursor.Y + 1, cursor.X + 1, errors, warnings, path)
     if state ~= last then
         last = state
-        goos.Stdout:WriteString("\027]0;t-code " .. state .. "\007")
+        write_osc("\027]0;t-code " .. state .. "\007")
     end
 end
 
@@ -115,7 +122,7 @@ end
 local function tick()
     report()
     ticks = ticks + 1
-    if ticks % 3 == 0 then
+    if ticks % 10 == 0 then
         local bp = current()
         if bp ~= nil then
             follow_head(bp.Buf)

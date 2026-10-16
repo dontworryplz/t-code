@@ -83,9 +83,10 @@ static void drop_dir(int y, char *out, size_t cap)
 {
     int r = row_at(y);
 
-    snprintf(out, cap, "%s", r >= 0 ? fm.rows[r].path : fm.root);
     if (r >= 0 && !fm.rows[r].dir)
-        *strrchr(out, '/') = '\0';
+        parent_dir(fm.rows[r].path, out, cap);
+    else
+        snprintf(out, cap, "%s", r >= 0 ? fm.rows[r].path : fm.root);
 }
 
 /* Left button: a press selects; a release on the same row opens it, unless the pointer moved to
@@ -224,7 +225,7 @@ void handle_input(const unsigned char *buf, int n)
             break;
         case '.':
             fm.show_hidden = !fm.show_hidden;
-            rebuild(selected_path());
+            rebuild_rows(selected_path());
             break;
         case 'R': rebuild(selected_path()); break;
         }

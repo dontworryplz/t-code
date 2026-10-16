@@ -57,7 +57,7 @@ void activate(void)
     Row *row = &fm.rows[fm.sel];
     if (row->dir) {
         set_expanded(row->path, is_expanded(row->path) < 0);
-        rebuild(row->path);
+        rebuild_rows(row->path);
     } else {
         send_to_tcode("open", row->path);
     }
@@ -71,15 +71,14 @@ void collapse(void)
     Row *row = &fm.rows[fm.sel];
     if (row->dir && is_expanded(row->path) >= 0) {
         set_expanded(row->path, false);
-        rebuild(row->path);
+        rebuild_rows(row->path);
         return;
     }
     char parent[PATH_MAX];
-    snprintf(parent, sizeof parent, "%s", row->path);
-    *strrchr(parent, '/') = '\0';
+    parent_dir(row->path, parent, sizeof parent);
     if (strcmp(parent, fm.root) != 0) {
         set_expanded(parent, false);
-        rebuild(parent);
+        rebuild_rows(parent);
     }
 }
 
@@ -91,11 +90,12 @@ void target_dir(char *out, size_t cap)
         return;
     }
     Row *row = &fm.rows[fm.sel];
-    snprintf(out, cap, "%s", row->path);
-    if (row->dir)
+    if (row->dir) {
+        snprintf(out, cap, "%s", row->path);
         set_expanded(row->path, true);
-    else
-        *strrchr(out, '/') = '\0';
+    } else {
+        parent_dir(row->path, out, cap);
+    }
 }
 
 /* Creating, renaming, deleting ------------------------------------------------------------------- */
@@ -226,13 +226,18 @@ static int copy_file(const char *src, const char *dst, mode_t mode)
             if (w < 0) {
                 close(in);
                 close(out);
+                unlink(dst);
                 return -1;
             }
             done += w;
         }
     }
     close(in);
-    return close(out) < 0 || n < 0 ? -1 : 0;
+    if (close(out) < 0 || n < 0) {
+        unlink(dst);
+        return -1;
+    }
+    return 0;
 }
 
 /* Copies a file, a symlink, or a folder with everything in it. */
@@ -310,8 +315,7 @@ static bool put(const char *src, const char *dir, bool cut, char *dest, size_t c
         error_message("%s is gone", src);
         return false;
     }
-    snprintf(parent, sizeof parent, "%s", src);
-    *strrchr(parent, '/') = '\0';
+    parent_dir(src, parent, sizeof parent);
     if (cut && strcmp(parent, dir) == 0)
         return false; /* already there */
     if (S_ISDIR(st.st_mode) && inside(dir, src)) {
