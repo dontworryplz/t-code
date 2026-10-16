@@ -1,5 +1,6 @@
 /*
  * Remembers the window between runs, in ~/.config/t-code/session.ini:
+ *   [settings]          the Settings window's choices
  *   [window]            size, pane sizes, which panes are shown, text size
  *   [recent]            the last opened project folders
  *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones
@@ -71,6 +72,33 @@ static gboolean get_bool(GKeyFile *kf, const char *group, const char *key, gbool
         return fallback;
     }
     return value;
+}
+
+void session_load_settings(App *t)
+{
+    GKeyFile *kf = load();
+
+    t->settings.minimap = get_bool(kf, "settings", "minimap", TRUE);
+    t->settings.reopen_last = get_bool(kf, "settings", "reopen-last-project", TRUE);
+    t->settings.autosave = get_bool(kf, "settings", "autosave", TRUE);
+    t->settings.tabs_to_spaces = get_bool(kf, "settings", "tabs-to-spaces", TRUE);
+    t->settings.tab_size = CLAMP(get_int(kf, "settings", "tab-size", 4), 1, 16);
+    t->plain = !get_bool(kf, "settings", "code-coloring", TRUE);
+    g_key_file_free(kf);
+}
+
+void session_save_settings(App *t)
+{
+    GKeyFile *kf = load();
+
+    g_key_file_set_boolean(kf, "settings", "minimap", t->settings.minimap);
+    g_key_file_set_boolean(kf, "settings", "reopen-last-project", t->settings.reopen_last);
+    g_key_file_set_boolean(kf, "settings", "autosave", t->settings.autosave);
+    g_key_file_set_boolean(kf, "settings", "tabs-to-spaces", t->settings.tabs_to_spaces);
+    g_key_file_set_integer(kf, "settings", "tab-size", t->settings.tab_size);
+    g_key_file_set_boolean(kf, "settings", "code-coloring", !t->plain);
+    store(kf);
+    g_key_file_free(kf);
 }
 
 void session_apply_window(App *t)

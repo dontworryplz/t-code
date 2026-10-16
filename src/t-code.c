@@ -15,6 +15,7 @@
 #include "app.h"
 
 #include <glib-unix.h>
+#include <string.h>
 #include <unistd.h>
 
 /* View --------------------------------------------------------------------------------------- */
@@ -111,13 +112,14 @@ static void on_split_toggled(GtkToggleButton *button, App *t)
     focus_current_tab(t);
 }
 
-/* Open Folder and Recent Folders on the left, Split Editor on the right. */
+/* Open Folder and Recent Folders on the left, Settings and Split Editor on the right. */
 static GtkWidget *header_bar(App *t)
 {
     GtkWidget *header = gtk_header_bar_new();
     GtkWidget *open = gtk_button_new_from_icon_name("folder-open-symbolic");
     GtkWidget *recent = gtk_menu_button_new();
     GtkWidget *split = gtk_toggle_button_new();
+    GtkWidget *settings = gtk_button_new_from_icon_name("emblem-system-symbolic");
 
     gtk_widget_set_tooltip_text(open, "Open Folder… (Ctrl+Shift+O)");
     gtk_actionable_set_action_name(GTK_ACTIONABLE(open), "win.open-folder");
@@ -133,6 +135,10 @@ static GtkWidget *header_bar(App *t)
     t->split_button = GTK_TOGGLE_BUTTON(split);
     g_signal_connect(split, "toggled", G_CALLBACK(on_split_toggled), t);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), split);
+
+    gtk_widget_set_tooltip_text(settings, "Settings (Ctrl+,)");
+    g_signal_connect_swapped(settings, "clicked", G_CALLBACK(show_settings), t);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), settings);
     return header;
 }
 
@@ -188,8 +194,23 @@ static void build_window(App *t, GtkApplication *app)
 
 /* Application -------------------------------------------------------------------------------- */
 
+/* Started with no folder from the home directory (the app menu does that): reopen the last project
+ * instead. Started elsewhere, the current directory is meant. */
+static void reopen_last_project(App *t)
+{
+    char **recent = session_recent();
+
+    if (t->settings.reopen_last && strcmp(t->root, g_get_home_dir()) == 0 && recent && recent[0] &&
+        g_file_test(recent[0], G_FILE_TEST_IS_DIR)) {
+        g_free(t->root);
+        t->root = g_strdup(recent[0]);
+    }
+    g_strfreev(recent);
+}
+
 static void on_activate(GApplication *app, App *t)
 {
+    reopen_last_project(t);
     build_window(t, GTK_APPLICATION(app));
     session_restore_tabs(t);
 }
@@ -245,6 +266,7 @@ int main(int argc, char **argv)
                                               G_APPLICATION_HANDLES_OPEN | G_APPLICATION_NON_UNIQUE);
     int status;
 
+    session_load_settings(&t);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &t);
     g_signal_connect(app, "open", G_CALLBACK(on_open), &t);
     g_signal_connect(app, "shutdown", G_CALLBACK(on_shutdown), &t);

@@ -1,5 +1,6 @@
 VERSION = "0.6.2"
 
+
 local micro = import("micro")
 local config = import("micro/config")
 local shell = import("micro/shell")
@@ -36,11 +37,34 @@ function toBytes(str)
 	return result
 end
 
+-- The patterns below spell out byte ranges: gopher-lua's %w and %c follow Unicode and would
+-- take single bytes of UTF-8 text for letters or control characters.
+
+-- Percent-encodes a path the way clangd does, so URIs compare equal.
+function pathToUri(file)
+	return "file://" .. file:gsub("[^A-Za-z0-9%-%_%.~/:]", function (c)
+		return string.format("%%%02X", c:byte())
+	end)
+end
+
+function uriToPath(uri)
+	local file = uri:gsub("^file://", "")
+	return (file:gsub("%%(%x%x)", function (h) return string.char(tonumber(h, 16)) end))
+end
+
+local jsonEscapes = { ['"'] = '\\"', ['\\'] = '\\\\', ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t' }
+local jsonSpecial = "[" .. string.char(1) .. "-" .. string.char(31) .. '"\\]'
+
+-- Escapes text for a JSON string, control characters included (clangd rejects them raw).
+function jsonEscape(text)
+	return (text:gsub(jsonSpecial, function (c)
+		return jsonEscapes[c] or string.format("\\u%04x", c:byte())
+	end))
+end
+
 function getUriFromBuf(buf)
 	if buf == nil then return; end
-	local file = buf.AbsPath
-	local uri = fmt.Sprintf("file://%s", file)
-	return uri
+	return pathToUri(buf.AbsPath)
 end
 
 function mysplit (inputstr, sep)
@@ -64,7 +88,7 @@ end
 
 function startServer(filetype, callback)
 	local wd, _ = go_os.Getwd()
-	rootUri = fmt.Sprintf("file://%s", wd)
+	rootUri = pathToUri(wd)
 	local envSettings, _ = go_os.Getenv("MICRO_LSP")
 	local settings = config.GetGlobalOption("lsp.server")
 	local fallback = "python=pylsp,go=gopls,typescript=deno lsp,javascript=deno lsp,markdown=deno lsp,json=deno lsp,jsonc=deno lsp,rust=rls,lua=lua-lsp,c++=clangd"
@@ -170,7 +194,7 @@ function onRune(bp, r)
 		lastCompletion = {}
 	end
 	-- allow the document contents to be escaped properly for the JSON string
-	local content = util.String(bp.Buf:Bytes()):gsub("\\", "\\\\"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub('"', '\\"'):gsub("\t", "\\t")
+	local content = jsonEscape(util.String(bp.Buf:Bytes()))
 	-- increase change version
 	version[uri] = (version[uri] or 0) + 1
 	send("textDocument/didChange", fmt.Sprintf('{"textDocument": {"version": %.0f, "uri": "%s"}, "contentChanges": [{"text": "%s"}]}', version[uri], uri, content), true)
@@ -210,8 +234,8 @@ function preInsertNewline(bp)
 		local cur = bp.Buf:GetActiveCursor()
 		cur:SelectLine()
 		local data = util.String(cur:GetSelection())
-		local file, line, character = data:match("(./[^:]+):([^:]+):([^:]+)")
-		local doc, _ = file:gsub("^file://", "")
+		local doc, line, character = data:match("^(.*):(%d+):(%d+)")
+		if doc == nil then return false end
 		if go_os.Getenv("TCODE_SOCKET") ~= "" then
 			local abs, err = filepath.Abs(doc)
 			if err == nil then doc = abs end
@@ -243,7 +267,7 @@ function handleInitialized(buf, filetype)
 	micro.Log("Found running lsp server for ", filetype, "firing textDocument/didOpen...")
 	local send = withSend(filetype)
 	local uri = getUriFromBuf(buf)
-	local content = util.String(buf:Bytes()):gsub("\\", "\\\\"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub('"', '\\"'):gsub("\t", "\\t")
+	local content = jsonEscape(util.String(buf:Bytes()))
 	send("textDocument/didOpen", fmt.Sprintf('{"textDocument": {"uri": "%s", "languageId": "%s", "version": 1, "text": "%s"}}', uri, filetype, content), true)
 end
 
@@ -329,6 +353,7 @@ local function handleMessage(filetype, raw)
 		local pane = micro.CurPane()
 		if not pane or not pane.Buf then return end
 		local bp = pane.Buf
+		
 		local uri = getUriFromBuf(bp)
 		if data.params and data.params.uri == uri then
 			bp:ClearMessages("lsp")
@@ -411,11 +436,11 @@ function hoverAction(bp)
 	local filetype = bp.Buf:FileType()
 	if cmd[filetype] ~= nil then
 		local send = withSend(filetype)
-		local file = bp.Buf.AbsPath
+		local file = getUriFromBuf(bp.Buf)
 		local line = bp.Buf:GetActiveCursor().Y
 		local char = bp.Buf:GetActiveCursor().X
 		currentAction[filetype] = { method = "textDocument/hover", response = hoverActionResponse }
-		send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "file://%s"}, "position": {"line": %.0f, "character": %.0f}}', file, line, char))
+		send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "position": {"line": %.0f, "character": %.0f}}', file, line, char))
 	end
 end
 
@@ -439,7 +464,7 @@ function definitionAction(bp)
 	local line = bp.Buf:GetActiveCursor().Y
 	local char = bp.Buf:GetActiveCursor().X
 	currentAction[filetype] = { method = "textDocument/definition", response = definitionActionResponse }
-	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "file://%s"}, "position": {"line": %.0f, "character": %.0f}}', file, line, char))
+	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "position": {"line": %.0f, "character": %.0f}}', pathToUri(file), line, char))
 end
 
 function definitionActionResponse(bp, data)
@@ -452,7 +477,7 @@ function definitionActionResponse(bp, data)
 	end
 	if #results <= 0 then return; end
 	local uri = (results[1].uri or results[1].targetUri)
-	local doc = uri:gsub("^file://", "")
+	local doc = uriToPath(uri)
 	local buf = bp.Buf
 	local range = results[1].range or results[1].targetSelectionRange
 	if file ~= doc then
@@ -518,7 +543,7 @@ function completionAction(bp)
 	if cmd[filetype] == nil then return; end
 	lastCompletion = {file, line, char}
 	currentAction[filetype] = { method = "textDocument/completion", response = completionActionResponse }
-	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "file://%s"}, "position": {"line": %.0f, "character": %.0f}}', file, line, char))
+	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "position": {"line": %.0f, "character": %.0f}}', pathToUri(file), line, char))
 end
 
 table.filter = function(t, filterIter)
@@ -757,7 +782,7 @@ function formatAction(bp, callback)
 	local file = bp.Buf.AbsPath
 
 	currentAction[filetype] = { method = "textDocument/formatting", response = formatActionResponse(callback) }
-	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "file://%s"}, "options": {"tabSize": 4, "insertSpaces": true}}', file))
+	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "options": {"tabSize": 4, "insertSpaces": true}}', pathToUri(file)))
 end
 
 function formatActionResponse(callback)
@@ -815,7 +840,7 @@ function referencesAction(bp)
 	local line = bp.Buf:GetActiveCursor().Y
 	local char = bp.Buf:GetActiveCursor().X
 	currentAction[filetype] = { method = "textDocument/references", response = referencesActionResponse }
-	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "file://%s"}, "position": {"line": %.0f, "character": %.0f}, "context": {"includeDeclaration":true}}', file, line, char))
+	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "position": {"line": %.0f, "character": %.0f}, "context": {"includeDeclaration":true}}', pathToUri(file), line, char))
 end
 
 function referencesActionResponse(bp, data)
@@ -828,8 +853,12 @@ function referencesActionResponse(bp, data)
 	local msg = ''
 	for _idx, ref in ipairs(results) do
 		if msg ~= '' then msg = msg .. '\n'; end
-		local doc = (ref.uri or ref.targetUri)
-		msg = msg .. "." .. doc:sub(#rootUri + 1, #doc) .. ":" .. ref.range.start.line .. ":" .. ref.range.start.character
+		local doc = uriToPath(ref.uri or ref.targetUri)
+		local root = uriToPath(rootUri) .. "/"
+		if doc:sub(1, #root) == root then
+			doc = "./" .. doc:sub(#root + 1)
+		end
+		msg = msg .. doc .. ":" .. ref.range.start.line .. ":" .. ref.range.start.character
 	end
 
 	local logBuf = buffer.NewBuffer(msg, "References found")
@@ -883,6 +912,20 @@ end
 -- Expects the given pos to be the first character after the opening quote.
 -- Returns val, pos; the returned pos is after the closing quote character.
 local esc_map = {b = '\b', f = '\f', n = '\n', r = '\r', t = '\t'}
+
+local function utf8_char(code)
+  if code < 0x80 then return string.char(code) end
+  if code < 0x800 then
+    return string.char(0xC0 + math.floor(code / 0x40), 0x80 + code % 0x40)
+  end
+  if code < 0x10000 then
+    return string.char(0xE0 + math.floor(code / 0x1000), 0x80 + math.floor(code / 0x40) % 0x40,
+                       0x80 + code % 0x40)
+  end
+  return string.char(0xF0 + math.floor(code / 0x40000), 0x80 + math.floor(code / 0x1000) % 0x40,
+                     0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+end
+
 local function parse_str_val(str, pos)
   local early_end_error = 'End of input found while parsing string.'
   local parts = {}
@@ -894,8 +937,21 @@ local function parse_str_val(str, pos)
     elseif c == '\\' then
       local nextc = str:sub(pos + 1, pos + 1)
       if nextc == '' then error(early_end_error) end
-      parts[#parts + 1] = esc_map[nextc] or nextc
-      pos = pos + 2
+      local code = nextc == 'u' and tonumber(str:sub(pos + 2, pos + 5), 16)
+      if code then
+        pos = pos + 6
+        -- A surrogate pair: \uD83D\uDE00
+        local low = code >= 0xD800 and code < 0xDC00 and str:sub(pos, pos + 1) == '\\u' and
+                    tonumber(str:sub(pos + 2, pos + 5), 16)
+        if low and low >= 0xDC00 and low < 0xE000 then
+          code = 0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00)
+          pos = pos + 6
+        end
+        parts[#parts + 1] = utf8_char(code)
+      else
+        parts[#parts + 1] = esc_map[nextc] or nextc
+        pos = pos + 2
+      end
     else
       local next_special = str:find('["\\]', pos)
       if not next_special then error(early_end_error) end

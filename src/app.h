@@ -7,6 +7,7 @@
 typedef struct App App;
 typedef struct Preview Preview;
 typedef struct Picker Picker;
+typedef struct EditorView EditorView;
 
 typedef enum {
     TAB_EDITOR,  /* a terminal running micro */
@@ -26,6 +27,8 @@ typedef struct {
     gboolean modified;
     int line, column;   /* cursor, errors and warnings: reported by micro (micro/plug/tcode) */
     int errors, warnings;
+    int top, height, lines; /* first line shown (0-based), lines that fit, lines in the file */
+    EditorView *view;   /* editors only: minimap, scrollbar, control pipe */
     GPid pid;
 } Tab;
 
@@ -56,6 +59,13 @@ struct App {
     double font_scale;
     gboolean closing;
     gboolean plain;     /* syntax coloring off (F7) */
+    struct {
+        gboolean minimap;
+        gboolean reopen_last;    /* started from the app menu: open the last project */
+        gboolean autosave;       /* micro saves a second after each change */
+        gboolean tabs_to_spaces;
+        int tab_size;
+    } settings;
 };
 
 /* terminal.c */
@@ -92,6 +102,20 @@ void set_split(App *t, gboolean split);
 void toggle_syntax(App *t);
 gboolean any_unsaved(App *t);
 
+/* settings.c */
+void show_settings(App *t);
+void settings_editor_args(App *t, GPtrArray *argv);
+
+/* editorview.c */
+GtkWidget *editor_page(VteTerminal *term);
+const char *editor_view_init(Tab *tab, int number);
+void editor_view_set_path(Tab *tab);
+void editor_view_update(Tab *tab, int top);
+void editor_view_show_minimap(Tab *tab, gboolean show);
+void editor_view_redraw(Tab *tab);
+void editor_view_free(EditorView *view);
+gboolean editor_control(Tab *tab, const char *line);
+
 /* commands.c */
 void add_shortcuts(App *t);
 void command_palette(App *t);
@@ -123,6 +147,8 @@ void search_show(App *t);
 GtkWidget *status_bar(App *t);
 void update_status(App *t);
 void start_status_updates(App *t);
+void watch_git(App *t);
+void refresh_branch(App *t);
 
 /* project.c */
 typedef void (*ConfirmedFunc)(App *t, const char *arg);
@@ -154,6 +180,8 @@ void session_apply_window(App *t);
 gboolean session_restore_tabs(App *t);
 void session_save(App *t);
 void session_add_recent(App *t);
+void session_load_settings(App *t);
+void session_save_settings(App *t);
 char **session_recent(void);
 
 /* preview.c */

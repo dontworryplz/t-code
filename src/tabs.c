@@ -1,7 +1,8 @@
 /*
  * Editor tabs, in two groups side by side (the second one only while split). Each editor is a
  * terminal running micro; micro reports its state through the terminal title, as
- * "t-code <modified> <line> <column> <errors> <warnings> <path>" (see micro/plug/tcode).
+ * "t-code <modified> <line> <column> <errors> <warnings> <top> <height> <lines> <path>"
+ * (see micro/plug/tcode), and takes commands through a named pipe (see editorview.c).
  */
 #include "app.h"
 
@@ -16,6 +17,7 @@ static void tab_free(Tab *tab)
     }
     if (tab->preview)
         preview_free(tab->preview);
+    editor_view_free(tab->view);
     g_free(tab->compare_with);
     g_free(tab->title);
     g_free(tab->path);
@@ -78,11 +80,17 @@ gboolean any_unsaved(App *t)
     return FALSE;
 }
 
+/* The widget that takes the keyboard in a tab: an editor's terminal, not the box around it. */
+static GtkWidget *focus_widget(Tab *tab)
+{
+    return tab->term ? GTK_WIDGET(tab->term) : tab->page;
+}
+
 void focus_current_tab(App *t)
 {
     Tab *tab = current_tab(t);
 
-    gtk_widget_grab_focus(tab ? tab->page : GTK_WIDGET(t->fm));
+    gtk_widget_grab_focus(tab ? focus_widget(tab) : GTK_WIDGET(t->fm));
 }
 
 void focus_group(App *t, int group)
@@ -100,7 +108,7 @@ void select_tab(Tab *tab)
 
     gtk_notebook_set_current_page(t->groups[group], gtk_notebook_page_num(t->groups[group], tab->page));
     t->active = group;
-    gtk_widget_grab_focus(tab->page);
+    gtk_widget_grab_focus(focus_widget(tab));
 }
 
 void step_tab(App *t, int step)
@@ -244,7 +252,7 @@ static void on_editor_exited(VteTerminal *term G_GNUC_UNUSED, int status G_GNUC_
 static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, Tab *tab)
 {
     const char *title = vte_terminal_get_termprop_string(term, VTE_TERMPROP_XTERM_TITLE, NULL);
-    int modified, line, column, errors, warnings, end = 0;
+    int modified, line, column, errors, warnings, top, height, lines, end = 0;
 
     if (!title)
         return;
@@ -255,18 +263,25 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
         return;
     }
     if (!g_str_has_prefix(title, "t-code ") ||
-        sscanf(title + 7, "%d %d %d %d %d %n", &modified, &line, &column, &errors, &warnings, &end) < 5)
+        sscanf(title + 7, "%d %d %d %d %d %d %d %d %n", &modified, &line, &column, &errors, &warnings,
+               &top, &height, &lines, &end) < 8)
         return;
+    if (tab->modified && !modified)
+        refresh_branch(tab->app); /* saved: the working tree changed */
     tab->modified = modified != 0;
     tab->line = line;
     tab->column = column;
     tab->errors = errors;
     tab->warnings = warnings;
+    tab->height = height;
+    tab->lines = lines;
+    editor_view_update(tab, top);
 
     const char *path = title + 7 + end;
     if (!tab->title && g_path_is_absolute(path) && g_strcmp0(tab->path, path) != 0) {
         g_free(tab->path); /* another file was opened inside micro */
         tab->path = g_strdup(path);
+        editor_view_set_path(tab);
     }
     update_tab_label(tab);
     if (tab == current_tab(tab->app))
@@ -280,29 +295,40 @@ Tab *open_editor(App *t, const char *path, int line, int column, gboolean readon
     GFile *root = g_file_new_for_path(t->root), *file = g_file_new_for_path(path);
     char *relative = g_file_get_relative_path(root, file);
     char *position = line > 0 ? g_strdup_printf("+%d:%d", line, MAX(column, 1)) : NULL;
-    GPtrArray *argv = g_ptr_array_new();
+    GPtrArray *argv = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *env = g_ptr_array_new_with_free_func(g_free);
     VteTerminal *term = new_terminal(t);
-    Tab *tab = add_tab(t, TAB_EDITOR, GTK_WIDGET(term), path);
+    Tab *tab = add_tab(t, TAB_EDITOR, editor_page(term), path);
+    static int editors;
+    const char *control;
 
-    g_ptr_array_add(argv, "micro");
-    g_ptr_array_add(argv, "-config-dir");
-    g_ptr_array_add(argv, t->micro_config);
-    g_ptr_array_add(argv, "-syntax");
-    g_ptr_array_add(argv, t->plain ? "false" : "true");
+    g_ptr_array_add(argv, g_strdup("micro"));
+    g_ptr_array_add(argv, g_strdup("-config-dir"));
+    g_ptr_array_add(argv, g_strdup(t->micro_config));
+    g_ptr_array_add(argv, g_strdup("-syntax"));
+    g_ptr_array_add(argv, g_strdup(t->plain ? "false" : "true"));
+    settings_editor_args(t, argv);
     if (readonly) {
-        g_ptr_array_add(argv, "-readonly");
-        g_ptr_array_add(argv, "true");
+        g_ptr_array_add(argv, g_strdup("-readonly"));
+        g_ptr_array_add(argv, g_strdup("true"));
     }
     if (position)
-        g_ptr_array_add(argv, position);
-    g_ptr_array_add(argv, relative ? relative : (char *)path);
+        g_ptr_array_add(argv, g_strdup(position));
+    g_ptr_array_add(argv, g_strdup(relative ? relative : (char *)path));
     g_ptr_array_add(argv, NULL);
 
     tab->term = term;
+    control = editor_view_init(tab, ++editors);
+    for (int i = 0; extra_env && extra_env[i]; i++)
+        g_ptr_array_add(env, g_strdup(extra_env[i]));
+    if (control)
+        g_ptr_array_add(env, g_strconcat("TCODE_CONTROL=", control, NULL));
+    g_ptr_array_add(env, NULL);
     g_signal_connect(term, "child-exited", G_CALLBACK(on_editor_exited), tab);
     g_signal_connect(term, "termprop-changed::" VTE_TERMPROP_XTERM_TITLE, G_CALLBACK(on_editor_title), tab);
-    spawn(t, term, (char **)argv->pdata, extra_env, &tab->pid);
+    spawn(t, term, (char **)argv->pdata, (char **)env->pdata, &tab->pid);
 
+    g_ptr_array_free(env, TRUE);
     g_ptr_array_free(argv, TRUE);
     g_free(position);
     g_free(relative);
@@ -342,13 +368,18 @@ void feed_editor(Tab *tab, const char *keys)
     g_timeout_add(100, feed_pending_keys, pending);
 }
 
-/* Runs a micro command in an editor through its command bar (Ctrl+E). */
+/* Runs a micro command in an editor: through the plugin's pipe, or else typed into its command
+ * bar (Ctrl+E). */
 void editor_command(Tab *tab, const char *command)
 {
-    char *keys = g_strdup_printf("\x05%s\r", command);
+    char *line = g_strdup_printf("command %s", command);
 
-    feed_editor(tab, keys);
-    g_free(keys);
+    if (!editor_control(tab, line)) {
+        char *keys = g_strdup_printf("\x05%s\r", command);
+        feed_editor(tab, keys);
+        g_free(keys);
+    }
+    g_free(line);
 }
 
 void open_file_at(App *t, const char *path, int line, int column)
@@ -394,10 +425,13 @@ void toggle_syntax(App *t)
     int n = tab_count(t);
 
     t->plain = !t->plain;
+    session_save_settings(t);
     for (int i = 0; i < n; i++) {
         Tab *tab = tab_nth(t, i);
-        if (tab->kind == TAB_EDITOR)
+        if (tab->kind == TAB_EDITOR) {
             editor_command(tab, t->plain ? "setlocal syntax off" : "setlocal syntax on");
+            editor_view_redraw(tab);
+        }
     }
 }
 

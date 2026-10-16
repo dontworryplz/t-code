@@ -108,6 +108,7 @@ static const Command commands[] = {
     { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out },
     { "Reset Zoom", "<Control>0|<Control>KP_0", "Ctrl+0", zoom_reset },
     { "Open Folder…", "<Control><Shift>o", "Ctrl+Shift+O", choose_folder },
+    { "Settings…", "<Control>comma", "Ctrl+,", show_settings },
     { "Keyboard Shortcuts", NULL, NULL, show_keybinds },
 };
 

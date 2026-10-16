@@ -24,23 +24,23 @@ static void search_free(Search *s)
     g_free(s);
 }
 
-/* "path:line:column:text" (ripgrep) or "path:line:text" (grep). */
-static void add_result(Search *s, char *line, gboolean has_column)
+/* rest is "line:column:text" (ripgrep) or "line:text" (grep). */
+static void add_result(Search *s, const char *file, char *rest, gboolean has_column)
 {
-    char *fields[3] = { NULL };
-    char *p = line;
+    char *fields[2] = { NULL };
+    char *p = rest;
 
-    for (int i = 0; i < (has_column ? 3 : 2); i++) {
+    for (int i = 0; i < (has_column ? 2 : 1); i++) {
         fields[i] = p;
         p = strchr(p, ':');
         if (!p)
             return;
         *p++ = '\0';
     }
-    const char *path = g_str_has_prefix(fields[0], "./") ? fields[0] + 2 : fields[0];
+    const char *path = g_str_has_prefix(file, "./") ? file + 2 : file;
     char *text = g_strstrip(g_strndup(p, 200));
-    char *detail = g_strdup_printf("%s:%s", path, fields[1]);
-    char *payload = g_strdup_printf("%s\n%s\n%s", path, fields[1], has_column ? fields[2] : "1");
+    char *detail = g_strdup_printf("%s:%s", path, fields[0]);
+    char *payload = g_strdup_printf("%s\n%s\n%s", path, fields[0], has_column ? fields[1] : "1");
 
     picker_add(s->app, s->generation, *text ? text : "(empty line)", detail, payload);
     g_free(payload);
@@ -64,20 +64,25 @@ static void on_done(GObject *source, GAsyncResult *result, gpointer data)
     }
     gsize size;
     const char *bytes = g_bytes_get_data(out, &size);
-    char *text = g_utf8_make_valid(bytes ? bytes : "", size);
     gboolean has_column = GPOINTER_TO_INT(g_object_get_data(source, "has-column"));
-    char **lines = g_strsplit(text, "\n", -1);
 
-    for (int i = 0; lines[i]; i++) {
-        if (*lines[i]) {
-            add_result(s, lines[i], has_column);
+    /* Each line is "path\0rest": a ':' in a file name cannot split it. */
+    for (const char *start = bytes, *end = bytes + size; start && start < end;) {
+        const char *newline = memchr(start, '\n', end - start);
+        gsize len = (newline ? newline : end) - start;
+        const char *nul = memchr(start, '\0', len);
+        if (nul) {
+            char *path = g_utf8_make_valid(start, nul - start);
+            char *rest = g_utf8_make_valid(nul + 1, start + len - nul - 1);
+            add_result(s, path, rest, has_column);
             count++;
+            g_free(rest);
+            g_free(path);
         }
+        start = newline ? newline + 1 : end;
     }
     if (count == 0)
         picker_message(s->app, s->generation, "No results");
-    g_strfreev(lines);
-    g_free(text);
     g_bytes_unref(out);
     search_free(s);
 }
@@ -88,8 +93,8 @@ static gboolean start(gpointer data)
     char *rg = g_find_program_in_path("rg");
     const char *rg_argv[] = { "rg", "--line-number", "--column", "--no-heading", "--color", "never",
                               "--smart-case", "--fixed-strings", "--max-columns", "300",
-                              "--max-count", "100", "--", s->text, ".", NULL };
-    const char *grep_argv[] = { "grep", "-rnIF", "--exclude-dir=.git", "--exclude-dir=build",
+                              "--max-count", "100", "--null", "--", s->text, ".", NULL };
+    const char *grep_argv[] = { "grep", "-rnIFZ", "--exclude-dir=.git", "--exclude-dir=build",
                                 "--", s->text, ".", NULL };
     GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE |
                                                               G_SUBPROCESS_FLAGS_STDERR_SILENCE);

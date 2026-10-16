@@ -58,9 +58,14 @@ void update_status(App *t)
     }
 }
 
-/* Git branch, polled ----------------------------------------------------------------------------- */
+/* Git branch ----------------------------------------------------------------------------------
+ * git status runs when the repository changes (.git/HEAD or .git/index, watched), when an editor
+ * saves, and every 10 seconds for changes made outside t-code (a build, a shell command). */
 
-static gboolean branch_busy;
+static gboolean branch_busy, branch_again;
+static guint branch_soon_id;
+static GFileMonitor *git_monitor;
+static gboolean poll_branch(gpointer data);
 
 static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
 {
@@ -73,6 +78,10 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
     gboolean dirty = FALSE;
 
     branch_busy = FALSE;
+    if (branch_again && !t->closing) {
+        branch_again = FALSE;
+        refresh_branch(t);
+    }
     if (ok && out && !t->closing) {
         char **lines = g_strsplit(out, "\n", -1);
         for (int i = 0; lines[i]; i++) {
@@ -102,8 +111,10 @@ static gboolean poll_branch(gpointer data)
 
     if (t->closing)
         return G_SOURCE_REMOVE;
-    if (branch_busy)
+    if (branch_busy) {
+        branch_again = TRUE; /* the running one may have missed the change */
         return G_SOURCE_CONTINUE;
+    }
     proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL,
                             "git", "-C", t->root, "status", "--porcelain=v2", "--branch", NULL);
     if (proc) {
@@ -114,10 +125,65 @@ static gboolean poll_branch(gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
+static gboolean poll_branch_once(gpointer data)
+{
+    branch_soon_id = 0;
+    poll_branch(data);
+    return G_SOURCE_REMOVE;
+}
+
+/* Runs git status shortly; changes that come together (a commit touches several files) share one. */
+void refresh_branch(App *t)
+{
+    if (!branch_soon_id)
+        branch_soon_id = g_timeout_add(300, poll_branch_once, t);
+}
+
+static gboolean is_git_state(GFile *file)
+{
+    char *name = file ? g_file_get_basename(file) : NULL;
+    gboolean yes = name && (strcmp(name, "HEAD") == 0 || strcmp(name, "index") == 0);
+
+    g_free(name);
+    return yes;
+}
+
+static void on_git_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file, GFile *other,
+                           GFileMonitorEvent event G_GNUC_UNUSED, App *t)
+{
+    /* git writes HEAD.lock and index.lock, then renames them into place (other is the new name). */
+    if (is_git_state(file) || is_git_state(other))
+        refresh_branch(t);
+}
+
+/* Watches the git directory of the project (t->root); call again after it changes. */
+void watch_git(App *t)
+{
+    char *argv[] = { "git", "-C", t->root, "rev-parse", "--absolute-git-dir", NULL };
+    char *out = NULL;
+    int status = 0;
+
+    if (git_monitor) {
+        g_file_monitor_cancel(git_monitor);
+        g_clear_object(&git_monitor);
+    }
+    if (g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL,
+                     &out, NULL, &status, NULL) &&
+        g_spawn_check_wait_status(status, NULL)) {
+        GFile *dir = g_file_new_for_path(g_strstrip(out));
+        git_monitor = g_file_monitor_directory(dir, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+        if (git_monitor)
+            g_signal_connect(git_monitor, "changed", G_CALLBACK(on_git_changed), t);
+        g_object_unref(dir);
+    }
+    g_free(out);
+    refresh_branch(t);
+}
+
 void start_status_updates(App *t)
 {
-    poll_branch(t);
-    g_timeout_add_seconds(2, poll_branch, t);
+    watch_git(t);
+    g_timeout_add_seconds(10, poll_branch, t);
     update_status(t);
 }
 

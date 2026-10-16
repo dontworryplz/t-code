@@ -6,7 +6,7 @@ One window, three kinds of terminals, nothing else.
 
 <sub>A small Makefile project in git: the file manager marks the changed <code>main.c</code>, the editor marks the changed line in the gutter and clangd's unused-variable warning with <code>&gt;&gt;</code>, the header is open to the side, and the shell has built and run the program.</sub>
 
-Two small C programs for Linux. Uses 100-150MB RAM (language server is not included). `t-code` (GTK4) is the window; every pane in it is a real terminal (VTE, the
+Two small C programs for Linux. Uses 100-150MB RAM (language server is not included, it also uses approximately ~1GB RAM). `t-code` (GTK4) is the window; every pane in it is a real terminal (VTE, the
 same widget GNOME's terminals use):
 
 - **left:** `t-code-fm`, a file manager written in plain C (no libraries)

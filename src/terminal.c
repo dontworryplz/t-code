@@ -7,6 +7,7 @@
 
 #include <signal.h>
 #include <string.h>
+#include <unistd.h>
 
 #define TERMINAL_FONT "Cascadia Code 11"
 
@@ -116,15 +117,85 @@ static void on_fixed_exited(VteTerminal *term, int status G_GNUC_UNUSED, App *t)
         start_shell(t);
 }
 
-/* Types command into the shell pane and runs it. Ctrl+U first drops a half-typed line. */
-void run_in_shell(App *t, const char *command)
+/* The process group in the foreground of the shell pane: the shell itself when it waits at its
+ * prompt, else the program it runs. 0 when unknown. */
+static pid_t shell_foreground(App *t)
+{
+    VtePty *pty = vte_terminal_get_pty(t->shell);
+    pid_t group = pty ? tcgetpgrp(vte_pty_get_fd(pty)) : -1;
+
+    return group > 0 ? group : 0;
+}
+
+typedef struct {
+    App *app;
+    char *command;
+    int tries;
+} ShellRun;
+
+static void type_in_shell(App *t, const char *command)
 {
     char *line = g_strdup_printf("\x15%s\r", command);
 
-    set_pane_visible(t, GTK_WIDGET(t->shell), TRUE);
     vte_terminal_feed_child(t->shell, line, -1);
-    gtk_widget_grab_focus(GTK_WIDGET(t->shell));
     g_free(line);
+}
+
+static void show_shell_busy(App *t, pid_t group)
+{
+    char *path = g_strdup_printf("/proc/%d/comm", group), *name = NULL;
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("The terminal is busy");
+    char *detail;
+
+    g_file_get_contents(path, &name, NULL, NULL);
+    detail = g_strdup_printf("%s is still running in the terminal and did not stop on Ctrl+C. "
+                             "Close it, then try again.", name ? g_strstrip(name) : "A program");
+    gtk_alert_dialog_set_detail(dialog, detail);
+    gtk_alert_dialog_show(dialog, t->window);
+    g_object_unref(dialog);
+    g_free(detail);
+    g_free(name);
+    g_free(path);
+}
+
+/* Waits for an interrupted program to give the prompt back (2 seconds at most), then types the
+ * command. */
+static gboolean run_when_idle(gpointer data)
+{
+    ShellRun *run = data;
+    App *t = run->app;
+    pid_t group = shell_foreground(t);
+    gboolean busy = group && group != t->shell_pid;
+
+    if (busy && !t->closing && ++run->tries < 40)
+        return G_SOURCE_CONTINUE;
+    if (busy && !t->closing)
+        show_shell_busy(t, group);
+    else if (!t->closing)
+        type_in_shell(t, run->command);
+    g_free(run->command);
+    g_free(run);
+    return G_SOURCE_REMOVE;
+}
+
+/* Types command into the shell pane and runs it. Ctrl+U first drops a half-typed line. When a
+ * program runs in the shell (the last Run, gdb), it gets Ctrl+C first, so the command does not go
+ * to its input. */
+void run_in_shell(App *t, const char *command)
+{
+    pid_t group = shell_foreground(t);
+
+    set_pane_visible(t, GTK_WIDGET(t->shell), TRUE);
+    gtk_widget_grab_focus(GTK_WIDGET(t->shell));
+    if (!group || group == t->shell_pid) {
+        type_in_shell(t, command);
+        return;
+    }
+    ShellRun *run = g_new0(ShellRun, 1);
+    run->app = t;
+    run->command = g_strdup(command);
+    kill(-group, SIGINT);
+    g_timeout_add(50, run_when_idle, run);
 }
 
 /* Clickable compiler messages ------------------------------------------------------------------ */
