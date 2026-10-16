@@ -2,3 +2,4 @@ backups/
 buffers/
 build/
 .clangd
+.vscode/
