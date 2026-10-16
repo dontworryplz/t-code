@@ -86,7 +86,7 @@ palette) finds any command by name.
 | files       | `a` / `r` / `d`, `Delete`              | new file (end with `/` for a folder) / rename / delete |
 | files       | `Ctrl+X` / `Ctrl+C` / `Ctrl+V`         | cut / copy / paste files and folders      |
 | files       | drag a row onto a folder               | move it there                             |
-| files       | `.` / `R`                              | show hidden files / refresh               |
+| files       | `.` / `R`                              | hide / show dotfiles (shown by default) / refresh |
 | files       | right click                            | Open, Open to the Side, Open Preview, Compare with HEAD, File History, New File/Folder, Open in Terminal, Cut/Copy/Paste, Copy (Relative) Path, Rename, Delete, Open Folder as Project |
 | editor      | `Ctrl+S` / `Ctrl+Q`                    | save / close this tab                     |
 | editor      | `Ctrl+F`, `F3` / `Shift+F3`            | find, next / previous                     |

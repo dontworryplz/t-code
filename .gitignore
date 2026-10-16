@@ -3,3 +3,4 @@ buffers/
 build/
 .clangd
 .vscode/
+CLAUDE.md

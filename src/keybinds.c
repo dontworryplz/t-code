@@ -20,7 +20,7 @@ static const KeyHelp fm_keys[] = {
     { "Rename / delete", "r / d, Delete" },
     { "Cut / copy / paste files", "Ctrl+X / Ctrl+C / Ctrl+V" },
     { "Move into a folder", "Drag a file onto it" },
-    { "Show hidden files / refresh", ". / R" },
+    { "Hide / show dotfiles / refresh", ". / R" },
 };
 
 static const KeyHelp editor_keys[] = {

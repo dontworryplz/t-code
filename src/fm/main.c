@@ -10,7 +10,7 @@
 
 #define REFRESH_DELAY_MS 150 /* changes come in bursts (a save, a git commit): refresh once */
 
-Fm fm = { .focused = true, .follow = true, .press_row = -1, .drop_row = -1 };
+Fm fm = { .show_hidden = true, .focused = true, .follow = true, .press_row = -1, .drop_row = -1 };
 volatile int resized;
 
 static void restore_terminal(void)

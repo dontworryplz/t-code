@@ -61,6 +61,21 @@ static int compare_rows(const void *a, const void *b)
     return c ? c : strcmp(x->name, y->name);
 }
 
+/* Like VS Code: dotfiles show, version control folders never do; "." hides every dotfile. */
+static bool shown(const char *name)
+{
+    static const char *const never[] = { ".git", ".svn", ".hg", NULL };
+
+    if (name[0] != '.')
+        return true;
+    if (!fm.show_hidden)
+        return false;
+    for (int i = 0; never[i]; i++)
+        if (strcmp(name, never[i]) == 0)
+            return false;
+    return true;
+}
+
 static void scan(const char *dir, int depth)
 {
     DIR *d = opendir(dir);
@@ -73,7 +88,7 @@ static void scan(const char *dir, int depth)
     while ((e = readdir(d))) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
             continue;
-        if (!fm.show_hidden && e->d_name[0] == '.')
+        if (!shown(e->d_name))
             continue;
         if (n == cap) {
             cap = cap ? cap * 2 : 32;
