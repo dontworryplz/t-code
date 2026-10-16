@@ -56,14 +56,9 @@ end
 
 function parseOptions(inputstr)
 	local t = {}
-	inputstr = inputstr:gsub("[%w+_-]+=[^=,]+={.-}", function (str)
+	for str in inputstr:gmatch("[^,]+") do
 		table.insert(t, str)
-		return '';
-	end)
-	inputstr = inputstr:gsub("[%w+_-]+=[^=,]+", function (str)
-		table.insert(t, str)
-		return '';
-	end)
+	end
 	return t
 end
 
@@ -84,23 +79,24 @@ function startServer(filetype, callback)
 	local server = parseOptions(settings)
 	micro.Log("Server Options", server)
 	for i in pairs(server) do
-		local part = mysplit(server[i], "=")
-		local run = mysplit(part[2], "%s")
-		local initOptions = part[3] or '{}'
-		local runCmd = table.remove(run, 1)
-		local args = run
-		if filetype == part[1] then
-		local send = withSend(part[1])
-		if cmd[part[1]] ~= nil then return; end
-			id[part[1]] = 0
-			micro.Log("Starting server", part[1])
-			cmd[part[1]] = shell.JobSpawn(runCmd, args, onStdout(part[1]), onStderr, onExit(part[1]), {})
-			currentAction[part[1]] = { method = "initialize", response = function (bp, data)
+		local lang, rest = server[i]:match("^([%w+_-]+)=(.+)$")
+		if lang == filetype and rest then
+			local runStr, initOpts = rest:match("^(.-)=({.*})$")
+			local run = mysplit(runStr or rest, "%s")
+			local initOptions = initOpts or '{}'
+			local runCmd = table.remove(run, 1)
+			local args = run
+			local send = withSend(lang)
+			if cmd[lang] ~= nil then return; end
+			id[lang] = 0
+			micro.Log("Starting server", lang)
+			cmd[lang] = shell.JobSpawn(runCmd, args, onStdout(lang), onStderr, onExit(lang), {})
+			currentAction[lang] = { method = "initialize", response = function (bp, data)
 			    send("initialized", "{}", true)
 				capabilities[filetype] = data.result and data.result.capabilities or {}
 			    callback(bp.Buf, filetype)
 			end }
-			send(currentAction[part[1]].method, fmt.Sprintf('{"processId": %.0f, "rootUri": "%s", "workspaceFolders": [{"name": "root", "uri": "%s"}], "initializationOptions": %s, "capabilities": {"textDocument": {"hover": {"contentFormat": ["plaintext", "markdown"]}, "publishDiagnostics": {"relatedInformation": false, "versionSupport": false, "codeDescriptionSupport": true, "dataSupport": true}, "signatureHelp": {"signatureInformation": {"documentationFormat": ["plaintext", "markdown"]}}}}}', go_os.Getpid(), rootUri, rootUri, initOptions))
+			send(currentAction[lang].method, fmt.Sprintf('{"processId": %.0f, "rootUri": "%s", "workspaceFolders": [{"name": "root", "uri": "%s"}], "initializationOptions": %s, "capabilities": {"textDocument": {"hover": {"contentFormat": ["plaintext", "markdown"]}, "publishDiagnostics": {"relatedInformation": false, "versionSupport": false, "codeDescriptionSupport": true, "dataSupport": true}, "signatureHelp": {"signatureInformation": {"documentationFormat": ["plaintext", "markdown"]}}}}}', go_os.Getpid(), rootUri, rootUri, initOptions))
 			return
 		end
 	end
