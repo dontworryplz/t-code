@@ -24,14 +24,13 @@ static void focus_right(App *t) { focus_group(t, 1); }
 static void zoom_in(App *t) { set_font_scale(t, t->font_scale * 1.1); }
 static void zoom_out(App *t) { set_font_scale(t, t->font_scale / 1.1); }
 static void zoom_reset(App *t) { set_font_scale(t, 1.0); }
-static void toggle_files(App *t) { toggle_pane(t, GTK_WIDGET(t->fm)); }
+static void toggle_files(App *t) { toggle_pane(t, t->sidebar); }
 static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell)); }
-static void toggle_scm(App *t) { toggle_pane(t, t->scm); }
+static void show_scm(App *t) { show_sidebar_page(t, "scm"); }
 
 static void focus_fm(App *t)
 {
-    set_pane_visible(t, GTK_WIDGET(t->fm), TRUE);
-    gtk_widget_grab_focus(GTK_WIDGET(t->fm));
+    show_sidebar_page(t, "files");
 }
 
 static void focus_shell(App *t)
@@ -102,9 +101,9 @@ static const Command commands[] = {
     { "Focus File Manager", "<Alt>1", "Alt+1", focus_fm },
     { "Focus Editor", "<Alt>2", "Alt+2", focus_current_tab },
     { "Focus Shell", "<Alt>3", "Alt+3", focus_shell },
-    { "Toggle File Manager", "<Control>b", "Ctrl+B", toggle_files },
+    { "Toggle Sidebar", "<Control>b", "Ctrl+B", toggle_files },
     { "Toggle Shell", "<Control>j", "Ctrl+J", toggle_shell },
-    { "Toggle Source Control", "<Control><Shift>g", "Ctrl+Shift+G", toggle_scm },
+    { "Source Control", "<Control><Shift>g", "Ctrl+Shift+G", show_scm },
     { "Toggle Code Coloring", "F7", "F7", toggle_syntax },
     { "Zoom In", "<Control>equal|<Control>plus|<Control>KP_Add", "Ctrl+=", zoom_in },
     { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out },

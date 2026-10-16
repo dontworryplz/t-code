@@ -1,5 +1,5 @@
 /*
- * The Source Control panel, right of the shell (Ctrl+Shift+G), like VS Code's:
+ * The Source Control panel, a tab next to the file manager (Ctrl+Shift+G), like VS Code's:
  *   a commit message and Commit / Push buttons
  *   Staged Changes and Changes: click a file to see its changes side by side; + stages, − unstages,
  *     ↶ discards (after asking)
@@ -36,8 +36,7 @@ static struct {
 } scm;
 
 static const char *const css =
-    ".tcode-scm { background: #181818; border-left: 1px solid #2b2b2b; }"
-    ".tcode-scm .title { font-size: 0.8em; font-weight: bold; color: #cccccc; margin: 6px 10px 4px; }"
+    ".tcode-scm { background: #1f1f1f; }"
     ".tcode-scm textview, .tcode-scm textview text { background: #313131; color: #cccccc; }"
     ".tcode-scm .message { border: 1px solid #3c3c3c; margin: 0 10px; }"
     ".tcode-scm .message:focus-within { border-color: #0078d4; }"
@@ -672,6 +671,11 @@ void scm_update(App *t, const char *out, gsize size)
     gtk_label_set_text(scm.staged_title, title);
     g_free(title);
     update_buttons();
+    /* The tab shows how many files changed, like VS Code's badge. */
+    title = scm.staged->len + scm.changes->len ? g_strdup_printf("SOURCE CONTROL  %u", scm.staged->len + scm.changes->len)
+                                               : g_strdup("SOURCE CONTROL");
+    gtk_stack_page_set_title(gtk_stack_get_page(t->sidebar_stack, t->scm), title);
+    g_free(title);
     gtk_widget_set_sensitive(scm.commit, out != NULL);
     gtk_widget_set_sensitive(scm.push, out != NULL && !scm.initial);
     if (!out)
@@ -734,7 +738,6 @@ GtkWidget *scm_panel(App *t)
     GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     GtkWidget *scroll = gtk_scrolled_window_new();
-    GtkWidget *title = gtk_label_new("SOURCE CONTROL");
     GtkWidget *overlay = gtk_overlay_new();
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     GtkEventController *keys = gtk_event_controller_key_new();
@@ -756,9 +759,7 @@ GtkWidget *scm_panel(App *t)
     scm.changes = g_ptr_array_new_with_free_func((GDestroyNotify)change_free);
     gtk_widget_add_css_class(panel, "tcode-scm");
 
-    gtk_widget_add_css_class(title, "title");
-    gtk_label_set_xalign(GTK_LABEL(title), 0);
-    gtk_box_append(GTK_BOX(content), title);
+    gtk_widget_set_margin_top(content, 8);
 
     /* The commit message, with a hint while it is empty. */
     scm.message = gtk_text_view_new();

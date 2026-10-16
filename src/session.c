@@ -113,10 +113,12 @@ void session_apply_window(App *t)
         gtk_window_maximize(t->window);
     gtk_paned_set_position(t->hpaned, get_int(kf, "window", "files-width", 280));
     gtk_paned_set_position(t->vpaned, get_int(kf, "window", "editor-height", 620));
-    gtk_widget_set_visible(GTK_WIDGET(t->fm), get_bool(kf, "window", "files-visible", TRUE));
-    set_pane_visible(t, GTK_WIDGET(t->shell), get_bool(kf, "window", "shell-visible", TRUE));
-    set_pane_visible(t, t->scm, get_bool(kf, "window", "scm-visible", TRUE));
-    gtk_paned_set_position(t->bottom, get_int(kf, "window", "shell-width", 700));
+    gtk_widget_set_visible(t->sidebar, get_bool(kf, "window", "files-visible", TRUE));
+    gtk_widget_set_visible(GTK_WIDGET(t->shell), get_bool(kf, "window", "shell-visible", TRUE));
+    char *page = g_key_file_get_string(kf, "window", "sidebar-page", NULL);
+    if (g_strcmp0(page, "scm") == 0)
+        gtk_stack_set_visible_child_name(t->sidebar_stack, "scm");
+    g_free(page);
     if (!error && scale > 0)
         set_font_scale(t, scale);
     g_clear_error(&error);
@@ -193,11 +195,9 @@ void session_save(App *t)
     g_key_file_set_integer(kf, "window", "editor-height", gtk_paned_get_position(t->vpaned));
     if (gtk_widget_get_visible(GTK_WIDGET(t->groups[1])))
         g_key_file_set_integer(kf, "window", "split-position", gtk_paned_get_position(t->split));
-    g_key_file_set_boolean(kf, "window", "files-visible", gtk_widget_get_visible(GTK_WIDGET(t->fm)));
+    g_key_file_set_boolean(kf, "window", "files-visible", gtk_widget_get_visible(t->sidebar));
     g_key_file_set_boolean(kf, "window", "shell-visible", gtk_widget_get_visible(GTK_WIDGET(t->shell)));
-    g_key_file_set_boolean(kf, "window", "scm-visible", gtk_widget_get_visible(t->scm));
-    if (gtk_widget_get_visible(GTK_WIDGET(t->shell)) && gtk_widget_get_visible(t->scm))
-        g_key_file_set_integer(kf, "window", "shell-width", gtk_paned_get_position(t->bottom));
+    g_key_file_set_string(kf, "window", "sidebar-page", gtk_stack_get_visible_child_name(t->sidebar_stack));
     g_key_file_set_double(kf, "window", "font-scale", t->font_scale);
 
     g_key_file_set_string(kf, group, "root", t->root);

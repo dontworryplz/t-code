@@ -38,7 +38,8 @@ typedef struct {
 struct App {
     GtkWindow *window;
     GtkPaned *hpaned, *vpaned, *split;
-    GtkPaned *bottom;           /* the shell and the Source Control panel */
+    GtkWidget *sidebar;         /* left: tabs for the file manager and Source Control */
+    GtkStack *sidebar_stack;    /* pages "files" and "scm" */
     GtkWidget *scm;
     GtkStack *editor_area;
     GtkNotebook *groups[GROUPS];
@@ -203,3 +204,4 @@ void preview_free(Preview *preview);
 void set_font_scale(App *t, double scale);
 void set_pane_visible(App *t, GtkWidget *pane, gboolean visible);
 void toggle_pane(App *t, GtkWidget *pane);
+void show_sidebar_page(App *t, const char *page);

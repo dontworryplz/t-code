@@ -41,10 +41,14 @@ void set_pane_visible(App *t, GtkWidget *pane, gboolean visible)
     if (!visible && gtk_widget_has_focus(pane))
         focus_current_tab(t);
     gtk_widget_set_visible(pane, visible);
-    /* The bottom row goes away with both of its panes, and the editors take its place. */
-    if (t->bottom)
-        gtk_widget_set_visible(GTK_WIDGET(t->bottom), gtk_widget_get_visible(GTK_WIDGET(t->shell)) ||
-                                                          gtk_widget_get_visible(t->scm));
+}
+
+/* Shows the sidebar on one of its pages ("files" or "scm") and gives that page the keyboard. */
+void show_sidebar_page(App *t, const char *page)
+{
+    set_pane_visible(t, t->sidebar, TRUE);
+    gtk_stack_set_visible_child_name(t->sidebar_stack, page);
+    gtk_widget_grab_focus(strcmp(page, "files") == 0 ? GTK_WIDGET(t->fm) : t->scm);
 }
 
 void toggle_pane(App *t, GtkWidget *pane)
@@ -116,6 +120,41 @@ static void on_split_toggled(GtkToggleButton *button, App *t)
     focus_current_tab(t);
 }
 
+/* The left side: the file manager and the Source Control panel, as tabs. */
+static GtkWidget *sidebar(App *t)
+{
+    static const char *const css =
+        ".tcode-sidebar { background: #1f1f1f; }"
+        ".tcode-sidebar stackswitcher { background: #181818; border-bottom: 1px solid #2b2b2b; }"
+        ".tcode-sidebar stackswitcher button { min-height: 0; padding: 4px 10px; border-radius: 0;"
+        "  background: none; box-shadow: none; color: #9d9d9d; font-size: 0.8em; font-weight: bold;"
+        "  border-bottom: 1px solid transparent; }"
+        ".tcode-sidebar stackswitcher button:checked { color: #e7e7e7; border-bottom-color: #0078d4; }"
+        ".tcode-sidebar stackswitcher button:hover { color: #e7e7e7; }";
+    GtkCssProvider *provider = gtk_css_provider_new();
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *switcher = gtk_stack_switcher_new();
+
+    gtk_css_provider_load_from_string(provider, css);
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+
+    t->scm = scm_panel(t);
+    t->sidebar_stack = GTK_STACK(gtk_stack_new());
+    gtk_stack_add_titled(t->sidebar_stack, GTK_WIDGET(t->fm), "files", "FILES");
+    gtk_stack_add_titled(t->sidebar_stack, t->scm, "scm", "SOURCE CONTROL");
+    gtk_widget_set_vexpand(GTK_WIDGET(t->sidebar_stack), TRUE);
+    gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher), t->sidebar_stack);
+    gtk_widget_set_focusable(switcher, FALSE);
+
+    gtk_widget_add_css_class(box, "tcode-sidebar");
+    gtk_box_append(GTK_BOX(box), switcher);
+    gtk_box_append(GTK_BOX(box), GTK_WIDGET(t->sidebar_stack));
+    t->sidebar = box;
+    return box;
+}
+
 /* Open Folder and Recent Folders on the left, Settings and Split Editor on the right. */
 static GtkWidget *header_bar(App *t)
 {
@@ -166,22 +205,14 @@ static void build_window(App *t, GtkApplication *app)
     create_fixed_terminals(t);
     create_groups(t);
 
-    t->scm = scm_panel(t);
-    t->bottom = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_HORIZONTAL));
-    gtk_paned_set_start_child(t->bottom, GTK_WIDGET(t->shell));
-    gtk_paned_set_end_child(t->bottom, t->scm);
-    gtk_paned_set_resize_end_child(t->bottom, FALSE);
-    gtk_paned_set_shrink_end_child(t->bottom, FALSE);
-    gtk_paned_set_position(t->bottom, 700);
-
     t->vpaned = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_VERTICAL));
     gtk_paned_set_start_child(t->vpaned, GTK_WIDGET(t->editor_area));
-    gtk_paned_set_end_child(t->vpaned, GTK_WIDGET(t->bottom));
+    gtk_paned_set_end_child(t->vpaned, GTK_WIDGET(t->shell));
     gtk_paned_set_resize_end_child(t->vpaned, FALSE);
     gtk_paned_set_position(t->vpaned, 620);
 
     t->hpaned = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_HORIZONTAL));
-    gtk_paned_set_start_child(t->hpaned, GTK_WIDGET(t->fm));
+    gtk_paned_set_start_child(t->hpaned, sidebar(t));
     gtk_paned_set_end_child(t->hpaned, GTK_WIDGET(t->vpaned));
     gtk_paned_set_resize_start_child(t->hpaned, FALSE);
     gtk_paned_set_shrink_start_child(t->hpaned, FALSE);
