@@ -45,14 +45,17 @@ static void toggle_split(App *t)
     focus_current_tab(t);
 }
 
-/* Opens micro's command bar with "goto " typed; the line number and Enter follow. */
+/* Opens micro's command bar with "goto " typed; the line number and Enter follow. Through the
+ * plugin's pipe the bar opens at once, so digits typed right after Ctrl+G go into it; typed keys
+ * wait for micro's Escape timeout, and fast digits would land in the file first. */
 static void go_to_line(App *t)
 {
     Tab *tab = current_tab(t);
 
     if (tab && tab->kind == TAB_EDITOR) {
         select_tab(tab);
-        feed_editor(tab, "\x05goto ");
+        if (!editor_control(tab, "prompt goto "))
+            feed_editor(tab, "\x05goto ");
     }
 }
 

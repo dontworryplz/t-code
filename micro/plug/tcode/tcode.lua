@@ -5,6 +5,7 @@
 -- With TCODE_CONTROL set, it reads lines from that named pipe:
 --   scroll <line>       show the file from that line (0-based) on
 --   command <command>   run a micro command, as if typed after Ctrl+E
+--   prompt <text>       open the command bar with text typed in (Ctrl+G: "goto ")
 -- It adds the tcodebase command that sets what the changed lines in the gutter are compared with:
 --   tcodebase rev <commit>   that commit's version of the file
 --   tcodebase file <path>    the contents of another file
@@ -201,6 +202,12 @@ local function control(line)
         end
     elseif verb == "command" and arg ~= "" then
         bp:HandleCommand(arg)
+    elseif verb == "prompt" then
+        micro.InfoBar():Prompt("> ", arg, "Command", nil, function(input, canceled)
+            if not canceled and input ~= "" then
+                bp:HandleCommand(input)
+            end
+        end)
     end
     report()
 end

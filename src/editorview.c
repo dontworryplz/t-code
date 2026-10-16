@@ -35,6 +35,7 @@ struct EditorView {
     gsize size;
     GArray *starts;     /* offset of each line in text */
     GArray *in_comment; /* gboolean: the line starts inside a block comment */
+    gboolean c_like;    /* C/C++ source: colored; anything else is drawn plain */
     double grab;        /* while dragging the viewport: where in it the pointer is */
     gboolean dragging;
 };
@@ -178,7 +179,8 @@ static void load_text(EditorView *v)
         gsize end = newline ? (gsize)(newline - text) : size;
         g_array_append_val(v->starts, start);
         g_array_append_val(v->in_comment, comment);
-        comment = lex_line(text + start, end - start, comment, NULL, NULL);
+        if (v->c_like)
+            comment = lex_line(text + start, end - start, comment, NULL, NULL);
         if (!newline)
             break;
         start = end + 1;
@@ -202,6 +204,21 @@ static void on_file_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file G_G
         v->reload_id = g_timeout_add(200, reload_now, v);
 }
 
+/* The lexer knows C and C++ only: other files (Makefiles, scripts, Markdown) would get '#'
+ * comments drawn as preprocessor lines and apostrophes as unclosed character literals. */
+static gboolean is_c_like(const char *path)
+{
+    static const char *const extensions[] = {
+        ".c", ".h", ".cc", ".cpp", ".cxx", ".c++", ".hh", ".hpp", ".hxx", ".h++", ".inl", ".ipp", ".tpp", NULL,
+    };
+    const char *dot = path ? strrchr(path, '.') : NULL;
+
+    for (int i = 0; dot && extensions[i]; i++)
+        if (g_ascii_strcasecmp(dot, extensions[i]) == 0)
+            return TRUE;
+    return FALSE;
+}
+
 /* Follows tab->path: call again when it changes. */
 void editor_view_set_path(Tab *tab)
 {
@@ -210,6 +227,7 @@ void editor_view_set_path(Tab *tab)
 
     if (!v)
         return;
+    v->c_like = is_c_like(tab->path);
     if (v->monitor) {
         g_file_monitor_cancel(v->monitor);
         g_clear_object(&v->monitor);
@@ -337,7 +355,7 @@ static void draw_minimap(GtkDrawingArea *area G_GNUC_UNUSED, cairo_t *cr, int wi
         cairo_save(cr);
         cairo_translate(cr, 2, i * LINE_PITCH - offset);
         lex_line(v->text + start, end - start, g_array_index(v->in_comment, gboolean, i), cr,
-                 tab->app->plain ? paint_plain : paint_run);
+                 tab->app->plain || !v->c_like ? paint_plain : paint_run);
         cairo_restore(cr);
     }
     if (tab->lines > 0 && tab->height > 0) {

@@ -225,10 +225,9 @@ void draw(const char *prompt, const char *input)
             const char *tail = input;
             int len = utf8_cols(input);
             while (len >= cols && *tail) {
-                tail++;
-                while ((*tail & 0xC0) == 0x80)
-                    tail++;
-                len--;
+                size_t n;
+                len -= next_char(tail, &n); /* a wide character takes two columns */
+                tail += n;
             }
             buf_cols(&b, tail, cols);
             buf_puts(&b, "\x1b[K\x1b[?25h");

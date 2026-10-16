@@ -14,7 +14,8 @@ local filepath = import("path/filepath")
 local cmd = {}
 local id = {}
 local version = {}
-local currentAction = {}
+local currentAction = {} -- per filetype: the request whose response is awaited (one at a time)
+local initAction = {} -- per filetype: the initialize request, kept apart so no action replaces it
 local capabilities = {}
 local filetype = ''
 local rootUri = ''
@@ -22,7 +23,32 @@ local message = ''
 local completionCursor = 0
 local lastCompletion = {}
 local splitBP = nil
+local referencesBP = nil -- the "References found" split
 local tabCount = 0
+local openCount = 0
+
+-- Asks t-code to open file at line and column (1-based) in its own tab. t-code reads the terminal
+-- title, and only hears of a new one: the counter makes the same jump twice a new title.
+local function tcodeOpen(line, column, file)
+	openCount = openCount + 1
+	go_os.Stdout:WriteString(fmt.Sprintf("\027]0;t-code-open %d %d %d %s\007", openCount, line, column, file))
+end
+
+-- Lua patterns treat ( ) . % + - * ? [ ] ^ $ as special: this matches s literally.
+local function escapePattern(s)
+	return (s:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0"))
+end
+
+-- Byte offset of the first chars characters of s (cursor columns count characters).
+local function byteOffset(s, chars)
+	local i, n = 1, 0
+	while n < chars and i <= #s do
+		local c = s:byte(i)
+		i = i + (c >= 0xF0 and 4 or c >= 0xE0 and 3 or c >= 0xC0 and 2 or 1)
+		n = n + 1
+	end
+	return i - 1
+end
 
 local json = {}
 
@@ -115,12 +141,12 @@ function startServer(filetype, callback)
 			id[lang] = 0
 			micro.Log("Starting server", lang)
 			cmd[lang] = shell.JobSpawn(runCmd, args, onStdout(lang), onStderr, onExit(lang), {})
-			currentAction[lang] = { method = "initialize", response = function (bp, data)
+			initAction[lang] = { method = "initialize", response = function (bp, data)
 			    send("initialized", "{}", true)
 				capabilities[filetype] = data.result and data.result.capabilities or {}
 			    callback(bp.Buf, filetype)
 			end }
-			send(currentAction[lang].method, fmt.Sprintf('{"processId": %.0f, "rootUri": "%s", "workspaceFolders": [{"name": "root", "uri": "%s"}], "initializationOptions": %s, "capabilities": {"textDocument": {"hover": {"contentFormat": ["plaintext", "markdown"]}, "publishDiagnostics": {"relatedInformation": false, "versionSupport": false, "codeDescriptionSupport": true, "dataSupport": true}, "signatureHelp": {"signatureInformation": {"documentationFormat": ["plaintext", "markdown"]}}}}}', go_os.Getpid(), rootUri, rootUri, initOptions))
+			send(initAction[lang].method, fmt.Sprintf('{"processId": %.0f, "rootUri": "%s", "workspaceFolders": [{"name": "root", "uri": "%s"}], "initializationOptions": %s, "capabilities": {"textDocument": {"hover": {"contentFormat": ["plaintext", "markdown"]}, "publishDiagnostics": {"relatedInformation": false, "versionSupport": false, "codeDescriptionSupport": true, "dataSupport": true}, "signatureHelp": {"signatureInformation": {"documentationFormat": ["plaintext", "markdown"]}}}}}', go_os.Getpid(), rootUri, rootUri, initOptions))
 			return
 		end
 	end
@@ -160,6 +186,14 @@ function withSend(filetype)
 	    end
 	    
 		local msg = fmt.Sprintf('{"jsonrpc": "2.0", %s"method": "%s", "params": %s}', not isNotification and fmt.Sprintf('"id": %.0f, ', id[filetype]) or "", method, params)
+		if not isNotification then
+			-- remember which request the awaited action is, to match its response by id
+			for _, action in ipairs({initAction[filetype] or {}, currentAction[filetype] or {}}) do
+				if action.method == method and action.id == nil then
+					action.id = id[filetype]
+				end
+			end
+		end
 		id[filetype] = id[filetype] + 1
 		msg = fmt.Sprintf("Content-Length: %.0f\r\n\r\n%s", #msg, msg)
 		--micro.Log("send", filetype, "sending", method or msg, msg)
@@ -200,12 +234,29 @@ function onRune(bp, r)
 	send("textDocument/didChange", fmt.Sprintf('{"textDocument": {"version": %.0f, "uri": "%s"}, "contentChanges": [{"text": "%s"}]}', version[uri], uri, content), true)
 	local ignored = mysplit(config.GetGlobalOption("lsp.ignoreTriggerCharacters") or '', ",")
 	if r and capabilities[filetype] then
-		if not contains(ignored, "completion") and capabilities[filetype].completionProvider and capabilities[filetype].completionProvider.triggerCharacters and contains(capabilities[filetype].completionProvider.triggerCharacters, r) then
+		if not contains(ignored, "completion") and capabilities[filetype].completionProvider and capabilities[filetype].completionProvider.triggerCharacters and contains(capabilities[filetype].completionProvider.triggerCharacters, r) and isMemberAccess(bp, r) then
 			completionAction(bp)
 		elseif not contains(ignored, "signature") and capabilities[filetype].signatureHelpProvider and capabilities[filetype].signatureHelpProvider.triggerCharacters and contains(capabilities[filetype].signatureHelpProvider.triggerCharacters, r) then
-			hoverAction(bp)
+			signatureAction(bp)
 		end
 	end
+end
+
+-- clangd lists . < > : " / * as completion triggers, but a completion inserts and selects text,
+-- which gets in the way after #include <, /*, a < b or a string. Completion starts by itself only
+-- after member access (. -> ::); Ctrl+Space completes anywhere.
+function isMemberAccess(bp, r)
+	local cur = bp.Buf:GetActiveCursor()
+	local line = bp.Buf:Line(cur.Y)
+	local before = line:sub(1, byteOffset(line, cur.X))
+	if r == "." then
+		return before:match("[%a_][%w_]*%.$") ~= nil or before:match("[%)%]]%.$") ~= nil
+	elseif r == ">" then
+		return before:match("%->$") ~= nil
+	elseif r == ":" then
+		return before:match("::$") ~= nil
+	end
+	return false
 end
 
 -- alias functions for any kind of change to the document
@@ -227,6 +278,10 @@ function onEscape(bp)
 		pcall(function () splitBP:Unsplit(); end)
 		splitBP = nil
 	end
+	if referencesBP ~= nil then
+		pcall(function () referencesBP:Unsplit(); end)
+		referencesBP = nil
+	end
 end
 
 function preInsertNewline(bp)
@@ -240,8 +295,8 @@ function preInsertNewline(bp)
 			local abs, err = filepath.Abs(doc)
 			if err == nil then doc = abs end
 			pcall(function () bp:Unsplit(); end)
-			splitBP = nil
-			go_os.Stdout:WriteString(fmt.Sprintf("\027]0;t-code-open %d %d %s\007", (line * 1) + 1, (character * 1) + 1, doc))
+			referencesBP = nil
+			tcodeOpen((line * 1) + 1, (character * 1) + 1, doc)
 			return false
 		end
 		buf, _ = buffer.NewBufferFromFile(doc)
@@ -373,11 +428,20 @@ local function handleMessage(filetype, raw)
 				end
 			end
 		end
-	elseif currentAction[filetype] and currentAction[filetype].method and not data.method and currentAction[filetype].response and data.jsonrpc then
-		local bp = micro.CurPane()
-		local action = currentAction[filetype]
-		currentAction[filetype] = {}
-		action.response(bp, data)
+	elseif not data.method and data.jsonrpc and data.id ~= nil then
+		-- a response: only the one to the awaited request counts (an older hover or completion
+		-- answering late must not be taken for the definition asked for since)
+		local action = nil
+		if initAction[filetype] and initAction[filetype].id == data.id then
+			action = initAction[filetype]
+			initAction[filetype] = nil
+		elseif currentAction[filetype] and currentAction[filetype].response and currentAction[filetype].id == data.id then
+			action = currentAction[filetype]
+			currentAction[filetype] = {}
+		end
+		if action then
+			action.response(micro.CurPane(), data)
+		end
 	elseif data.method == "window/showMessage" or data.method == "window\\/showMessage" then
 		if filetype == micro.CurPane().Buf:FileType() then
 			micro.InfoBar():Message(data.params.message)
@@ -425,6 +489,7 @@ end
 function onExit(filetype)
 	return function (str)
 		currentAction[filetype] = nil
+		initAction[filetype] = nil
 		cmd[filetype] = nil
 		micro.Log("ONEXIT", filetype, str)
 	end
@@ -451,6 +516,25 @@ function hoverActionResponse(buf, data)
 		elseif #data.result.contents > 0 then
 			micro.InfoBar():Message(data.result.contents[1].value)
 		end
+	end
+end
+
+-- signature help: while typing a call's arguments, the function's parameters in the info bar
+function signatureAction(bp)
+	local filetype = bp.Buf:FileType()
+	if cmd[filetype] == nil then return; end
+	local send = withSend(filetype)
+	local cur = bp.Buf:GetActiveCursor()
+	currentAction[filetype] = { method = "textDocument/signatureHelp", response = signatureActionResponse }
+	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "position": {"line": %.0f, "character": %.0f}}', getUriFromBuf(bp.Buf), cur.Y, cur.X))
+end
+
+function signatureActionResponse(bp, data)
+	local result = data.result
+	if result == nil or result.signatures == nil or #result.signatures == 0 then return; end
+	local signature = result.signatures[(result.activeSignature or 0) + 1] or result.signatures[1]
+	if signature.label then
+		micro.InfoBar():Message(signature.label)
 	end
 end
 
@@ -482,7 +566,7 @@ function definitionActionResponse(bp, data)
 	local range = results[1].range or results[1].targetSelectionRange
 	if file ~= doc then
 		if go_os.Getenv("TCODE_SOCKET") ~= "" then
-			go_os.Stdout:WriteString(fmt.Sprintf("\027]0;t-code-open %d %d %s\007", range.start.line + 1, range.start.character + 1, doc))
+			tcodeOpen(range.start.line + 1, range.start.character + 1, doc)
 			return
 		end
 		-- it's from a different file, so open it as a new tab
@@ -684,7 +768,10 @@ function completionActionResponse(bp, data)
 			bp.Cursor:ResetSelection()
 		end
 	end
-	local inserting = "" .. toInsert:gsub(prefix, "")
+	local inserting = toInsert
+	if prefix ~= "" and inserting:starts(prefix) then
+		inserting = inserting:sub(#prefix + 1)
+	end
 	bp.Buf:Insert(start, inserting)
 	
 	if #results > 1 then
@@ -769,7 +856,7 @@ function completionActionResponse(bp, data)
 			micro.InfoBar():Message(insertion)
 		else
 			local cleaned = " " .. msg:gsub("%s+", "  ")
-			local replaced, _ = cleaned:gsub(".*%s" .. insertion .. "%s?", " [" .. insertion .. "] ")
+			local replaced, _ = cleaned:gsub(".*%s" .. escapePattern(insertion) .. "%s?", " [" .. insertion:gsub("%%", "%%%%") .. "] ")
 			micro.InfoBar():Message(replaced)
 		end
 	end
@@ -781,8 +868,11 @@ function formatAction(bp, callback)
 	local send = withSend(filetype)
 	local file = bp.Buf.AbsPath
 
+	-- the buffer's own indentation (t-code's settings reach micro as tabsize / tabstospaces)
+	local tabSize = tonumber(bp.Buf.Settings["tabsize"]) or 4
+	local insertSpaces = bp.Buf.Settings["tabstospaces"] and "true" or "false"
 	currentAction[filetype] = { method = "textDocument/formatting", response = formatActionResponse(callback) }
-	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "options": {"tabSize": 4, "insertSpaces": true}}', pathToUri(file)))
+	send(currentAction[filetype].method, fmt.Sprintf('{"textDocument": {"uri": "%s"}, "options": {"tabSize": %.0f, "insertSpaces": %s}}', pathToUri(file), tabSize, insertSpaces))
 end
 
 function formatActionResponse(callback)
@@ -862,7 +952,10 @@ function referencesActionResponse(bp, data)
 	end
 
 	local logBuf = buffer.NewBuffer(msg, "References found")
-	local splitBP = bp:HSplitBuf(logBuf)
+	if referencesBP ~= nil then
+		pcall(function () referencesBP:Unsplit(); end)
+	end
+	referencesBP = bp:HSplitBuf(logBuf)
 end
 
 --

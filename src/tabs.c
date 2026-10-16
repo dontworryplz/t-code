@@ -257,7 +257,9 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
     if (!title)
         return;
     if (g_str_has_prefix(title, "t-code-open ")) {
-        if (sscanf(title + 12, "%d %d %n", &line, &column, &end) >= 2 &&
+        /* "t-code-open <n> <line> <column> <path>": n counts up, so that jumping to the same place
+         * twice changes the title again (the signal only comes for a new title). */
+        if (sscanf(title + 12, "%*u %d %d %n", &line, &column, &end) >= 2 &&
             g_path_is_absolute(title + 12 + end))
             open_file_at(tab->app, title + 12 + end, line, column);
         return;
@@ -279,7 +281,15 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
 
     const char *path = title + 7 + end;
     if (!tab->title && g_path_is_absolute(path) && g_strcmp0(tab->path, path) != 0) {
-        g_free(tab->path); /* another file was opened inside micro */
+        /* Another file was opened inside micro (Ctrl+E open). When a tab has it already, that tab
+         * takes over: two editors on one file would overwrite each other's saves. */
+        Tab *other = find_tab(tab->app, TAB_EDITOR, path);
+        if (other) {
+            editor_command(tab, "quit");
+            select_tab(other);
+            return;
+        }
+        g_free(tab->path);
         tab->path = g_strdup(path);
         editor_view_set_path(tab);
     }
@@ -380,6 +390,49 @@ void editor_command(Tab *tab, const char *command)
         g_free(keys);
     }
     g_free(line);
+}
+
+typedef struct {
+    App *app;
+    SavedFunc then;
+    gpointer data;
+    int tries;
+} PendingSave;
+
+static gboolean when_saved(gpointer data)
+{
+    PendingSave *pending = data;
+
+    if (!pending->app->closing && any_unsaved(pending->app) && ++pending->tries < 15)
+        return G_SOURCE_CONTINUE;
+    pending->then(pending->app, pending->data);
+    g_free(pending);
+    return G_SOURCE_REMOVE;
+}
+
+/* Saves every changed editor, then calls then (also when a save does not finish within ~450ms,
+ * and while the app closes: then checks t->closing itself). The save goes through micro's command,
+ * which works with its find or command bar open, where a typed Ctrl+S would be ignored. */
+void save_all(App *t, SavedFunc then, gpointer data)
+{
+    PendingSave *pending = g_new0(PendingSave, 1);
+    int n = tab_count(t);
+    gboolean saving = FALSE;
+
+    for (int i = 0; i < n; i++) {
+        Tab *tab = tab_nth(t, i);
+        if (tab->kind == TAB_EDITOR && tab->modified) {
+            editor_command(tab, "save");
+            saving = TRUE;
+        }
+    }
+    pending->app = t;
+    pending->then = then;
+    pending->data = data;
+    if (saving)
+        g_timeout_add(30, when_saved, pending);
+    else
+        when_saved(pending);
 }
 
 void open_file_at(App *t, const char *path, int line, int column)

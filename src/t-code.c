@@ -290,13 +290,17 @@ static void on_shutdown(GApplication *app G_GNUC_UNUSED, App *t)
     remove_temp_dir(t);
 }
 
-/* SIGTERM / SIGINT: save the session and quit normally, so the socket file is removed. */
+/* SIGTERM / SIGINT: save the session and quit normally, so the socket file is removed. The window
+ * goes like on a normal close: its tabs stop their editors, the terminals hang up on theirs. */
 static gboolean on_signal(gpointer data)
 {
     App *t = data;
 
-    if (t->window && !t->closing)
+    if (t->window && !t->closing) { /* closing: the window is gone already */
         session_save(t);
+        t->closing = TRUE;
+        gtk_window_destroy(t->window);
+    }
     t->closing = TRUE;
     g_application_quit(g_application_get_default());
     return G_SOURCE_REMOVE;

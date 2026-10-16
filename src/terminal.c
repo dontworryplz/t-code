@@ -110,6 +110,10 @@ static void on_fixed_exited(VteTerminal *term, int status G_GNUC_UNUSED, App *t)
 {
     if (t->closing)
         return;
+    if (term == t->fm)
+        t->fm_pid = 0; /* gone: nothing may signal its pid until the new one starts */
+    else
+        t->shell_pid = 0;
     vte_terminal_reset(term, TRUE, TRUE);
     if (term == t->fm)
         start_fm(t);
@@ -132,6 +136,8 @@ typedef struct {
     char *command;
     int tries;
 } ShellRun;
+
+static ShellRun *waiting; /* the command that waits for the shell's prompt */
 
 static void type_in_shell(App *t, const char *command)
 {
@@ -173,6 +179,7 @@ static gboolean run_when_idle(gpointer data)
         show_shell_busy(t, group);
     else if (!t->closing)
         type_in_shell(t, run->command);
+    waiting = NULL;
     g_free(run->command);
     g_free(run);
     return G_SOURCE_REMOVE;
@@ -184,18 +191,28 @@ static gboolean run_when_idle(gpointer data)
 void run_in_shell(App *t, const char *command)
 {
     pid_t group = shell_foreground(t);
+    gboolean busy = group && group != t->shell_pid;
 
     set_pane_visible(t, GTK_WIDGET(t->shell), TRUE);
     gtk_widget_grab_focus(GTK_WIDGET(t->shell));
-    if (!group || group == t->shell_pid) {
+    if (waiting) {
+        /* Build or Run again while the last one waits: one command runs, the newest. */
+        g_free(waiting->command);
+        waiting->command = g_strdup(command);
+        waiting->tries = 0;
+        if (busy)
+            kill(-group, SIGINT);
+        return;
+    }
+    if (!busy) {
         type_in_shell(t, command);
         return;
     }
-    ShellRun *run = g_new0(ShellRun, 1);
-    run->app = t;
-    run->command = g_strdup(command);
     kill(-group, SIGINT);
-    g_timeout_add(50, run_when_idle, run);
+    waiting = g_new0(ShellRun, 1);
+    waiting->app = t;
+    waiting->command = g_strdup(command);
+    g_timeout_add(50, run_when_idle, waiting);
 }
 
 /* Clickable compiler messages ------------------------------------------------------------------ */

@@ -17,6 +17,7 @@ typedef struct {
 static guint debounce_id;
 static Search *pending; /* waiting for typing to pause */
 static GCancellable *running;
+static GSubprocess *running_proc; /* stopped when a newer search starts: cancelling only stops reading */
 
 static void search_free(Search *s)
 {
@@ -55,6 +56,8 @@ static void on_done(GObject *source, GAsyncResult *result, gpointer data)
     GError *error = NULL;
     int count = 0;
 
+    if (G_SUBPROCESS(source) == running_proc)
+        g_clear_object(&running_proc);
     if (!g_subprocess_communicate_finish(G_SUBPROCESS(source), result, &out, NULL, &error)) {
         if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
             picker_message(s->app, s->generation, error->message);
@@ -115,6 +118,7 @@ static gboolean start(gpointer data)
     }
     g_object_set_data(G_OBJECT(proc), "has-column", GINT_TO_POINTER(rg != NULL));
     running = g_cancellable_new();
+    running_proc = g_object_ref(proc);
     g_subprocess_communicate_async(proc, NULL, running, on_done, s);
     g_object_unref(proc);
     g_free(rg);
@@ -132,6 +136,10 @@ static void query(App *t, const char *text, guint generation)
     if (running) {
         g_cancellable_cancel(running);
         g_clear_object(&running);
+    }
+    if (running_proc) {
+        g_subprocess_force_exit(running_proc);
+        g_clear_object(&running_proc);
     }
     if (strlen(text) < 2) {
         picker_message(t, generation, "Type at least two characters to search all files");

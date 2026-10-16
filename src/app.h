@@ -102,6 +102,8 @@ void open_file_at(App *t, const char *path, int line, int column);
 void open_to_side(App *t, const char *path);
 void feed_editor(Tab *tab, const char *keys);
 void editor_command(Tab *tab, const char *command);
+typedef void (*SavedFunc)(App *t, gpointer data);
+void save_all(App *t, SavedFunc then, gpointer data);
 void set_split(App *t, gboolean split);
 void toggle_syntax(App *t);
 gboolean any_unsaved(App *t);
@@ -174,11 +176,13 @@ void stop_socket(App *t);
 
 /* gitcompare.c */
 void compare_with_head(App *t, const char *path);
+void compare_with_index(App *t, const char *path);
 void file_history(App *t, const char *path);
 void stop_comparing(App *t);
 void forget_comparison(Tab *old_version);
 void remove_temp_dir(App *t);
 const char *comparable_path(App *t);
+#define INDEX_REV ":0" /* compare_revisions(): the staged version instead of a commit's */
 void compare_revisions(App *t, const char *old_rev, const char *old_rel, const char *new_rev, const char *new_rel);
 
 /* run.c */

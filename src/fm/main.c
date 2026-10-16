@@ -13,6 +13,7 @@
 
 Fm fm = { .show_hidden = true, .focused = true, .follow = true, .press_row = -1, .drop_row = -1 };
 volatile int resized;
+static volatile sig_atomic_t git_changed; /* t-code saw git status change (SIGUSR1) */
 
 static void restore_terminal(void)
 {
@@ -50,9 +51,18 @@ static void on_winch(int sig)
     resized = 1;
 }
 
+/* Only the root, the open folders and .git/{index,HEAD} are watched, so a file saved inside a
+ * closed folder goes unseen; t-code, which runs git status anyway, says so with SIGUSR1. */
+static void on_usr1(int sig)
+{
+    (void)sig;
+    git_changed = 1;
+}
+
 int main(void)
 {
     struct sigaction sa = { .sa_handler = on_winch }; /* no SA_RESTART: poll() returns on resize */
+    struct sigaction usr1 = { .sa_handler = on_usr1 };
     unsigned char buf[512];
     bool refresh_pending = false;
 
@@ -62,6 +72,7 @@ int main(void)
         return 1;
     }
     sigaction(SIGWINCH, &sa, NULL);
+    sigaction(SIGUSR1, &usr1, NULL);
     setup_terminal();
     update_size();
     rebuild(NULL);
@@ -69,6 +80,10 @@ int main(void)
     for (;;) {
         struct pollfd fds[2] = { { .fd = STDIN_FILENO, .events = POLLIN }, { .fd = watch_fd(), .events = POLLIN } };
 
+        if (git_changed) {
+            git_changed = 0;
+            refresh_pending = true;
+        }
         draw(NULL, NULL);
         int ready = poll(fds, fds[1].fd >= 0 ? 2 : 1, refresh_pending ? REFRESH_DELAY_MS : -1);
         if (ready < 0) {
@@ -78,7 +93,7 @@ int main(void)
                 resized = 0;
                 update_size();
             }
-            continue;
+            continue; /* a SIGUSR1 is picked up at the top */
         }
         if (ready == 0) { /* the burst of changes is over */
             refresh_pending = false;

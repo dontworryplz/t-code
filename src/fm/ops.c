@@ -350,11 +350,16 @@ void clip_selected(bool cut)
 
 void paste_into(const char *dir)
 {
-    char dest[PATH_MAX * 2];
+    char dest[PATH_MAX * 2], parent[PATH_MAX];
 
     if (!fm.clip[0]) {
         message("Nothing to paste: Ctrl+C or Ctrl+X a file first");
         return;
+    }
+    if (!fm.clip_cut && strcmp(fm.clip, dir) == 0) {
+        /* A copied folder pasted while it is still selected: the copy goes beside it ("foo copy"). */
+        parent_dir(dir, parent, sizeof parent);
+        dir = parent;
     }
     if (put(fm.clip, dir, fm.clip_cut, dest, sizeof dest)) {
         if (fm.clip_cut)

@@ -97,6 +97,7 @@ void session_save_settings(App *t)
     g_key_file_set_boolean(kf, "settings", "tabs-to-spaces", t->settings.tabs_to_spaces);
     g_key_file_set_integer(kf, "settings", "tab-size", t->settings.tab_size);
     g_key_file_set_boolean(kf, "settings", "code-coloring", !t->plain);
+    g_key_file_set_double(kf, "window", "font-scale", t->font_scale);
     store(kf);
     g_key_file_free(kf);
 }
@@ -203,17 +204,20 @@ void session_save(App *t)
     g_key_file_set_string(kf, group, "root", t->root);
     for (int g = 0; g < GROUPS; g++) {
         GtkNotebook *notebook = t->groups[g];
-        int n = gtk_notebook_get_n_pages(notebook), kept = 0;
+        int n = gtk_notebook_get_n_pages(notebook), kept = 0, active = 0;
+        int current = gtk_notebook_get_current_page(notebook);
         char **tabs = g_new0(char *, n + 1);
         for (int i = 0; i < n; i++) {
             Tab *tab = g_object_get_data(G_OBJECT(gtk_notebook_get_nth_page(notebook, i)), "t-code-tab");
+            if (i == current) /* counted among the kept tabs (an old version: the one before it) */
+                active = MAX(kept - (tab->compare_with ? 1 : 0), 0);
             if (tab->compare_with) /* old versions in a comparison live in a temp folder */
                 continue;
             tabs[kept++] = tab->kind == TAB_PREVIEW ? g_strconcat(PREVIEW_PREFIX, tab->path, NULL)
                                                     : g_strdup(tab->path);
         }
         g_key_file_set_string_list(kf, group, tab_keys[g], (const char *const *)tabs, kept);
-        g_key_file_set_integer(kf, group, active_keys[g], MAX(gtk_notebook_get_current_page(notebook), 0));
+        g_key_file_set_integer(kf, group, active_keys[g], active);
         g_strfreev(tabs);
     }
 

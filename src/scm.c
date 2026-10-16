@@ -31,7 +31,9 @@ static struct {
     char *upstream;
     int ahead, behind;
     gboolean initial;       /* no commit yet */
-    gboolean busy;          /* a git command runs */
+    gboolean busy;          /* a git command that changes the repository runs */
+    gboolean committing;    /* a commit waits for the editors to save */
+    GQueue waiting;         /* such commands that wait for it (GitCall) */
     char *open_commit;      /* the commit whose files are shown */
 } scm;
 
@@ -84,10 +86,34 @@ static void set_note(const char *text, gboolean error)
 typedef void (*GitDone)(gboolean ok, const char *out, const char *err, gpointer data);
 
 typedef struct {
+    char **argv;    /* git and its arguments */
+    char *input;    /* for its stdin, or NULL */
     GitDone done;
     gpointer data;
-    gboolean quiet; /* a background read: does not hold the buttons */
+    gboolean quiet; /* a background read: runs at once and does not hold the buttons */
 } GitCall;
+
+static void git_call_free(GitCall *call)
+{
+    g_strfreev(call->argv);
+    g_free(call->input);
+    g_free(call);
+}
+
+static gboolean start_git(GitCall *call);
+
+/* The next command that changes the repository, once none runs: two at once would fight over
+ * .git/index.lock. */
+static void start_waiting(void)
+{
+    GitCall *call;
+
+    while (!scm.busy && (call = g_queue_pop_head(&scm.waiting)))
+        if (!scm.app->closing && scm.app->git_top)
+            start_git(call);
+        else
+            git_call_free(call);
+}
 
 static void on_git_done(GObject *source, GAsyncResult *result, gpointer user)
 {
@@ -105,47 +131,63 @@ static void on_git_done(GObject *source, GAsyncResult *result, gpointer user)
         if (!call->quiet)
             refresh_branch(scm.app);
     }
+    if (!call->quiet)
+        start_waiting(); /* unless done started the next step already (a commit after staging) */
     g_free(out);
     g_free(err);
-    g_free(call);
+    git_call_free(call);
 }
 
-/* Runs git in the work tree with args (NULL-terminated); input goes to its stdin. */
-static void run_git(const char *const *args, const char *input, gboolean quiet, GitDone done, gpointer data)
+/* Starts the call, or frees it and returns FALSE when git does not start. */
+static gboolean start_git(GitCall *call)
 {
     GSubprocessLauncher *launcher;
-    GPtrArray *argv = g_ptr_array_new();
     GError *error = NULL;
     GSubprocess *proc;
+
+    launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
+                                         (call->input ? G_SUBPROCESS_FLAGS_STDIN_PIPE : 0));
+    g_subprocess_launcher_set_cwd(launcher, scm.app->git_top);
+    /* No terminal to answer a password prompt in: fail instead of waiting forever. */
+    g_subprocess_launcher_setenv(launcher, "GIT_TERMINAL_PROMPT", "0", TRUE);
+    proc = g_subprocess_launcher_spawnv(launcher, (const char *const *)call->argv, &error);
+    g_object_unref(launcher);
+    if (!proc) {
+        set_note(error->message, TRUE);
+        g_error_free(error);
+        git_call_free(call);
+        return FALSE;
+    }
+    if (!call->quiet)
+        scm.busy = TRUE;
+    g_subprocess_communicate_utf8_async(proc, call->input, NULL, on_git_done, call);
+    g_object_unref(proc);
+    return TRUE;
+}
+
+/* Runs git in the work tree with args (NULL-terminated); input goes to its stdin. Commands that
+ * change the repository (not quiet) run one after another. */
+static void run_git(const char *const *args, const char *input, gboolean quiet, GitDone done, gpointer data)
+{
+    GPtrArray *argv = g_ptr_array_new();
     GitCall *call;
 
     if (!scm.app->git_top)
         return;
-    g_ptr_array_add(argv, "git");
+    g_ptr_array_add(argv, g_strdup("git"));
     for (int i = 0; args[i]; i++)
-        g_ptr_array_add(argv, (char *)args[i]);
+        g_ptr_array_add(argv, g_strdup(args[i]));
     g_ptr_array_add(argv, NULL);
-    launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
-                                         (input ? G_SUBPROCESS_FLAGS_STDIN_PIPE : 0));
-    g_subprocess_launcher_set_cwd(launcher, scm.app->git_top);
-    /* No terminal to answer a password prompt in: fail instead of waiting forever. */
-    g_subprocess_launcher_setenv(launcher, "GIT_TERMINAL_PROMPT", "0", TRUE);
-    proc = g_subprocess_launcher_spawnv(launcher, (const char *const *)argv->pdata, &error);
-    g_object_unref(launcher);
-    g_ptr_array_free(argv, TRUE);
-    if (!proc) {
-        set_note(error->message, TRUE);
-        g_error_free(error);
-        return;
-    }
     call = g_new0(GitCall, 1);
+    call->argv = (char **)g_ptr_array_free(argv, FALSE);
+    call->input = g_strdup(input);
     call->done = done;
     call->data = data;
     call->quiet = quiet;
-    if (!quiet)
-        scm.busy = TRUE;
-    g_subprocess_communicate_utf8_async(proc, input, NULL, on_git_done, call);
-    g_object_unref(proc);
+    if (!quiet && scm.busy)
+        g_queue_push_tail(&scm.waiting, call);
+    else
+        start_git(call);
 }
 
 /* Shows git's complaint when a command fails. */
@@ -163,24 +205,35 @@ static void run_simple(const char *const *args, const char *failure)
 
 /* Staging ---------------------------------------------------------------------------------------- */
 
-static void stage(const char *path)
+/* git add takes the files from disk: what the editors hold unsaved is saved first. */
+static void on_saved_for_add(App *t, gpointer data)
 {
-    const char *args[] = { "add", "-A", "--", path, NULL };
-    run_simple(args, "Could not stage the file");
+    char *path = data; /* NULL: everything */
+    const char *one[] = { "add", "-A", "--", path, NULL };
+    const char *all[] = { "add", "-A", NULL };
+
+    if (!t->closing)
+        run_simple(path ? one : all, path ? "Could not stage the file" : "Could not stage the changes");
+    g_free(path);
 }
 
-static void unstage(const char *path)
+static void stage(const char *path)
 {
-    /* Before the first commit there is no HEAD to restore from. */
-    const char *first[] = { "rm", "--cached", "-r", "-q", "--", path, NULL };
-    const char *args[] = { "restore", "--staged", "--", path, NULL };
+    save_all(scm.app, on_saved_for_add, g_strdup(path));
+}
+
+static void unstage(const Change *c)
+{
+    /* Before the first commit there is no HEAD to restore from. A rename is staged as its old
+     * path's deletion too: both come back. */
+    const char *first[] = { "rm", "--cached", "-r", "-q", "--", c->path, NULL };
+    const char *args[] = { "restore", "--staged", "--", c->path, c->old_path, NULL };
     run_simple(scm.initial ? first : args, "Could not unstage the file");
 }
 
 static void stage_all(void)
 {
-    const char *args[] = { "add", "-A", NULL };
-    run_simple(args, "Could not stage the changes");
+    save_all(scm.app, on_saved_for_add, NULL);
 }
 
 static void unstage_all(void)
@@ -195,6 +248,19 @@ typedef struct {
     gboolean untracked;
 } Discard;
 
+/* An editor on the file still holds the discarded text, and would save it back. */
+static void on_discarded(gboolean ok, const char *out G_GNUC_UNUSED, const char *err, gpointer data)
+{
+    char *full = data;
+    Tab *tab = find_tab(scm.app, TAB_EDITOR, full);
+
+    if (!ok)
+        set_note(*err ? err : "Could not discard the changes", TRUE);
+    else if (tab)
+        editor_command(tab, "reopen");
+    g_free(full);
+}
+
 static void on_discard_answer(GObject *dialog, GAsyncResult *result, gpointer data)
 {
     Discard *d = data;
@@ -208,13 +274,18 @@ static void on_discard_answer(GObject *dialog, GAsyncResult *result, gpointer da
             if (!g_file_trash(file, NULL, &error)) {
                 set_note(error->message, TRUE);
                 g_error_free(error);
+            } else {
+                Tab *tab = find_tab(scm.app, TAB_EDITOR, full);
+                if (tab)
+                    editor_command(tab, "quit"); /* the file is gone */
             }
             g_object_unref(file);
             g_free(full);
             refresh_branch(scm.app);
         } else {
             const char *args[] = { "restore", "--", d->path, NULL };
-            run_simple(args, "Could not discard the changes");
+            set_note(NULL, FALSE);
+            run_git(args, NULL, FALSE, on_discarded, g_build_filename(scm.app->git_top, d->path, NULL));
         }
     }
     g_free(d->path);
@@ -249,10 +320,13 @@ static char *message_text(void)
     return g_strstrip(gtk_text_buffer_get_text(buffer, &start, &end, FALSE));
 }
 
-static void on_committed(gboolean ok, const char *out G_GNUC_UNUSED, const char *err, gpointer data G_GNUC_UNUSED)
+static void on_committed(gboolean ok, const char *out, const char *err, gpointer data G_GNUC_UNUSED)
 {
     if (!ok) {
-        set_note(*err ? err : "The commit failed", TRUE);
+        /* "nothing to commit" comes on stdout */
+        char *said = g_strstrip(g_strdup(out));
+        set_note(*err ? err : *said ? said : "The commit failed", TRUE);
+        g_free(said);
         return;
     }
     gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(scm.message)), "", -1);
@@ -273,21 +347,12 @@ static void on_staged_all(gboolean ok, const char *out G_GNUC_UNUSED, const char
     g_free(data);
 }
 
-static void commit(void)
+static void on_saved_for_commit(App *t, gpointer data)
 {
-    char *message = message_text();
+    char *message = data;
 
-    if (scm.busy) {
-        g_free(message);
-        return;
-    }
-    if (!*message) {
-        set_note("Type a commit message first", TRUE);
-        gtk_widget_grab_focus(scm.message);
-    } else if (scm.staged->len == 0 && scm.changes->len == 0) {
-        set_note("Nothing to commit", TRUE);
-    } else {
-        set_note(NULL, FALSE);
+    scm.committing = FALSE;
+    if (!t->closing) {
         if (scm.staged->len == 0) {
             const char *add[] = { "add", "-A", NULL };
             run_git(add, NULL, FALSE, on_staged_all, g_strdup(message));
@@ -295,6 +360,29 @@ static void commit(void)
             const char *args[] = { "commit", "-q", "-F", "-", NULL };
             run_git(args, message, FALSE, on_committed, NULL);
         }
+    }
+    g_free(message);
+}
+
+static void commit(void)
+{
+    char *message = message_text();
+
+    if (scm.busy || scm.committing) {
+        g_free(message);
+        return;
+    }
+    if (!*message) {
+        set_note("Type a commit message first", TRUE);
+        gtk_widget_grab_focus(scm.message);
+    } else if (scm.staged->len == 0 && scm.changes->len == 0 && !any_unsaved(scm.app)) {
+        set_note("Nothing to commit", TRUE);
+    } else {
+        /* git commits what is on disk: unsaved edits are saved first. */
+        set_note(NULL, FALSE);
+        scm.committing = TRUE;
+        save_all(scm.app, on_saved_for_commit, message);
+        return;
     }
     g_free(message);
 }
@@ -398,7 +486,7 @@ static GtkWidget *file_row(const char *path, char code, GtkWidget **box_out)
 }
 
 static void on_stage_clicked(GtkButton *button G_GNUC_UNUSED, Change *c) { stage(c->path); }
-static void on_unstage_clicked(GtkButton *button G_GNUC_UNUSED, Change *c) { unstage(c->path); }
+static void on_unstage_clicked(GtkButton *button G_GNUC_UNUSED, Change *c) { unstage(c); }
 static void on_discard_clicked(GtkButton *button G_GNUC_UNUSED, Change *c) { discard(c); }
 
 static void fill_changes(GtkListBox *list, GPtrArray *changes, gboolean staged)
@@ -427,23 +515,52 @@ static void fill_changes(GtkListBox *list, GPtrArray *changes, gboolean staged)
     }
 }
 
-/* A changed file next to its last commit (HEAD), staged or not. */
-static void on_change_activated(GtkListBox *list G_GNUC_UNUSED, GtkListBoxRow *row, gpointer data G_GNUC_UNUSED)
+static gboolean has_staged(const char *path)
 {
-    Change *c = g_object_get_data(G_OBJECT(row), "change");
-    App *t = scm.app;
-    char *full;
+    for (guint i = 0; i < scm.staged->len; i++)
+        if (strcmp(((Change *)g_ptr_array_index(scm.staged, i))->path, path) == 0)
+            return TRUE;
+    return FALSE;
+}
 
-    if (!c || !t->git_top)
-        return;
-    full = g_build_filename(t->git_top, c->path, NULL);
-    if (c->code == 'D')
+/* A staged change: the staged version (the index) next to the last commit's. */
+static void show_staged(App *t, const Change *c)
+{
+    if (c->code == 'A')
+        compare_revisions(t, NULL, NULL, INDEX_REV, c->path); /* new: only the staged version */
+    else if (c->code == 'D')
         compare_revisions(t, "HEAD", c->path, NULL, NULL); /* only the old version is left */
-    else if (c->code == 'U' || c->code == 'A' || c->code == 'R' || c->code == 'C' || scm.initial)
-        open_file(t, full); /* not in HEAD under this name: nothing to compare with */
+    else /* renames and copies: next to where the file came from */
+        compare_revisions(t, "HEAD", c->old_path ? c->old_path : c->path, INDEX_REV, c->path);
+}
+
+/* An unstaged change: the working file next to its staged version when it has staged changes too,
+ * else next to the last commit (the same then, and the gutter follows new commits). */
+static void show_unstaged(App *t, const Change *c)
+{
+    char *full = g_build_filename(t->git_top, c->path, NULL);
+
+    if (c->code == 'D')
+        compare_revisions(t, INDEX_REV, c->path, NULL, NULL); /* only the staged version is left */
+    else if (c->code != 'M')
+        open_file(t, full); /* untracked, conflicted: nothing to compare with */
+    else if (has_staged(c->path) || scm.initial)
+        compare_with_index(t, full);
     else
         compare_with_head(t, full);
     g_free(full);
+}
+
+static void on_change_activated(GtkListBox *list, GtkListBoxRow *row, gpointer data G_GNUC_UNUSED)
+{
+    Change *c = g_object_get_data(G_OBJECT(row), "change");
+
+    if (!c || !scm.app->git_top)
+        return;
+    if (list == scm.staged_list)
+        show_staged(scm.app, c);
+    else
+        show_unstaged(scm.app, c);
 }
 
 /* Commits ---------------------------------------------------------------------------------------- */
@@ -520,7 +637,10 @@ static void on_commit_activated(GtkListBox *list G_GNUC_UNUSED, GtkListBoxRow *r
     }
     g_free(scm.open_commit);
     scm.open_commit = g_strdup(commit);
-    const char *args[] = { "-c", "core.quotePath=false", "show", "--name-status", "-M", "--format=", commit, NULL };
+    /* A merge commit lists what it brought to its first parent (by default git shows a combined
+     * diff, which has no file list). */
+    const char *args[] = { "-c", "core.quotePath=false", "show", "--name-status", "-M", "--diff-merges=first-parent",
+                           "--format=", commit, NULL };
     run_git(args, NULL, TRUE, on_commit_files, g_strdup(commit));
 }
 
@@ -755,6 +875,7 @@ GtkWidget *scm_panel(App *t)
     g_object_unref(provider);
 
     scm.app = t;
+    g_queue_init(&scm.waiting);
     scm.staged = g_ptr_array_new_with_free_func((GDestroyNotify)change_free);
     scm.changes = g_ptr_array_new_with_free_func((GDestroyNotify)change_free);
     gtk_widget_add_css_class(panel, "tcode-scm");

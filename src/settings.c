@@ -97,7 +97,10 @@ static void on_reopen_last(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gp
 
 static void on_text_size(GtkSpinButton *spin, gpointer data G_GNUC_UNUSED)
 {
-    set_font_scale(app_of(GTK_WIDGET(spin)), gtk_spin_button_get_value(spin) / 100);
+    App *t = app_of(GTK_WIDGET(spin));
+
+    set_font_scale(t, gtk_spin_button_get_value(spin) / 100);
+    session_save_settings(t); /* kept even if t-code does not close normally */
 }
 
 static void add_heading(GtkGrid *grid, int *row, const char *title)

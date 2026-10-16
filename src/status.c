@@ -6,6 +6,7 @@
  */
 #include "app.h"
 
+#include <signal.h>
 #include <string.h>
 
 static const char *const css =
@@ -65,6 +66,7 @@ void update_status(App *t)
 static gboolean branch_busy, branch_again;
 static guint branch_soon_id;
 static GFileMonitor *git_monitor;
+static guint last_status; /* hash of git status's output */
 static gboolean poll_branch(gpointer data);
 
 /* The output (porcelain v2, -z) also fills the Source Control panel (scm.c). */
@@ -99,6 +101,11 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
     }
     if (!t->closing)
         scm_update(t, ok ? bytes : NULL, size);
+    /* The file manager watches only open folders: tell it when a file changed in a closed one. */
+    guint hash = out ? g_bytes_hash(out) : 0;
+    if (hash != last_status && last_status && !t->closing && t->fm_pid > 0)
+        kill(t->fm_pid, SIGUSR1);
+    last_status = hash;
     if (!t->closing && t->status.branch) {
         if (branch) {
             char *text = g_strdup_printf("⎇ %s%s", branch, dirty ? "*" : "");

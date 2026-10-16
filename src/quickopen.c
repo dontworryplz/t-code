@@ -40,7 +40,9 @@ static void walk(const char *dir, const char *prefix)
         char *path = g_build_filename(dir, name, NULL);
         char *rel = *prefix ? g_strconcat(prefix, "/", name, NULL) : g_strdup(name);
         if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
-            if (name[0] != '.' && strcmp(name, "build") != 0 && strcmp(name, "node_modules") != 0)
+            /* Linked folders are left out: a link to a parent ("ln -s .. loop") never ends. */
+            if (name[0] != '.' && strcmp(name, "build") != 0 && strcmp(name, "node_modules") != 0 &&
+                !g_file_test(path, G_FILE_TEST_IS_SYMLINK))
                 walk(path, rel);
             g_free(rel);
         } else {

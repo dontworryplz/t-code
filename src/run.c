@@ -84,9 +84,12 @@ static char *cmake_command(const char *root, gboolean run)
         src, build, ninja ? "-G Ninja " : "", build);
 
     if (run) {
+        /* The newest executable anywhere under build/ (targets may sit in build/bin, build/src),
+         * leaving out CMake's own checks and shared libraries. */
         char *with_run = g_strdup_printf(
-            "%s && exe=$(find %s -maxdepth 1 -type f -executable -printf '%%T@ %%p\\n' | sort -nr | head -1"
-            " | cut -d' ' -f2-) && echo \"▶ $exe\" && \"$exe\"",
+            "%s && exe=$(find %s -type f -executable -not -path '*/CMakeFiles/*' -not -name '*.so*'"
+            " -printf '%%T@ %%p\\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+            " && if [ -n \"$exe\" ]; then echo \"▶ $exe\" && \"$exe\"; else echo 'No executable in build/'; fi",
             cmd, build);
         g_free(cmd);
         cmd = with_run;
@@ -128,7 +131,8 @@ static char *file_command(const char *file, gboolean run)
                                 cxx ? CXX_FLAGS : C_FLAGS, qfile, qout);
 
     if (run) {
-        char *with_run = g_strdup_printf("%s && cd %s && %s", cmd, qdir, qout);
+        /* In a subshell: the shell stays in its own directory. */
+        char *with_run = g_strdup_printf("%s && (cd %s && %s)", cmd, qdir, qout);
         g_free(cmd);
         cmd = with_run;
     }
@@ -160,35 +164,42 @@ char *project_summary(App *t)
     return text;
 }
 
-typedef struct {
-    App *app;
-    char *command;
-    int tries;
-} PendingRun;
-
-static gboolean run_later(gpointer data)
+/* The commands use sh syntax (if/fi, var=$(...)); a shell that speaks something else (fish,
+ * tcsh) gets them through sh -c. */
+static char *for_user_shell(const char *command)
 {
-    PendingRun *run = data;
+    static const char *const posix[] = { "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "yash", NULL };
+    const char *env = g_getenv("SHELL");
+    char *path = env && *env ? g_strdup(env) : vte_get_user_shell(); /* as start_shell() picks it */
+    char *shell = path ? g_path_get_basename(path) : NULL;
+    gboolean ok = !shell || g_strv_contains(posix, shell);
+    char *quoted = ok ? NULL : g_shell_quote(command);
+    char *line = ok ? g_strdup(command) : g_strconcat("sh -c ", quoted, NULL);
 
-    if (!run->app->closing && any_unsaved(run->app) && ++run->tries < 15)
-        return G_SOURCE_CONTINUE;
+    g_free(quoted);
+    g_free(shell);
+    g_free(path);
+    return line;
+}
 
-    if (!run->app->closing) {
-        char *line = g_strdup_printf("clear; %s", run->command);
-        run_in_shell(run->app, line);
+static void run_saved(App *t, gpointer data)
+{
+    char *command = data;
+
+    if (!t->closing) {
+        char *line = for_user_shell(command);
+        char *with_clear = g_strdup_printf("clear; %s", line);
+        run_in_shell(t, with_clear);
+        g_free(with_clear);
         g_free(line);
     }
-    g_free(run->command);
-    g_free(run);
-    return G_SOURCE_REMOVE;
+    g_free(command);
 }
 
 void build_project(App *t, gboolean run)
 {
     Project p = find_project(t);
     char *command;
-    int n = tab_count(t);
-    gboolean saving = FALSE;
 
     switch (p.kind) {
     case PROJECT_CMAKE: command = cmake_command(p.root, run); break;
@@ -198,21 +209,7 @@ void build_project(App *t, gboolean run)
         command = g_strdup("echo 't-code: nothing to build here (open a C file, or add a Makefile or CMakeLists.txt)'");
         break;
     }
-
-    /* Save every changed file first (Ctrl+S in micro), and wait for the saves to finish. */
-    for (int i = 0; i < n; i++) {
-        Tab *tab = tab_nth(t, i);
-        if (tab->kind == TAB_EDITOR && tab->modified) {
-            vte_terminal_feed_child(tab->term, "\x13", 1);
-            saving = TRUE;
-        }
-    }
-    PendingRun *pending = g_new0(PendingRun, 1);
-    pending->app = t;
-    pending->command = command;
-    if (saving)
-        g_timeout_add(30, run_later, pending);
-    else
-        run_later(pending);
+    /* Every changed file is saved first. */
+    save_all(t, run_saved, command);
     g_free(p.root);
 }
