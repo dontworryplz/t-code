@@ -5,7 +5,6 @@
  * on a worker thread; the picker shows the previous list of the same project until then.
  */
 #include "app.h"
-
 #include <string.h>
 
 #define MAX_WALK 20000
