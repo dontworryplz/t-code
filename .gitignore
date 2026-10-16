@@ -1,4 +1,4 @@
 backups/
 buffers/
 build/
-compile_flags.txt
+.clangd

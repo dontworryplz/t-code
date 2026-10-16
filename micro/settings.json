@@ -11,5 +11,6 @@
     "lsp.formatOnSave": false,
     "lsp.ignoreTriggerCharacters": "",
     "autosave": 1,
-    "diffgutter": true
+    "diffgutter": true,
+    "statusformatr": ""
 }
