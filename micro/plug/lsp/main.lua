@@ -136,6 +136,12 @@ function startServer(filetype, callback)
 			local initOptions = initOpts or '{}'
 			local runCmd = table.remove(run, 1)
 			local args = run
+			-- Inside t-code: one server per project for all editors, through t-code-lsp
+			local connect = go_os.Getenv("TCODE_LSP_CONNECT")
+			if connect ~= "" then
+				table.insert(args, 1, runCmd)
+				runCmd = connect
+			end
 			local send = withSend(lang)
 			if cmd[lang] ~= nil then return; end
 			id[lang] = 0

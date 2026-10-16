@@ -226,11 +226,20 @@ end
 
 local function listen()
     local fifo = goos.Getenv("TCODE_CONTROL")
-    if fifo ~= "" then
-        -- cat ends when t-code closes the pipe (the tab went away).
-        local ignore = function() end
-        shell.JobSpawn("cat", {fifo}, on_control, ignore, ignore)
+    if fifo == "" then
+        return
     end
+    -- cat ends when t-code closes the pipe (the tab went away, the pipe is removed). If it ends
+    -- while the pipe is still there, listen again: t-code keeps writing to it either way.
+    local function on_exit()
+        micro.After(time.Second, function()
+            local _, err = goos.Stat(fifo)
+            if err == nil then
+                listen()
+            end
+        end)
+    end
+    shell.JobSpawn("cat", {fifo}, on_control, function() end, on_exit)
 end
 
 local function base_command(bp, args)

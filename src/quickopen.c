@@ -1,7 +1,8 @@
 /*
  * Ctrl+P: open a file by typing part of its name, like VS Code's Go to File.
  * The file list comes from git when the project is a repository (so .gitignore applies),
- * otherwise from walking the project, skipping hidden folders and build output.
+ * otherwise from walking the project, skipping hidden folders and build output. It is built
+ * on a worker thread; the picker shows the previous list of the same project until then.
  */
 #include "app.h"
 
@@ -9,11 +10,14 @@
 
 #define MAX_WALK 20000
 
-static GPtrArray *files; /* paths relative to the project root */
+static GPtrArray *files;  /* paths relative to the project root */
+static char *files_root;  /* the root they belong to */
+static gboolean listing;  /* a worker is building the list */
+static guint list_number; /* drops lists of a project that was left meanwhile */
 
-static gboolean from_git(App *t)
+static gboolean from_git(GPtrArray *files, const char *root)
 {
-    char *argv[] = { "git", "-C", t->root, "ls-files", "-z", "-co", "--exclude-standard", NULL };
+    char *argv[] = { "git", "-C", (char *)root, "ls-files", "-z", "-co", "--exclude-standard", NULL };
     char *out = NULL;
     int status;
 
@@ -29,7 +33,7 @@ static gboolean from_git(App *t)
     return TRUE;
 }
 
-static void walk(const char *dir, const char *prefix)
+static void walk(GPtrArray *files, const char *dir, const char *prefix)
 {
     GDir *d = g_dir_open(dir, 0, NULL);
     const char *name;
@@ -43,7 +47,7 @@ static void walk(const char *dir, const char *prefix)
             /* Linked folders are left out: a link to a parent ("ln -s .. loop") never ends. */
             if (name[0] != '.' && strcmp(name, "build") != 0 && strcmp(name, "node_modules") != 0 &&
                 !g_file_test(path, G_FILE_TEST_IS_SYMLINK))
-                walk(path, rel);
+                walk(files, path, rel);
             g_free(rel);
         } else {
             g_ptr_array_add(files, rel);
@@ -88,7 +92,7 @@ static void query(App *t, const char *text, guint generation)
         g_free(name);
     }
     if (matches->len == 0)
-        picker_message(t, generation, "No matching files");
+        picker_message(t, generation, listing ? "Listing files..." : "No matching files");
     g_array_free(matches, TRUE);
 }
 
@@ -100,12 +104,63 @@ static void choose(App *t, const char *relative)
     g_free(path);
 }
 
+typedef struct {
+    guint number;
+    char *root;
+} Listing;
+
+static void listing_free(Listing *l)
+{
+    g_free(l->root);
+    g_free(l);
+}
+
+static void list_files(GTask *task, gpointer source G_GNUC_UNUSED, gpointer data, GCancellable *cancel G_GNUC_UNUSED)
+{
+    Listing *l = data;
+    GPtrArray *list = g_ptr_array_new_with_free_func(g_free);
+
+    if (!from_git(list, l->root))
+        walk(list, l->root, "");
+    g_task_return_pointer(task, list, (GDestroyNotify)g_ptr_array_unref);
+}
+
+static void on_listed(GObject *source G_GNUC_UNUSED, GAsyncResult *result, gpointer data)
+{
+    App *t = data;
+    GTask *task = G_TASK(result);
+    Listing *l = g_task_get_task_data(task);
+    GPtrArray *list = g_task_propagate_pointer(task, NULL);
+
+    if (l->number != list_number) {
+        g_ptr_array_unref(list);
+        return;
+    }
+    listing = FALSE;
+    g_ptr_array_unref(files);
+    files = list;
+    picker_requery(t, query);
+}
+
 void quick_open_show(App *t)
 {
-    if (!files)
+    if (!files || g_strcmp0(files_root, t->root) != 0) {
+        g_clear_pointer(&files, g_ptr_array_unref);
         files = g_ptr_array_new_with_free_func(g_free);
-    g_ptr_array_set_size(files, 0);
-    if (!from_git(t))
-        walk(t->root, "");
+        g_free(files_root);
+        files_root = g_strdup(t->root);
+        list_number++;
+        listing = FALSE;
+    }
+    if (!listing) {
+        GTask *task = g_task_new(NULL, NULL, on_listed, t);
+        Listing *l = g_new(Listing, 1);
+        l->number = list_number;
+        l->root = g_strdup(t->root);
+        g_task_set_task_data(task, l, (GDestroyNotify)listing_free);
+        listing = TRUE;
+        g_task_run_in_thread(task, list_files);
+        g_object_unref(task);
+    }
     picker_open(t, "Go to file by name", query, choose);
 }

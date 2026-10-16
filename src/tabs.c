@@ -132,7 +132,16 @@ static void remove_tab(Tab *tab)
     focus_current_tab(t);
 }
 
-/* Editors close through micro (Ctrl+Q), so nothing unsaved is dropped. */
+/* Asks micro to quit, which asks about unsaved changes first; the tab goes when micro exits.
+ * Typed Ctrl+Q only without the control pipe: in a prompt (find, command bar) a typed key
+ * goes to the prompt. */
+void quit_editor(Tab *tab)
+{
+    if (!editor_control(tab, "command quit"))
+        vte_terminal_feed_child(tab->term, "\x11", 1);
+}
+
+/* Editors close through micro, so nothing unsaved is dropped. */
 static void close_tab(Tab *tab)
 {
     if (tab->kind != TAB_EDITOR || tab->pid <= 0) {
@@ -140,7 +149,7 @@ static void close_tab(Tab *tab)
         return;
     }
     select_tab(tab);
-    vte_terminal_feed_child(tab->term, "\x11", 1);
+    quit_editor(tab);
 }
 
 void close_all_tabs(App *t)
@@ -285,7 +294,7 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
          * takes over: two editors on one file would overwrite each other's saves. */
         Tab *other = find_tab(tab->app, TAB_EDITOR, path);
         if (other) {
-            editor_command(tab, "quit");
+            quit_editor(tab);
             select_tab(other);
             return;
         }
@@ -333,6 +342,7 @@ Tab *open_editor(App *t, const char *path, int line, int column, gboolean readon
         g_ptr_array_add(env, g_strdup(extra_env[i]));
     if (control)
         g_ptr_array_add(env, g_strconcat("TCODE_CONTROL=", control, NULL));
+    lsp_editor_env(t, env);
     g_ptr_array_add(env, NULL);
     g_signal_connect(term, "child-exited", G_CALLBACK(on_editor_exited), tab);
     g_signal_connect(term, "termprop-changed::" VTE_TERMPROP_XTERM_TITLE, G_CALLBACK(on_editor_title), tab);

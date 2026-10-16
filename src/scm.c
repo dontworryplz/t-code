@@ -277,7 +277,7 @@ static void on_discard_answer(GObject *dialog, GAsyncResult *result, gpointer da
             } else {
                 Tab *tab = find_tab(scm.app, TAB_EDITOR, full);
                 if (tab)
-                    editor_command(tab, "quit"); /* the file is gone */
+                    quit_editor(tab); /* the file is gone */
             }
             g_object_unref(file);
             g_free(full);

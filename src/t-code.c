@@ -88,10 +88,12 @@ static char *find_beside_exe(const char *const *candidates)
 static void find_files(App *t)
 {
     static const char *const fm[] = { "t-code-fm", "../libexec/t-code/t-code-fm", NULL };
+    static const char *const lsp[] = { "t-code-lsp", "../libexec/t-code/t-code-lsp", NULL };
     static const char *const micro[] = { "../share/t-code/micro", "../micro", NULL };
     char *versions = g_strdup_printf("t-code-%d-versions", getpid());
 
     t->fm_program = find_beside_exe(fm);
+    t->lsp_program = find_beside_exe(lsp);
     t->micro_config = find_beside_exe(micro);
     t->temp_dir = g_build_filename(g_get_user_runtime_dir(), versions, NULL);
     g_free(versions);
@@ -193,6 +195,7 @@ static void build_window(App *t, GtkApplication *app)
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
     find_files(t);
     start_socket(t);
+    lsp_start(t);
     gtk_window_set_default_icon_name("utilities-terminal");
 
     t->window = GTK_WINDOW(gtk_application_window_new(app));
@@ -287,6 +290,7 @@ static void on_shutdown(GApplication *app G_GNUC_UNUSED, App *t)
 {
     t->closing = TRUE;
     stop_socket(t);
+    lsp_stop();
     remove_temp_dir(t);
 }
 
@@ -325,6 +329,7 @@ int main(int argc, char **argv)
     g_clear_object(&t.service);
     g_free(t.socket_path);
     g_free(t.fm_program);
+    g_free(t.lsp_program);
     g_free(t.micro_config);
     g_free(t.temp_dir);
     g_free(t.git_top);

@@ -124,7 +124,7 @@ static void close_comparisons(App *t, const char *path, const char *keep)
     for (int i = 0; i < n; i++) {
         Tab *tab = tab_nth(t, i);
         if (g_strcmp0(tab->compare_with, path) == 0 && g_strcmp0(tab->path, keep) != 0)
-            editor_command(tab, "quit"); /* read-only: nothing to save */
+            quit_editor(tab); /* read-only: nothing to save */
     }
 }
 
@@ -344,7 +344,7 @@ void stop_comparing(App *t)
     for (int i = 0; i < n; i++) {
         Tab *tab = tab_nth(t, i);
         if (g_strcmp0(tab->compare_with, working) == 0) {
-            vte_terminal_feed_child(tab->term, "\x11", 1); /* Ctrl+Q */
+            quit_editor(tab);
             closed = TRUE;
         }
     }

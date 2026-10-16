@@ -115,6 +115,15 @@ static void refresh(Picker *p)
     p->query(p->app, gtk_editable_get_text(GTK_EDITABLE(p->entry)), p->generation);
 }
 
+/* New data for query(): fill the list again, if the picker still shows that query's results. */
+void picker_requery(App *t, PickerQuery query)
+{
+    Picker *p = t->picker;
+
+    if (gtk_widget_get_visible(p->box) && p->query == query)
+        refresh(p);
+}
+
 /* Showing and choosing ------------------------------------------------------------------------- */
 
 static void hide(Picker *p)

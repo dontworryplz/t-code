@@ -57,6 +57,7 @@ struct App {
     char *git_top;      /* the work tree root of t->root's repository; NULL outside one */
     char *socket_path;
     char *fm_program;   /* t-code-fm */
+    char *lsp_program;  /* t-code-lsp: connects an editor's lsp plugin to the shared servers */
     char *micro_config; /* micro -config-dir */
     char *temp_dir;     /* old file versions for comparisons */
     GSocketService *service;
@@ -102,6 +103,7 @@ void open_file_at(App *t, const char *path, int line, int column);
 void open_to_side(App *t, const char *path);
 void feed_editor(Tab *tab, const char *keys);
 void editor_command(Tab *tab, const char *command);
+void quit_editor(Tab *tab);
 typedef void (*SavedFunc)(App *t, gpointer data);
 void save_all(App *t, SavedFunc then, gpointer data);
 void set_split(App *t, gboolean split);
@@ -143,6 +145,7 @@ void picker_init(App *t, GtkOverlay *overlay);
 void picker_open(App *t, const char *placeholder, PickerQuery query, PickerChoose choose);
 void picker_add(App *t, guint generation, const char *label, const char *detail, const char *payload);
 void picker_message(App *t, guint generation, const char *text);
+void picker_requery(App *t, PickerQuery query);
 int fuzzy_score(const char *query, const char *text);
 
 /* quickopen.c, search.c */
@@ -173,6 +176,11 @@ void open_project(App *t, const char *root);
 /* socket.c */
 void start_socket(App *t);
 void stop_socket(App *t);
+
+/* lsp.c */
+void lsp_start(App *t);
+void lsp_stop(void);
+void lsp_editor_env(App *t, GPtrArray *env);
 
 /* gitcompare.c */
 void compare_with_head(App *t, const char *path);

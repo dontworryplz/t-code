@@ -2,6 +2,7 @@
 # Builds t-code and installs it under ~/.local:
 #   ~/.local/bin/t-code
 #   ~/.local/libexec/t-code/t-code-fm
+#   ~/.local/libexec/t-code/t-code-lsp                   shares one clangd between editors
 #   ~/.local/share/t-code/micro/                         editor config (colors, C syntax, clangd plugin)
 #   ~/.local/share/applications/io.github.tcode.desktop app menu entry
 # Run it again after pulling changes to update the installed copy.
@@ -41,11 +42,12 @@ info "Building..."
 make -C "$ROOT" --no-print-directory
 
 # 3. Programs (a leftover symlink from a manual 'ln -s' setup is replaced by a real copy)
-for dst in "$BIN" "$LIBEXEC/t-code-fm"; do
+for dst in "$BIN" "$LIBEXEC/t-code-fm" "$LIBEXEC/t-code-lsp"; do
   [[ -L "$dst" ]] && rm "$dst"
 done
 install -Dm755 "$ROOT/build/t-code" "$BIN"
 install -Dm755 "$ROOT/build/t-code-fm" "$LIBEXEC/t-code-fm"
+install -Dm755 "$ROOT/build/t-code-lsp" "$LIBEXEC/t-code-lsp"
 info "Installed $BIN"
 
 # 4. Editor config. micro keeps its own state (cursor positions, backups) next to it; that stays.
