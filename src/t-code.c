@@ -41,6 +41,10 @@ void set_pane_visible(App *t, GtkWidget *pane, gboolean visible)
     if (!visible && gtk_widget_has_focus(pane))
         focus_current_tab(t);
     gtk_widget_set_visible(pane, visible);
+    /* The bottom row goes away with both of its panes, and the editors take its place. */
+    if (t->bottom)
+        gtk_widget_set_visible(GTK_WIDGET(t->bottom), gtk_widget_get_visible(GTK_WIDGET(t->shell)) ||
+                                                          gtk_widget_get_visible(t->scm));
 }
 
 void toggle_pane(App *t, GtkWidget *pane)
@@ -162,9 +166,17 @@ static void build_window(App *t, GtkApplication *app)
     create_fixed_terminals(t);
     create_groups(t);
 
+    t->scm = scm_panel(t);
+    t->bottom = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_HORIZONTAL));
+    gtk_paned_set_start_child(t->bottom, GTK_WIDGET(t->shell));
+    gtk_paned_set_end_child(t->bottom, t->scm);
+    gtk_paned_set_resize_end_child(t->bottom, FALSE);
+    gtk_paned_set_shrink_end_child(t->bottom, FALSE);
+    gtk_paned_set_position(t->bottom, 700);
+
     t->vpaned = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_VERTICAL));
     gtk_paned_set_start_child(t->vpaned, GTK_WIDGET(t->editor_area));
-    gtk_paned_set_end_child(t->vpaned, GTK_WIDGET(t->shell));
+    gtk_paned_set_end_child(t->vpaned, GTK_WIDGET(t->bottom));
     gtk_paned_set_resize_end_child(t->vpaned, FALSE);
     gtk_paned_set_position(t->vpaned, 620);
 
@@ -280,6 +292,7 @@ int main(int argc, char **argv)
     g_free(t.fm_program);
     g_free(t.micro_config);
     g_free(t.temp_dir);
+    g_free(t.git_top);
     g_free(t.root);
     return status;
 }

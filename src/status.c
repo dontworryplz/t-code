@@ -67,13 +67,16 @@ static guint branch_soon_id;
 static GFileMonitor *git_monitor;
 static gboolean poll_branch(gpointer data);
 
+/* The output (porcelain v2, -z) also fills the Source Control panel (scm.c). */
 static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
 {
     App *t = data;
-    char *out = NULL;
-    gboolean ok = g_subprocess_communicate_utf8_finish(G_SUBPROCESS(source), result, &out, NULL, NULL) &&
+    GBytes *out = NULL;
+    gboolean ok = g_subprocess_communicate_finish(G_SUBPROCESS(source), result, &out, NULL, NULL) &&
                   g_subprocess_get_if_exited(G_SUBPROCESS(source)) &&
                   g_subprocess_get_exit_status(G_SUBPROCESS(source)) == 0;
+    gsize size = 0;
+    const char *bytes = out ? g_bytes_get_data(out, &size) : NULL;
     char *branch = NULL;
     gboolean dirty = FALSE;
 
@@ -82,16 +85,20 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
         branch_again = FALSE;
         refresh_branch(t);
     }
-    if (ok && out && !t->closing) {
-        char **lines = g_strsplit(out, "\n", -1);
-        for (int i = 0; lines[i]; i++) {
-            if (g_str_has_prefix(lines[i], "# branch.head "))
-                branch = g_strdup(lines[i] + strlen("# branch.head "));
-            else if (*lines[i] && lines[i][0] != '#')
+    if (ok && bytes && !t->closing) {
+        /* Records end with NUL; only the header lines matter here. */
+        for (const char *p = bytes, *end = bytes + size; p < end;) {
+            const char *nul = memchr(p, '\0', end - p);
+            gsize len = (nul ? nul : end) - p;
+            if (len > 14 && strncmp(p, "# branch.head ", 14) == 0)
+                branch = g_strndup(p + 14, len - 14);
+            else if (len && *p != '#')
                 dirty = TRUE;
+            p += len + 1;
         }
-        g_strfreev(lines);
     }
+    if (!t->closing)
+        scm_update(t, ok ? bytes : NULL, size);
     if (!t->closing && t->status.branch) {
         if (branch) {
             char *text = g_strdup_printf("⎇ %s%s", branch, dirty ? "*" : "");
@@ -101,7 +108,8 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
         gtk_widget_set_visible(GTK_WIDGET(t->status.branch), branch != NULL);
     }
     g_free(branch);
-    g_free(out);
+    if (out)
+        g_bytes_unref(out);
 }
 
 static gboolean poll_branch(gpointer data)
@@ -116,10 +124,11 @@ static gboolean poll_branch(gpointer data)
         return G_SOURCE_CONTINUE;
     }
     proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL,
-                            "git", "-C", t->root, "status", "--porcelain=v2", "--branch", NULL);
+                            "git", "-C", t->root, "status", "--porcelain=v2", "--branch", "-z",
+                            "--untracked-files=all", NULL);
     if (proc) {
         branch_busy = TRUE;
-        g_subprocess_communicate_utf8_async(proc, NULL, NULL, on_branch, t);
+        g_subprocess_communicate_async(proc, NULL, NULL, on_branch, t);
         g_object_unref(proc);
     }
     return G_SOURCE_CONTINUE;
@@ -156,10 +165,11 @@ static void on_git_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file, GFi
         refresh_branch(t);
 }
 
-/* Watches the git directory of the project (t->root); call again after it changes. */
+/* Watches the git directory of the project (t->root) and finds the top of its work tree
+ * (t->git_top, NULL outside a repository); call again after the root changes. */
 void watch_git(App *t)
 {
-    char *argv[] = { "git", "-C", t->root, "rev-parse", "--absolute-git-dir", NULL };
+    char *argv[] = { "git", "-C", t->root, "rev-parse", "--absolute-git-dir", "--show-toplevel", NULL };
     char *out = NULL;
     int status = 0;
 
@@ -170,11 +180,17 @@ void watch_git(App *t)
     if (g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL,
                      &out, NULL, &status, NULL) &&
         g_spawn_check_wait_status(status, NULL)) {
-        GFile *dir = g_file_new_for_path(g_strstrip(out));
+        char **lines = g_strsplit(out, "\n", 3);
+        GFile *dir = g_file_new_for_path(lines[0]);
+        g_free(t->git_top);
+        t->git_top = lines[1] && *lines[1] ? g_strdup(lines[1]) : NULL;
+        g_strfreev(lines);
         git_monitor = g_file_monitor_directory(dir, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
         if (git_monitor)
             g_signal_connect(git_monitor, "changed", G_CALLBACK(on_git_changed), t);
         g_object_unref(dir);
+    } else {
+        g_clear_pointer(&t->git_top, g_free);
     }
     g_free(out);
     refresh_branch(t);

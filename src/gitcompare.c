@@ -152,6 +152,90 @@ void compare_with_head(App *t, const char *path)
     compare_with(t, path, "HEAD");
 }
 
+/* Two versions from git -------------------------------------------------------------------------- */
+
+/* Writes rel (relative to the work tree top) as it was in rev under the temp folder; returns its
+ * path, and the short commit in *label. */
+static char *write_revision(App *t, const char *rev, const char *rel, char **label)
+{
+    const char *short_args[] = { "rev-parse", "--short", "--verify", "--quiet", rev, NULL };
+    char *short_commit = git(t->git_top, short_args);
+    char *spec = g_strconcat(rev, ":", rel, NULL);
+    const char *show_args[] = { "show", spec, NULL };
+    char *content = short_commit ? git(t->git_top, show_args) : NULL;
+    char *path = NULL;
+
+    if (content) {
+        g_strstrip(short_commit);
+        path = g_build_filename(t->temp_dir, short_commit, rel, NULL);
+        char *dir = g_path_get_dirname(path);
+        g_mkdir_with_parents(dir, 0700);
+        g_file_set_contents(path, content, -1, NULL);
+        g_free(dir);
+        *label = g_strdup(short_commit);
+    }
+    g_free(content);
+    g_free(spec);
+    g_free(short_commit);
+    return path;
+}
+
+/* Opens a read-only old version in group (titled "name @ label"), its gutter compared with base
+ * (NULL: no gutter marks); reuses a tab that shows it already. */
+static Tab *open_version(App *t, const char *path, const char *label, const char *base, const char *working,
+                         int group)
+{
+    Tab *tab = find_tab(t, TAB_EDITOR, path);
+
+    if (!tab) {
+        char *env_file = base ? g_strconcat("TCODE_BASE_FILE=", base, NULL) : NULL;
+        char *env[] = { "MICRO_LSP=none=none", env_file, NULL };
+        char *name = g_path_get_basename(working);
+        t->active = group;
+        tab = open_editor(t, path, 0, 0, TRUE, env);
+        tab->title = g_strdup_printf("%s @ %s", name, label);
+        tab->compare_with = g_strdup(working);
+        update_tab_label(tab);
+        g_free(name);
+        g_free(env_file);
+    } else if (tab_group(tab) != group) {
+        move_tab(tab, group);
+    }
+    return tab;
+}
+
+/* Shows a file in two versions side by side: new_rev's on the left, old_rev's on the right, each
+ * gutter marking what differs from the other. Paths are relative to the work tree top (they differ
+ * after a rename); a NULL rev or path is a missing side (the file was added or deleted). */
+void compare_revisions(App *t, const char *old_rev, const char *old_rel, const char *new_rev, const char *new_rel)
+{
+    char *old_label = NULL, *new_label = NULL;
+    char *old_path = old_rev && old_rel && t->git_top ? write_revision(t, old_rev, old_rel, &old_label) : NULL;
+    char *new_path = new_rev && new_rel && t->git_top ? write_revision(t, new_rev, new_rel, &new_label) : NULL;
+    char *working = t->git_top ? g_build_filename(t->git_top, new_rel ? new_rel : old_rel, NULL) : NULL;
+    Tab *left = NULL, *right = NULL;
+
+    if (!old_path && !new_path) {
+        show_message(t, "Nothing to compare", "git has no such version of this file.");
+    } else {
+        if (old_path && new_path)
+            set_split(t, TRUE);
+        if (new_path)
+            left = open_version(t, new_path, new_label, old_path, working, 0);
+        if (old_path)
+            right = open_version(t, old_path, old_label, new_path, working, new_path ? 1 : 0);
+        if (right)
+            select_tab(right);
+        if (left)
+            select_tab(left);
+    }
+    g_free(working);
+    g_free(new_path);
+    g_free(old_path);
+    g_free(new_label);
+    g_free(old_label);
+}
+
 /* An old version's tab closed: unless another old version still compares with the same file,
  * its gutter goes back to following HEAD. */
 void forget_comparison(Tab *old_version)

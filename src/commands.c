@@ -26,6 +26,7 @@ static void zoom_out(App *t) { set_font_scale(t, t->font_scale / 1.1); }
 static void zoom_reset(App *t) { set_font_scale(t, 1.0); }
 static void toggle_files(App *t) { toggle_pane(t, GTK_WIDGET(t->fm)); }
 static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell)); }
+static void toggle_scm(App *t) { toggle_pane(t, t->scm); }
 
 static void focus_fm(App *t)
 {
@@ -103,6 +104,7 @@ static const Command commands[] = {
     { "Focus Shell", "<Alt>3", "Alt+3", focus_shell },
     { "Toggle File Manager", "<Control>b", "Ctrl+B", toggle_files },
     { "Toggle Shell", "<Control>j", "Ctrl+J", toggle_shell },
+    { "Toggle Source Control", "<Control><Shift>g", "Ctrl+Shift+G", toggle_scm },
     { "Toggle Code Coloring", "F7", "F7", toggle_syntax },
     { "Zoom In", "<Control>equal|<Control>plus|<Control>KP_Add", "Ctrl+=", zoom_in },
     { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out },

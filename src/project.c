@@ -109,6 +109,7 @@ static void switch_project(App *t, const char *root)
     session_add_recent(t);
     rebuild_recent_menu(t);
     restart_fixed_terminals(t);
+    scm_reset();
     watch_git(t);
 
     session_restore_tabs(t);

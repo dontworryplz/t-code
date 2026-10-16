@@ -38,6 +38,8 @@ typedef struct {
 struct App {
     GtkWindow *window;
     GtkPaned *hpaned, *vpaned, *split;
+    GtkPaned *bottom;           /* the shell and the Source Control panel */
+    GtkWidget *scm;
     GtkStack *editor_area;
     GtkNotebook *groups[GROUPS];
     int active;                 /* the group new tabs go to */
@@ -51,6 +53,7 @@ struct App {
         GtkLabel *branch, *problems, *build, *position;
     } status;
     char *root;
+    char *git_top;      /* the work tree root of t->root's repository; NULL outside one */
     char *socket_path;
     char *fm_program;   /* t-code-fm */
     char *micro_config; /* micro -config-dir */
@@ -143,6 +146,11 @@ int fuzzy_score(const char *query, const char *text);
 void quick_open_show(App *t);
 void search_show(App *t);
 
+/* scm.c */
+GtkWidget *scm_panel(App *t);
+void scm_update(App *t, const char *out, gsize size);
+void scm_reset(void);
+
 /* status.c */
 GtkWidget *status_bar(App *t);
 void update_status(App *t);
@@ -170,6 +178,7 @@ void stop_comparing(App *t);
 void forget_comparison(Tab *old_version);
 void remove_temp_dir(App *t);
 const char *comparable_path(App *t);
+void compare_revisions(App *t, const char *old_rev, const char *old_rel, const char *new_rev, const char *new_rel);
 
 /* run.c */
 void build_project(App *t, gboolean run);
