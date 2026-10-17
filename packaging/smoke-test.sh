@@ -29,7 +29,11 @@ check "icon installed" test -f /usr/share/icons/hicolor/scalable/apps/io.github.
 for cmd in micro clangd git; do
   check "dependency '$cmd' installed" command -v "$cmd"
 done
-check "Cascadia Code font installed" sh -c "fc-match -f '%{family}' 'Cascadia Code' | grep -q 'Cascadia Code'"
+if [[ -n "${NO_FONT_PACKAGE:-}" ]]; then
+  check "a monospace font for the Cascadia Code fallback" sh -c "fc-match -f '%{spacing}' monospace | grep -q 100"
+else
+  check "Cascadia Code font installed" sh -c "fc-match -f '%{family}' 'Cascadia Code' | grep -q 'Cascadia Code'"
+fi
 
 echo "Running t-code"
 export XDG_RUNTIME_DIR="/tmp/runtime-$USER" DISPLAY=:99 GDK_BACKEND=x11 GSK_RENDERER=cairo
@@ -61,6 +65,12 @@ check "clangd runs with 2 malloc arenas" \
   sh -c "tr '\\0' '\\n' < /proc/\$(pgrep -u $USER -f '^clangd ' | head -1)/environ | grep -q arena_max=2"
 check "per-user config links to the shared one" test "$(readlink "$state/plug")" = "$share/plug"
 check "control socket created" sh -c "ls $XDG_RUNTIME_DIR/t-code-*.sock"
+# The Markdown preview: WebKit's web content process has to start.
+printf '# Notes\n\nhello\n' > "$project/README.md"
+python3 -I -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.send(sys.argv[2].encode())' \
+  "$XDG_RUNTIME_DIR/t-code-$tcode.sock" "preview $project/README.md"$'\n' 2>/dev/null
+for _ in $(seq 15); do pgrep -u "$USER" -f WebKitWebProcess >/dev/null && break; sleep 1; done
+check "Markdown preview started WebKit's web process" pgrep -u "$USER" -f WebKitWebProcess
 kill -TERM "${tcode:-0}" 2>/dev/null
 for _ in $(seq 10); do kill -0 "$app" 2>/dev/null || break; sleep 1; done
 check "t-code quits on SIGTERM" sh -c "! pgrep -u $USER -x t-code"

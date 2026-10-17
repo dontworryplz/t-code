@@ -3,6 +3,7 @@
  * manager and the shell). In the shell, Ctrl+click on a "file.c:12:5" location (compiler output)
  * opens the file at that line.
  */
+#define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 #include "app.h"
 
 #include <signal.h>

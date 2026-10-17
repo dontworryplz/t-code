@@ -5,13 +5,15 @@ PACKAGING="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$PACKAGING")"
 OUT="$PACKAGING/packages"
 VERSION="$(sed -n 's/^VERSION *:= *//p' "$ROOT/Makefile")"
-DISTROS=(fedora arch debian)
+DISTROS=(fedora arch debian void void-musl)
 
 # The images the packages are built and tested in.
 declare -A IMAGE=(
   [fedora]=registry.fedoraproject.org/fedora:44
   [arch]=docker.io/library/archlinux:latest
   [debian]=docker.io/library/debian:trixie
+  [void]=ghcr.io/void-linux/void-glibc-full:latest
+  [void-musl]=ghcr.io/void-linux/void-musl-full:latest
 )
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -34,6 +36,9 @@ run_in_container() { # <distro> <out dir> <command...>
   runtime="$(container_runtime)"
   [[ "$runtime" == docker ]] && owner=(-e HOST_OWNER="$(id -u):$(id -g)")
   mkdir -p "$out"
+  # Void's images have no bash, which the scripts here are written for.
+  [[ "$distro" == void* ]] &&
+    set -- sh -c 'xbps-install -Syu xbps >/dev/null && xbps-install -Sy bash >/dev/null && exec "$@"' sh "$@"
   "$runtime" run --rm \
     -v "$ROOT:/src:ro,Z" -v "$out:/out:Z" \
     -e VERSION="$VERSION" "${owner[@]}" \

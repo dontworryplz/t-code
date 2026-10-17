@@ -3,7 +3,8 @@
 One window, three kinds of terminals, nothing else.
 
 **Version 0.1.1** — uses about 8 times less memory than 0.1 and almost no CPU while idle
-([Performance](#performance)); packages for Fedora, Arch Linux and Debian ([Install](#install)).
+([Performance](#performance)); packages for Fedora, Arch Linux, Debian and Void Linux (glibc and
+musl) ([Install](#install)).
 `t-code --version` prints the installed version.
 
 ![t-code editing its own source: the file manager on the left, src/t-code.c open in the editor with indent guides and the minimap, the shell below, and the status bar](docs/screenshot.png)
@@ -46,10 +47,11 @@ sudo dnf install gtk4-devel vte291-gtk4-devel webkitgtk6.0-devel md4c-devel
 
 ## Install
 
-### With a package (Fedora, Arch Linux, Debian)
+### With a package (Fedora, Arch Linux, Debian, Void Linux)
 
-t-code 0.1.1 has packages for Fedora 44, Arch Linux and Debian 13 (trixie), x86_64. Install the one
-for your distribution; the package manager pulls in micro, clangd, git and the Cascadia Code font:
+t-code 0.1.1 has packages for Fedora 44, Arch Linux, Debian 13 (trixie) and Void Linux (glibc and
+musl), x86_64. Install the one for your distribution; the package manager pulls in micro, clangd,
+git and the Cascadia Code font:
 
 ```sh
 sudo dnf install ./t-code-0.1.1-1.fc44.x86_64.rpm        # Fedora
@@ -57,8 +59,20 @@ sudo pacman -U t-code-0.1.1-1-x86_64.pkg.tar.zst         # Arch Linux
 sudo apt install ./t-code_0.1.1-1_amd64.deb              # Debian
 ```
 
+On Void Linux, xbps installs from a repository, so the downloaded package is indexed first (in
+the folder it is in; use the `x86_64-musl` file on musl):
+
+```sh
+xbps-rindex -a t-code-0.1.1_1.x86_64.xbps
+sudo xbps-install --repository="$PWD" t-code
+```
+
+Void has no package for Cascadia Code: t-code then uses the system's monospace font, and any
+font can be picked in Settings. The Void packages were built and tested in Void containers.
+
 Then start `t-code` from the app menu, or `t-code [folder]` in a terminal. To remove it, use
-your package manager (`sudo dnf remove t-code`, `sudo pacman -R t-code`, `sudo apt remove t-code`).
+your package manager (`sudo dnf remove t-code`, `sudo pacman -R t-code`, `sudo apt remove t-code`,
+`sudo xbps-remove t-code`).
 
 The package puts `t-code` in `/usr/bin`, the file manager and `t-code-lsp` in
 `/usr/libexec/t-code/` (`/usr/lib/t-code/` on Arch), the editor config in
@@ -68,18 +82,17 @@ the shared config, so package updates reach it.
 
 ### Building the packages yourself
 
-All three packages are built from this repository with one script. The Arch and Debian packages
+All packages are built from this repository with one script. The Arch, Debian and Void packages
 (and the Fedora one, when you are not on Fedora) are built in containers, so all you need is
 `podman` or `docker`:
 
 ```sh
-packaging/build.sh                # all three, or pick: packaging/build.sh fedora arch debian
+packaging/build.sh                # all, or pick: packaging/build.sh fedora arch debian void void-musl
 packaging/test.sh                 # tries each package out in a fresh container
 ```
 
-The packages land in `packaging/packages/fedora/`, `arch/` and `debian/` (with the debug and
-source packages); `packaging/packages/release/` gets just the three to publish and their
-`SHA256SUMS`. On Fedora, the RPM is
+The packages land in `packaging/packages/<distribution>/` (with the debug and source packages);
+`packaging/packages/release/` gets just the ones to publish and their `SHA256SUMS`. On Fedora, the RPM is
 built directly with `rpmbuild`; install its build dependencies once with
 `sudo dnf install rpm-build dnf-plugins-core && sudo dnf builddep packaging/fedora/t-code.spec`.
 
@@ -308,8 +321,9 @@ tools/               measuring memory and CPU: the running process tree, a headl
 micro/               editor config: settings, colors, C and C++ syntax, the clangd plugin, and the tcode
                      plugin that reports the editor's state to t-code and sets the git comparison
 desktop/             app menu entry template and the app icon
-packaging/           build.sh, test.sh: Fedora (fedora/t-code.spec), Arch (arch/PKGBUILD) and Debian
-                     (debian/debian/) packages, built into packaging/packages/ (not in git)
+packaging/           build.sh, test.sh: Fedora (fedora/t-code.spec), Arch (arch/PKGBUILD), Debian
+                     (debian/debian/) and Void Linux (void/) packages, built into packaging/packages/
+                     (not in git)
 install.sh, uninstall.sh
 LICENSE
 Makefile             VERSION, make install; also writes build/compile_commands.json, so clangd

@@ -5,6 +5,7 @@
  * <visualcol> <path>"
  * (see micro/plug/tcode), and takes commands through a named pipe (see editorview.c).
  */
+#define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 #include "app.h"
 
 #include <signal.h>

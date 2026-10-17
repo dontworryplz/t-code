@@ -4,6 +4,7 @@
  *          Build and Run buttons and what they would build
  *   right  cursor line and column, and the Keybinds button
  */
+#define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 #include "app.h"
 
 #include <signal.h>

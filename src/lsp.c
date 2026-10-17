@@ -688,6 +688,17 @@ static Server *server_start(const char *key)
         g_strfreev(fields);
         return NULL;
     }
+#ifndef __GLIBC__
+    /* malloc_trim() is glibc's: clangd built on musl (Void) has no --malloc-trim and exits on it. */
+    for (char **from = fields + 1, **to = fields + 1;; from++) {
+        if (*from && strcmp(*from, "--malloc-trim") == 0) {
+            g_free(*from);
+            continue;
+        }
+        if (!(*to++ = *from))
+            break;
+    }
+#endif
     launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE |
                                          G_SUBPROCESS_FLAGS_STDERR_SILENCE);
     g_subprocess_launcher_set_cwd(launcher, fields[0]);

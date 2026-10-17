@@ -3,7 +3,8 @@
 #   fedora  .rpm (+ .src.rpm), with rpmbuild on this machine when it runs Fedora, else in a container
 #   arch    .pkg.tar.zst, in an Arch Linux container
 #   debian  .deb, in a Debian 13 (trixie) container
-# Usage: packaging/build.sh [fedora|arch|debian|all]...   (default: all)
+#   void, void-musl  .xbps, in Void Linux containers (glibc and musl)
+# Usage: packaging/build.sh [fedora|arch|debian|void|void-musl|all]...   (default: all)
 # packaging/packages/release/ then holds just the packages to publish (no debug or source
 # packages) with their SHA256SUMS. packaging/test.sh installs them in fresh containers and checks
 # that they work.
@@ -51,12 +52,22 @@ collect_release() {
   rm -rf "$release" && mkdir -p "$release"
   for f in "$OUT/fedora/t-code-$VERSION-"[0-9]*.x86_64.rpm \
            "$OUT/arch/t-code-$VERSION-"[0-9]*-x86_64.pkg.tar.zst \
-           "$OUT/debian/t-code_$VERSION-"[0-9]*_amd64.deb; do
+           "$OUT/debian/t-code_$VERSION-"[0-9]*_amd64.deb \
+           "$OUT/void/t-code-${VERSION}_"[0-9]*.x86_64.xbps \
+           "$OUT/void-musl/t-code-${VERSION}_"[0-9]*.x86_64-musl.xbps; do
     [[ -f "$f" ]] && files+=("$f")
   done
   ((${#files[@]})) || return 0
   cp "${files[@]}" "$release/"
   (cd "$release" && sha256sum -- * > SHA256SUMS)
+}
+
+build_void() { # <void or void-musl>
+  local out="$OUT/$1"
+  rm -rf "$out" && make_tarball "$out"
+  info "Building the Void Linux package in ${IMAGE[$1]}"
+  run_in_container "$1" "$out" bash /src/packaging/void/build-in-container.sh
+  rm -f "$out/t-code-$VERSION.tar.gz"
 }
 
 targets=("$@")
@@ -66,12 +77,14 @@ check_versions
 for distro in "${targets[@]}"; do
   case "$distro" in
     fedora | arch | debian) "build_$distro" ;;
-    *) die "Unknown target '$distro' (fedora, arch, debian or all)" ;;
+    void | void-musl) build_void "$distro" ;;
+    *) die "Unknown target '$distro' (fedora, arch, debian, void, void-musl or all)" ;;
   esac
 done
 collect_release
 info "Packages (t-code $VERSION):"
-find "$OUT" -path "$OUT/release" -prune -o -type f \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' \) \
+find "$OUT" -path "$OUT/release" -prune -o -type f \
+  \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.xbps' \) \
   -print | sort | sed "s|^$ROOT/|  |"
 info "To publish (packaging/packages/release/):"
 ls "$OUT/release" | sed 's|^|  |'
