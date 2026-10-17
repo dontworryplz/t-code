@@ -206,10 +206,13 @@ void preview_free(Preview *p)
     g_free(p);
 }
 
+/* WebKit's 100% looks small next to the 11pt terminals, so previews start zoomed in. */
+#define PREVIEW_ZOOM 1.25
+
 void preview_set_zoom(Tab *tab, double scale)
 {
     if (tab->preview)
-        webkit_web_view_set_zoom_level(tab->preview->view, scale);
+        webkit_web_view_set_zoom_level(tab->preview->view, scale * PREVIEW_ZOOM);
 }
 
 void open_preview(App *t, const char *path)
@@ -233,7 +236,7 @@ void open_preview(App *t, const char *path)
     webkit_web_view_set_background_color(p->view, &background);
     /* Scripts inside the markdown never run; only the content swap above does. */
     webkit_settings_set_enable_javascript_markup(webkit_web_view_get_settings(p->view), FALSE);
-    webkit_web_view_set_zoom_level(p->view, t->font_scale);
+    webkit_web_view_set_zoom_level(p->view, t->font_scale * PREVIEW_ZOOM);
     gtk_widget_set_hexpand(GTK_WIDGET(p->view), TRUE);
     gtk_widget_set_vexpand(GTK_WIDGET(p->view), TRUE);
     g_signal_connect(p->view, "load-changed", G_CALLBACK(on_load_changed), p);
