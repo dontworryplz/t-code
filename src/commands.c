@@ -27,6 +27,7 @@ static void zoom_reset(App *t) { set_font_scale(t, 1.0); }
 static void toggle_files(App *t) { toggle_pane(t, t->sidebar); }
 static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell)); }
 static void show_scm(App *t) { show_sidebar_page(t, "scm"); }
+static void show_search(App *t) { show_sidebar_page(t, "search"); }
 
 static void focus_fm(App *t)
 {
@@ -87,7 +88,7 @@ static void history(App *t)
 
 static const Command commands[] = {
     { "Go to File…", "<Control>p", "Ctrl+P", quick_open_show },
-    { "Search in Files…", "<Control><Shift>f", "Ctrl+Shift+F", search_show },
+    { "Search in Files", "<Control><Shift>f", "Ctrl+Shift+F", show_search },
     { "Command Palette…", "<Control><Shift>p|F1", "Ctrl+Shift+P, F1", command_palette },
     { "Go to Line…", "<Control>g", "Ctrl+G", go_to_line },
     { "Build", "<Control><Shift>b", "Ctrl+Shift+B", build },

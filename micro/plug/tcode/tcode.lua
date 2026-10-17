@@ -1,10 +1,11 @@
 -- t-code: reports the editor's state to t-code through the terminal title, as
 --   "t-code <modified 0|1> <line> <column> <errors> <warnings> <top> <height> <lines> <tabsize>
---    <startcol> <visualcol> <absolute path>"
+--    <startcol> <visualcol> <problems> <absolute path>"
 -- (errors and warnings are clangd's; top is the first line shown, height the lines that fit and
 -- lines the lines in the file, for t-code's scrollbar and minimap; tabsize, startcol (the first
 -- column shown) and visualcol (the cursor's column on the screen, tabs expanded) for its indent
--- guides).
+-- guides; problems the lines with errors and warnings for the minimap, like "e12,w30,e31", or
+-- "-" for none).
 -- With TCODE_DETECT_INDENT set, a file's own indentation (tabs, or spaces in steps of 2, 4, ...)
 -- overrides the tabsize and tabstospaces it was started with, like VS Code's "Detect Indentation".
 -- With TCODE_CONTROL set, it reads lines from that named pipe:
@@ -53,21 +54,47 @@ local function current()
     return nil
 end
 
+local MAX_PROBLEM_LINES = 300 -- keeps the title short
+
+-- clangd's errors and warnings in the buffer, and the lines they are on ("e12,w30", "-": none).
+-- A line with both is an error line.
 local function diagnostics(buf)
     local errors, warnings = 0, 0
+    local kinds = {}
     -- Go slices iterate when called; an empty one cannot, hence pcall.
     pcall(function()
         for _, m in buf.Messages() do
             if m.Owner == "lsp" then
+                local kind = nil
                 if m.Kind == buffer.MTError then
                     errors = errors + 1
+                    kind = "e"
                 elseif m.Kind == buffer.MTWarning then
                     warnings = warnings + 1
+                    kind = "w"
+                end
+                if kind ~= nil then
+                    -- A problem over several lines marks the first few of them.
+                    local first = m.Start.Y
+                    for y = first, math.min(math.max(m.End.Y, first), first + 4) do
+                        if kinds[y + 1] ~= "e" then
+                            kinds[y + 1] = kind
+                        end
+                    end
                 end
             end
         end
     end)
-    return errors, warnings
+    local lines = {}
+    for line in pairs(kinds) do
+        table.insert(lines, line)
+    end
+    table.sort(lines) -- a steady order: the title only changes when the problems do
+    local marks = {}
+    for i = 1, math.min(#lines, MAX_PROBLEM_LINES) do
+        marks[i] = kinds[lines[i]] .. lines[i]
+    end
+    return errors, warnings, #marks > 0 and table.concat(marks, ",") or "-"
 end
 
 local function write_osc(text)
@@ -83,13 +110,13 @@ local function report()
         return
     end
     local path = bp.Buf.Path == "" and "" or bp.Buf.AbsPath
-    local errors, warnings = diagnostics(bp.Buf)
+    local errors, warnings, problems = diagnostics(bp.Buf)
     local cursor = bp.Buf:GetActiveCursor()
     local view = bp:BufView()
-    local state = string.format("%d %d %d %d %d %d %d %d %d %d %d %s", bp.Buf:Modified() and 1 or 0,
+    local state = string.format("%d %d %d %d %d %d %d %d %d %d %d %s %s", bp.Buf:Modified() and 1 or 0,
                                 cursor.Y + 1, cursor.X + 1, errors, warnings, view.StartLine.Line,
                                 view.Height, bp.Buf:LinesNum(), math.floor(bp.Buf.Settings["tabsize"]),
-                                view.StartCol, cursor:GetVisualX(false), path)
+                                view.StartCol, cursor:GetVisualX(false), problems, path)
     if state ~= last then
         last = state
         write_osc("\027]0;t-code " .. state .. "\007")

@@ -55,6 +55,8 @@ To remove everything it installed:
 ```
 
 For development, `make` builds into `build/`, and `build/t-code` runs straight from the repo.
+`make test` runs the tests in `tests/` (the Search panel and minimap ones open a window, so they
+need a display).
 
 ## Usage
 
@@ -72,7 +74,7 @@ palette) finds any command by name.
 | Where       | Key                                    | Action                                    |
 |-------------|----------------------------------------|-------------------------------------------|
 | anywhere    | `Ctrl+P`                               | open a file by typing part of its name    |
-| anywhere    | `Ctrl+Shift+F`                         | search the text of all files              |
+| anywhere    | `Ctrl+Shift+F`                         | search the text of all files (the Search tab) |
 | anywhere    | `Ctrl+Shift+P`, `F1`                   | command palette                           |
 | anywhere    | `Ctrl+G`                               | go to line                                |
 | anywhere    | `F5` / `Ctrl+Shift+B`                  | build and run / build only (see below)    |
@@ -107,8 +109,9 @@ palette) finds any command by name.
 
 **Editing.** Files with changes are saved every second (micro's `autosave`), and closing a tab
 saves too, so `Ctrl+S` is rarely needed; a tab shows `●` while its file has unsaved changes.
-clangd marks problem lines with `>>` in the gutter; move the cursor onto the line to read the
-message at the bottom. Everything else in the editor is plain micro (`Ctrl+C`/`Ctrl+V`, `Ctrl+Z`,
+clangd marks problem lines with `>>` in the gutter, and the minimap shows them as red (errors)
+or yellow (warnings) lines across its width; move the cursor onto the line to read the message at
+the bottom. Everything else in the editor is plain micro (`Ctrl+C`/`Ctrl+V`, `Ctrl+Z`,
 ...; `Ctrl+E` opens its command bar, `help` there shows its help).
 
 **Status bar**, like VS Code's: the git branch (`*` when there are changes), clangd's errors and
@@ -143,6 +146,13 @@ Switching remembers and closes the current project's tabs, restarts the file man
 shell in the new folder, and brings back that folder's tabs from last time. t-code also remembers
 the window size, pane sizes, hidden panes and text size (in `~/.config/t-code/session.ini`).
 
+**Search** (`Ctrl+Shift+F`), a tab next to Files and Source Control, like VS Code's: results
+come as you type, grouped by file with the matches marked. **Aa**, **ab** and **.\*** next to the
+text turn on Match Case, Match Whole Word and regular expressions; **⋯** shows "files to include"
+and "files to exclude" (comma separated globs such as `*.c, src`). Click a file to fold its
+results, a result to open the file there. ripgrep skips what `.gitignore` ignores; without it,
+grep searches everything but `.git` and `build`.
+
 **Settings** (`Ctrl+,` or the gear in the title bar): minimap, code coloring, indent guides,
 word wrap (off by default; long lines then continue on the next row instead of running off the
 screen), tab size, spaces for Tab, detecting a file's own indentation, autosave, fonts, text size
@@ -159,9 +169,11 @@ src/                 t-code, the window (see src/app.h for how the parts call ea
   terminal.c         terminals; Ctrl+click on compiler messages in the shell
   tabs.c             editor tabs and the two groups
   commands.c         every command: shortcuts, command palette and the Keybinds list come from it
-  picker.c           the popup list used by Ctrl+P, the palette, search and file history
+  picker.c           the popup list used by Ctrl+P, the palette and file history
   quickopen.c        Ctrl+P
-  search.c           Ctrl+Shift+F (ripgrep)
+  search.c           the Search tab, Ctrl+Shift+F (ripgrep)
+  searchmatch.c      its command lines and output parsing (GLib only, tested on its own)
+  editorview.c       next to each editor: the minimap, the scrollbar and the indent guides
   status.c           the status bar (and the thin title bar's style)
   keybinds.c         the Keybinds window
   project.c          switching folders, recent folders
@@ -171,6 +183,7 @@ src/                 t-code, the window (see src/app.h for how the parts call ea
   session.c          remembering the window and the tabs
   preview.c          markdown preview
   fm/                t-code-fm, the file manager (see src/fm/fm.h)
+tests/               make test: searchmatch.c, the Search panel and the minimap
 micro/               editor config: settings, colors, C and C++ syntax, the clangd plugin, and the tcode
                      plugin that reports the editor's state to t-code and sets the git comparison
 desktop/             app menu entry template and the app icon

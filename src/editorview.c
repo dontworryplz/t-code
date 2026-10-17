@@ -5,6 +5,8 @@
  * scrolls it through a named pipe that the plugin reads (TCODE_CONTROL):
  *   scroll <line>       show the file from that line (0-based) on
  *   command <command>   run a micro command
+ * Lines with clangd's errors (red) and warnings (yellow), which micro reports in the title, are
+ * marked across the whole minimap.
  * Over the terminal lie VS Code's indent guides: a line at each indentation level, and the one of
  * the brackets around the cursor in their color. They are worked out from the text on the screen,
  * which is never behind micro (the saved file can be).
@@ -41,6 +43,8 @@ struct EditorView {
     GArray *starts;     /* offset of each line in text */
     GArray *in_comment; /* gboolean: the line starts inside a block comment */
     gboolean c_like;    /* C/C++ source: colored; anything else is drawn plain */
+    char *problems;     /* as micro reported them: "e12,w30", or "-" */
+    GArray *problem_lines; /* Problem */
     double grab;        /* while dragging the viewport: where in it the pointer is */
     gboolean dragging;
     GtkWidget *guides;  /* drawn over the terminal */
@@ -51,15 +55,25 @@ struct EditorView {
     } enclosing;        /* the last enclosing_line() */
 };
 
+typedef struct {
+    int line; /* 0-based */
+    gboolean error;
+} Problem;
+
 /* Colors ------------------------------------------------------------------------------------- */
 
-typedef enum { INK_TEXT, INK_COMMENT, INK_STRING, INK_NUMBER, INK_KEYWORD, INK_TYPE, INK_STATEMENT, INK_COUNT } Ink;
+typedef enum {
+    INK_TEXT, INK_COMMENT, INK_STRING, INK_NUMBER, INK_KEYWORD, INK_TYPE, INK_STATEMENT, INK_FUNCTION,
+    INK_CONSTANT, INK_PUNCTUATION, INK_COUNT
+} Ink;
 
-/* micro/colorschemes/dark-modern.micro */
+/* micro/colorschemes/dark-modern.micro: identifier, comment, constant.string, constant.number,
+ * keyword (also macros and the name after #define), type, statement (also preprocessor
+ * directives), identifier.func, identifier.constant, symbol. */
 static const char *const ink_hex[INK_COUNT] = {
-    "#9CDCFE", "#6A9955", "#CE9178", "#B5CEA8", "#569CD6", "#4EC9B0", "#C586C0",
+    "#9CDCFE", "#6A9955", "#CE9178", "#B5CEA8", "#569CD6", "#4EC9B0", "#C586C0", "#DCDCAA", "#4FC1FF", "#CCCCCC",
 };
-static GdkRGBA inks[INK_COUNT], plain_ink;
+static GdkRGBA inks[INK_COUNT], plain_ink, error_ink, warning_ink;
 
 static const char *const statements[] = {
     "if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return",
@@ -72,7 +86,14 @@ static const char *const keywords[] = {
     "protected", "virtual", "override", "constexpr", "consteval", "constinit", "noexcept", "new",
     "delete", "this", "true", "false", "nullptr", "NULL", "operator", "friend", "explicit", "mutable",
     "static_cast", "dynamic_cast", "reinterpret_cast", "const_cast", "decltype", "concept", "requires",
-    NULL,
+    "TRUE", "FALSE", NULL,
+};
+/* Lowercase type names micro/syntax/c.yaml colors as types (besides foo_t). */
+static const char *const types[] = {
+    "FILE", "DIR", "va_list", "jmp_buf", "fd_set", "gboolean", "gchar", "guchar", "gint", "guint", "gshort",
+    "gushort", "glong", "gulong", "gint8", "guint8", "gint16", "guint16", "gint32", "guint32", "gint64",
+    "guint64", "gfloat", "gdouble", "gsize", "gssize", "goffset", "gintptr", "guintptr", "gpointer",
+    "gconstpointer", "gunichar", "gquark", NULL,
 };
 
 static gboolean in_list(const char *const *list, const char *word, int len)
@@ -97,6 +118,33 @@ static int comment_end(const char *s, int len, int i, gboolean *open)
     return *open ? len : i + 2;
 }
 
+/* A word's color, following micro/syntax/c.yaml: ALL_CAPS names are constants (macros when
+ * called), PascalCase names and foo_t are types, and a name before "(" is a function. */
+static Ink word_ink(const char *s, int len, int start, int end)
+{
+    const char *word = s + start;
+    int n = end - start, next = end;
+    gboolean upper = FALSE, lower = FALSE;
+
+    if (in_list(statements, word, n))
+        return INK_STATEMENT;
+    if (in_list(keywords, word, n))
+        return INK_KEYWORD;
+    if (in_list(types, word, n) || (n > 2 && word[n - 2] == '_' && word[n - 1] == 't'))
+        return INK_TYPE;
+    while (next < len && (s[next] == ' ' || s[next] == '\t'))
+        next++;
+    for (int i = 0; i < n; i++) {
+        upper |= g_ascii_isupper(word[i]);
+        lower |= g_ascii_islower(word[i]);
+    }
+    if (upper && !lower && n > 1)
+        return next < len && s[next] == '(' ? INK_KEYWORD : INK_CONSTANT;
+    if (next < len && s[next] == '(')
+        return INK_FUNCTION;
+    return g_ascii_isupper(word[0]) && lower ? INK_TYPE : INK_TEXT;
+}
+
 /* Colors one line, calling paint for each run of visible characters. Returns whether the line
  * ends inside a block comment. */
 typedef void (*PaintFunc)(cairo_t *cr, int column, int length, Ink ink);
@@ -104,11 +152,10 @@ typedef void (*PaintFunc)(cairo_t *cr, int column, int length, Ink ink);
 static gboolean lex_line(const char *s, int len, gboolean comment, cairo_t *cr, PaintFunc paint)
 {
     int i = 0, column = 0, k = 0;
-    gboolean preprocessor;
+    gboolean include = FALSE, name_next = FALSE; /* after #include; the name after #define */
 
     while (k < len && (s[k] == ' ' || s[k] == '\t'))
         k++;
-    preprocessor = k < len && s[k] == '#';
     while (i < len) {
         int start = i;
         Ink ink = INK_TEXT;
@@ -133,14 +180,40 @@ static gboolean lex_line(const char *s, int len, gboolean comment, cairo_t *cr, 
             while (i < len && (is_word_char(s[i]) || s[i] == '.'))
                 i++;
             ink = INK_NUMBER;
+        } else if (c == '#' && i == k && !comment) {
+            /* A directive: "#include <a.h>" (the header like a string), "#define NAME" (the name
+             * blue), "#if COND" (the condition blue). */
+            int word;
+            for (i++; i < len && (s[i] == ' ' || s[i] == '\t'); i++)
+                ;
+            for (word = i; i < len && is_word_char(s[i]); i++)
+                ;
+            include = i - word == 7 && strncmp(s + word, "include", 7) == 0;
+            name_next = in_list((const char *const[]){ "define", "undef", "ifdef", "ifndef", NULL }, s + word, i - word);
+            if (cr)
+                paint(cr, column, i - start, INK_STATEMENT);
+            column += i - start;
+            if (in_list((const char *const[]){ "if", "elif", NULL }, s + word, i - word)) {
+                while (i < len && (s[i] == ' ' || s[i] == '\t'))
+                    i++, column++;
+                start = i;
+                while (i < len && !(s[i] == '/' && i + 1 < len && (s[i + 1] == '/' || s[i + 1] == '*')))
+                    i++;
+                if (cr && i > start)
+                    paint(cr, column, i - start, INK_KEYWORD);
+                column += i - start;
+            }
+            continue;
+        } else if (c == '<' && include) {
+            while (i < len && s[i] != '>')
+                i++;
+            i = MIN(i + 1, len);
+            ink = INK_STRING;
         } else if (is_word_char(c)) {
             while (i < len && is_word_char(s[i]))
                 i++;
-            ink = preprocessor                          ? INK_STATEMENT
-                  : in_list(statements, s + start, i - start) ? INK_STATEMENT
-                  : in_list(keywords, s + start, i - start)   ? INK_KEYWORD
-                  : g_ascii_isupper(c) && i - start > 1        ? INK_TYPE
-                                                               : INK_TEXT;
+            ink = name_next ? INK_KEYWORD : word_ink(s, len, start, i);
+            name_next = FALSE;
         } else if (c == ' ') {
             i++;
             column++;
@@ -151,7 +224,7 @@ static gboolean lex_line(const char *s, int len, gboolean comment, cairo_t *cr, 
             continue;
         } else {
             i++;
-            ink = preprocessor ? INK_STATEMENT : INK_TEXT;
+            ink = INK_PUNCTUATION;
         }
         /* A run with spaces inside (a comment, a string) is still one bar, like the text. */
         if (cr)
@@ -370,6 +443,16 @@ static void draw_minimap(GtkDrawingArea *area G_GNUC_UNUSED, cairo_t *cr, int wi
         lex_line(v->text + start, end - start, g_array_index(v->in_comment, gboolean, i), cr,
                  tab->app->plain || !v->c_like ? paint_plain : paint_run);
         cairo_restore(cr);
+    }
+    /* Problem lines: the whole width, over the text. */
+    for (guint k = 0; k < v->problem_lines->len; k++) {
+        Problem *p = &g_array_index(v->problem_lines, Problem, k);
+        double y = p->line * LINE_PITCH - offset;
+        if (y < -LINE_PITCH || y > height)
+            continue;
+        gdk_cairo_set_source_rgba(cr, p->error ? &error_ink : &warning_ink);
+        cairo_rectangle(cr, 0, y, width, LINE_PITCH);
+        cairo_fill(cr);
     }
     if (tab->lines > 0 && tab->height > 0) {
         cairo_set_source_rgba(cr, 1, 1, 1, v->dragging ? 0.14 : 0.08);
@@ -767,6 +850,8 @@ GtkWidget *editor_page(VteTerminal *term)
         }
         gdk_rgba_parse(&plain_ink, "#cccccc");
         plain_ink.alpha = 0.45;
+        gdk_rgba_parse(&error_ink, "#f14c4c");   /* gutter-error */
+        gdk_rgba_parse(&warning_ink, "#cca700"); /* gutter-warning */
         gdk_rgba_parse(&guide_ink, "#404040");
         gdk_rgba_parse(&active_ink, "#707070");
         gdk_rgba_parse(&pair_inks[0], "#ffd700");
@@ -797,6 +882,7 @@ const char *editor_view_init(Tab *tab, int number)
     v->control_fd = -1;
     v->starts = g_array_new(FALSE, FALSE, sizeof(gsize));
     v->in_comment = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    v->problem_lines = g_array_new(FALSE, FALSE, sizeof(Problem));
 
     v->guides = gtk_drawing_area_new();
     gtk_widget_set_can_target(v->guides, FALSE);
@@ -836,6 +922,26 @@ const char *editor_view_init(Tab *tab, int number)
     return v->control_path;
 }
 
+/* micro's problem lines ("e12,w30", or "-" for none) for the minimap. */
+void editor_view_set_problems(Tab *tab, const char *spec)
+{
+    EditorView *v = tab->view;
+    char **marks;
+
+    if (!v || g_strcmp0(v->problems, spec) == 0)
+        return;
+    g_set_str(&v->problems, spec);
+    g_array_set_size(v->problem_lines, 0);
+    marks = g_strsplit(spec, ",", -1);
+    for (int i = 0; marks[i]; i++) {
+        int line = atoi(marks[i] + (marks[i][0] ? 1 : 0));
+        if ((marks[i][0] == 'e' || marks[i][0] == 'w') && line > 0)
+            g_array_append_val(v->problem_lines, ((Problem){ line - 1, marks[i][0] == 'e' }));
+    }
+    g_strfreev(marks);
+    gtk_widget_queue_draw(v->minimap);
+}
+
 void editor_view_show_minimap(Tab *tab, gboolean show)
 {
     if (tab->view)
@@ -870,5 +976,7 @@ void editor_view_free(EditorView *v)
     g_free(v->text);
     g_array_free(v->starts, TRUE);
     g_array_free(v->in_comment, TRUE);
+    g_array_free(v->problem_lines, TRUE);
+    g_free(v->problems);
     g_free(v);
 }

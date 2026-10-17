@@ -1,171 +1,523 @@
 /*
- * Ctrl+Shift+F: search the text of every file in the project, like VS Code's Search.
+ * The Search panel, a tab next to the file manager and Source Control (Ctrl+Shift+F), like VS
+ * Code's: the text to find with Match Case, Match Whole Word and Use Regular Expression, files to
+ * include and exclude under "⋯", and the results grouped by file. Clicking a file's heading folds
+ * its lines; clicking a line opens the file there.
  * ripgrep does the work (it skips what .gitignore ignores and binary files); grep stands in when
- * it is missing. Picking a result opens the file at that line.
+ * it is missing. Its output is read line by line as it comes, and searchmatch.c finds the matches
+ * in each line to mark them.
  */
 #include "app.h"
+#include "searchmatch.h"
 
-#include <stdlib.h>
 #include <string.h>
 
+#define MAX_HITS 2000   /* results shown; the search stops there */
+#define DEBOUNCE_MS 300 /* typing pauses this long before a search starts */
+
 typedef struct {
+    GSubprocess *proc;
+    GDataInputStream *out;
+    GCancellable *cancel;
+    GRegex *regex;
+    char *root; /* the folder searched: result paths are relative to it */
+} Run;
+
+static struct {
     App *app;
-    guint generation;
-    char *text;
-} Search;
+    GtkEntry *entry, *include, *exclude;
+    GtkToggleButton *match_case, *whole_word, *regex, *details;
+    GtkWidget *details_box;
+    GtkLabel *summary;
+    GtkListBox *list;
+    guint debounce_id;
+    Run *run;             /* the search running, NULL when none */
+    int hits, files;
+    gboolean truncated;   /* stopped at MAX_HITS */
+    GtkWidget *heading;   /* the row of the file whose lines come in */
+    char *file;           /* its path */
+} search;
 
-static guint debounce_id;
-static Search *pending; /* waiting for typing to pause */
-static GCancellable *running;
-static GSubprocess *running_proc; /* stopped when a newer search starts: cancelling only stops reading */
+static const char *const css =
+    ".tcode-search { background: #1f1f1f; }"
+    ".tcode-search .field { background: #313131; border: 1px solid #3c3c3c; border-radius: 6px; margin: 8px 10px 0; }"
+    ".tcode-search .field:focus-within { border-color: #0078d4; }"
+    ".tcode-search .field entry { background: none; border: none; box-shadow: none; outline: none; color: #cccccc;"
+    "  min-height: 24px; padding: 0 6px; }"
+    ".tcode-search .field button.option { min-height: 0; min-width: 0; padding: 0 4px; margin: 3px 2px;"
+    "  border-radius: 4px; border: 1px solid transparent; background: none; box-shadow: none; color: #cccccc;"
+    "  font-family: 'Cascadia Code', monospace; font-size: 0.85em; }"
+    ".tcode-search .field button.option:hover { background: rgba(90, 93, 94, .5); }"
+    ".tcode-search .field button.option:checked { background: rgba(36, 137, 219, .51); border-color: #2488db;"
+    "  color: #ffffff; }"
+    ".tcode-search .label { color: #9d9d9d; font-size: 0.8em; margin: 6px 10px 0; }"
+    ".tcode-search button.details { min-height: 0; min-width: 0; padding: 0 6px; margin: 2px 10px 0;"
+    "  background: none; box-shadow: none; color: #cccccc; }"
+    ".tcode-search button.details:checked { color: #ffffff; background: rgba(255, 255, 255, .08); }"
+    ".tcode-search .summary { color: #9d9d9d; font-size: 0.85em; margin: 8px 6px 4px 10px; }"
+    ".tcode-search .summary.error { color: #f14c4c; }"
+    ".tcode-search button.tool { min-height: 0; min-width: 0; padding: 0 5px; margin-top: 4px; }"
+    ".tcode-search list { background: transparent; }"
+    ".tcode-search row { padding: 0 6px 0 28px; margin: 0 4px; min-height: 22px; border-radius: 6px; color: #cccccc; }"
+    ".tcode-search row.heading { padding-left: 6px; }"
+    ".tcode-search row:hover { background: #2a2d2e; }"
+    ".tcode-search row:selected { background: #04395e; }"
+    ".tcode-search row .dim { color: #8b8b8b; font-size: 0.9em; }"
+    ".tcode-search row .chevron { color: #cccccc; min-width: 14px; }"
+    ".tcode-search row .badge { background: #616161; color: #f8f8f8; border-radius: 9px; padding: 0 6px;"
+    "  font-size: 0.8em; }";
 
-static void search_free(Search *s)
+/* Searching ------------------------------------------------------------------------------------ */
+
+static void run_free(Run *run)
 {
-    g_free(s->text);
-    g_free(s);
+    g_clear_object(&run->out);
+    g_clear_object(&run->proc);
+    g_clear_object(&run->cancel);
+    g_clear_pointer(&run->regex, g_regex_unref);
+    g_free(run->root);
+    g_free(run);
 }
 
-/* rest is "line:column:text" (ripgrep) or "line:text" (grep). */
-static void add_result(Search *s, const char *file, char *rest, gboolean has_column)
+/* Stops the search running; its pending read then ends with an error and frees it. */
+static void stop_run(void)
 {
-    char *fields[2] = { NULL };
-    char *p = rest;
+    if (!search.run)
+        return;
+    g_cancellable_cancel(search.run->cancel);
+    g_subprocess_force_exit(search.run->proc);
+    search.run = NULL;
+}
 
-    for (int i = 0; i < (has_column ? 2 : 1); i++) {
-        fields[i] = p;
-        p = strchr(p, ':');
-        if (!p)
-            return;
-        *p++ = '\0';
+static void set_summary(const char *text, gboolean error)
+{
+    gtk_label_set_text(search.summary, text);
+    if (error)
+        gtk_widget_add_css_class(GTK_WIDGET(search.summary), "error");
+    else
+        gtk_widget_remove_css_class(GTK_WIDGET(search.summary), "error");
+}
+
+static void update_summary(void)
+{
+    char *text;
+
+    if (search.hits == 0) {
+        set_summary(search.run ? "Searching…" : "No results found.", FALSE);
+        return;
     }
-    const char *path = g_str_has_prefix(file, "./") ? file + 2 : file;
-    char *text = g_strstrip(g_strndup(p, 200));
-    char *detail = g_strdup_printf("%s:%s", path, fields[0]);
-    char *payload = g_strdup_printf("%s\n%s\n%s", path, fields[0], has_column ? fields[1] : "1");
-
-    picker_add(s->app, s->generation, *text ? text : "(empty line)", detail, payload);
-    g_free(payload);
-    g_free(detail);
+    text = g_strdup_printf("%d result%s in %d file%s%s", search.hits, search.hits == 1 ? "" : "s", search.files,
+                           search.files == 1 ? "" : "s", search.truncated ? " (search stopped there)" : "");
+    set_summary(text, FALSE);
     g_free(text);
 }
 
-static void on_done(GObject *source, GAsyncResult *result, gpointer data)
+static void clear_results(void)
 {
-    Search *s = data;
-    GBytes *out = NULL;
-    GError *error = NULL;
-    int count = 0;
+    GtkWidget *child;
 
-    if (G_SUBPROCESS(source) == running_proc)
-        g_clear_object(&running_proc);
-    if (!g_subprocess_communicate_finish(G_SUBPROCESS(source), result, &out, NULL, &error)) {
-        if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-            picker_message(s->app, s->generation, error->message);
-        g_error_free(error);
-        search_free(s);
-        return;
-    }
-    gsize size;
-    const char *bytes = g_bytes_get_data(out, &size);
-    gboolean has_column = GPOINTER_TO_INT(g_object_get_data(source, "has-column"));
-
-    /* Each line is "path\0rest": a ':' in a file name cannot split it. */
-    for (const char *start = bytes, *end = bytes + size; start && start < end;) {
-        const char *newline = memchr(start, '\n', end - start);
-        gsize len = (newline ? newline : end) - start;
-        const char *nul = memchr(start, '\0', len);
-        if (nul) {
-            char *path = g_utf8_make_valid(start, nul - start);
-            char *rest = g_utf8_make_valid(nul + 1, start + len - nul - 1);
-            add_result(s, path, rest, has_column);
-            count++;
-            g_free(rest);
-            g_free(path);
-        }
-        start = newline ? newline + 1 : end;
-    }
-    if (count == 0)
-        picker_message(s->app, s->generation, "No results");
-    g_bytes_unref(out);
-    search_free(s);
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(search.list))))
+        gtk_list_box_remove(search.list, child);
+    search.hits = search.files = 0;
+    search.truncated = FALSE;
+    search.heading = NULL;
+    g_clear_pointer(&search.file, g_free);
 }
 
-static gboolean start(gpointer data)
+/* A file's heading: chevron, name, its folder dimmed and the number of results. */
+static GtkWidget *heading_row(const char *path)
 {
-    Search *s = data;
-    char *rg = g_find_program_in_path("rg");
-    const char *rg_argv[] = { "rg", "--line-number", "--column", "--no-heading", "--color", "never",
-                              "--smart-case", "--fixed-strings", "--max-columns", "300",
-                              "--max-count", "100", "--null", "--", s->text, ".", NULL };
-    const char *grep_argv[] = { "grep", "-rnIFZ", "--exclude-dir=.git", "--exclude-dir=build",
-                                "--", s->text, ".", NULL };
-    GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE |
-                                                              G_SUBPROCESS_FLAGS_STDERR_SILENCE);
-    GError *error = NULL;
-    GSubprocess *proc;
+    GtkWidget *row = gtk_list_box_row_new();
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *chevron = gtk_label_new("▾");
+    char *name = g_path_get_basename(path), *dir = g_path_get_dirname(path);
+    GtkWidget *label = gtk_label_new(name);
+    GtkWidget *folder = gtk_label_new(strcmp(dir, ".") == 0 ? "" : dir);
+    GtkWidget *badge = gtk_label_new("0");
 
-    debounce_id = 0;
-    pending = NULL;
-    g_subprocess_launcher_set_cwd(launcher, s->app->root);
-    proc = g_subprocess_launcher_spawnv(launcher, rg ? rg_argv : grep_argv, &error);
-    g_object_unref(launcher);
-    if (!proc) {
-        picker_message(s->app, s->generation, error->message);
-        g_error_free(error);
-        search_free(s);
-        g_free(rg);
-        return G_SOURCE_REMOVE;
+    gtk_widget_add_css_class(row, "heading");
+    gtk_widget_add_css_class(chevron, "chevron");
+    gtk_label_set_ellipsize(GTK_LABEL(folder), PANGO_ELLIPSIZE_START);
+    gtk_widget_add_css_class(folder, "dim");
+    gtk_widget_set_hexpand(folder, TRUE);
+    gtk_label_set_xalign(GTK_LABEL(folder), 0);
+    gtk_widget_add_css_class(badge, "badge");
+    gtk_widget_set_valign(badge, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), chevron);
+    gtk_box_append(GTK_BOX(box), label);
+    gtk_box_append(GTK_BOX(box), folder);
+    gtk_box_append(GTK_BOX(box), badge);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+    gtk_widget_set_tooltip_text(row, path);
+    g_object_set_data(G_OBJECT(row), "chevron", chevron);
+    g_object_set_data(G_OBJECT(row), "badge", badge);
+    g_object_set_data_full(G_OBJECT(row), "lines", g_ptr_array_new(), (GDestroyNotify)g_ptr_array_unref);
+    g_free(name);
+    g_free(dir);
+    return row;
+}
+
+static void set_folded(GtkWidget *heading, gboolean folded)
+{
+    GPtrArray *lines = g_object_get_data(G_OBJECT(heading), "lines");
+
+    g_object_set_data(G_OBJECT(heading), "folded", GINT_TO_POINTER(folded));
+    gtk_label_set_text(g_object_get_data(G_OBJECT(heading), "chevron"), folded ? "▸" : "▾");
+    for (guint i = 0; i < lines->len; i++)
+        gtk_widget_set_visible(lines->pdata[i], !folded);
+}
+
+static gboolean is_folded(GtkWidget *heading)
+{
+    return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(heading), "folded"));
+}
+
+/* A result: the line with the match marked, under its file's heading. */
+static void add_hit(const SearchHit *hit, gpointer data)
+{
+    Run *run = data;
+    GtkWidget *row, *label;
+    GPtrArray *lines;
+    char *before, *match, *after, *markup, *count, *tip;
+
+    if (search.hits >= MAX_HITS) {
+        search.truncated = TRUE;
+        return;
     }
-    g_object_set_data(G_OBJECT(proc), "has-column", GINT_TO_POINTER(rg != NULL));
-    running = g_cancellable_new();
-    running_proc = g_object_ref(proc);
-    g_subprocess_communicate_async(proc, NULL, running, on_done, s);
-    g_object_unref(proc);
+    if (!search.file || strcmp(search.file, hit->path) != 0) {
+        g_set_str(&search.file, hit->path);
+        search.heading = heading_row(hit->path);
+        gtk_list_box_append(search.list, search.heading);
+        search.files++;
+    }
+    before = search_snippet(hit->text, hit->start, hit->end, &match, &after);
+    if (hit->start == hit->end)
+        g_strchug(after);
+    markup = g_markup_printf_escaped("%s<span background=\"#EA5C00\" bgalpha=\"40%%\">%s</span>%s",
+                                     before, match, after);
+    label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), markup);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    gtk_label_set_single_line_mode(GTK_LABEL(label), TRUE);
+    row = gtk_list_box_row_new();
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+    tip = g_strstrip(g_strdelimit(g_strdup(hit->text), "\t", ' '));
+    gtk_widget_set_tooltip_text(row, tip);
+    g_object_set_data_full(G_OBJECT(row), "path", g_build_filename(run->root, hit->path, NULL), g_free);
+    g_object_set_data(G_OBJECT(row), "line", GINT_TO_POINTER(hit->line));
+    g_object_set_data(G_OBJECT(row), "column", GINT_TO_POINTER(hit->column));
+    gtk_widget_set_visible(row, !is_folded(search.heading));
+    gtk_list_box_append(search.list, row);
+
+    lines = g_object_get_data(G_OBJECT(search.heading), "lines");
+    g_ptr_array_add(lines, row);
+    count = g_strdup_printf("%u", lines->len);
+    gtk_label_set_text(g_object_get_data(G_OBJECT(search.heading), "badge"), count);
+    search.hits++;
+    g_free(count);
+    g_free(tip);
+    g_free(markup);
+    g_free(before);
+    g_free(match);
+    g_free(after);
+}
+
+static void on_exit(GObject *source, GAsyncResult *result, gpointer data)
+{
+    Run *run = data;
+    gboolean ok = g_subprocess_wait_finish(G_SUBPROCESS(source), result, NULL);
+
+    if (run == search.run) {
+        search.run = NULL;
+        /* 0: found, 1: nothing found, 2: an error (a regular expression ripgrep cannot read). */
+        if (ok && search.hits == 0 && g_subprocess_get_if_exited(G_SUBPROCESS(source)) &&
+            g_subprocess_get_exit_status(G_SUBPROCESS(source)) > 1)
+            set_summary("The search failed (is the regular expression valid?)", TRUE);
+        else
+            update_summary();
+    }
+    run_free(run);
+}
+
+static void on_line(GObject *source, GAsyncResult *result, gpointer data)
+{
+    Run *run = data;
+    gsize len;
+    GError *error = NULL;
+    char *line = g_data_input_stream_read_line_finish(G_DATA_INPUT_STREAM(source), result, &len, &error);
+
+    if (run != search.run) { /* stopped: a newer search runs, or none */
+        g_clear_error(&error);
+        g_free(line);
+        run_free(run);
+        return;
+    }
+    if (!line) { /* the end, or the pipe failed: the exit status tells */
+        g_clear_error(&error);
+        g_subprocess_wait_async(run->proc, run->cancel, on_exit, run);
+        return;
+    }
+    search_parse_line(line, len, run->regex, add_hit, run);
+    g_free(line);
+    if (search.truncated) {
+        stop_run();
+        update_summary();
+        run_free(run);
+        return;
+    }
+    update_summary();
+    g_data_input_stream_read_line_async(run->out, G_PRIORITY_DEFAULT, run->cancel, on_line, run);
+}
+
+static void start_search(void)
+{
+    App *t = search.app;
+    SearchQuery q = {
+        .text = gtk_editable_get_text(GTK_EDITABLE(search.entry)),
+        .match_case = gtk_toggle_button_get_active(search.match_case),
+        .whole_word = gtk_toggle_button_get_active(search.whole_word),
+        .regex = gtk_toggle_button_get_active(search.regex),
+        .include = gtk_editable_get_text(GTK_EDITABLE(search.include)),
+        .exclude = gtk_editable_get_text(GTK_EDITABLE(search.exclude)),
+    };
+    char *rg = g_find_program_in_path("rg");
+    GSubprocessLauncher *launcher;
+    GError *error = NULL;
+    GRegex *regex;
+    char **argv;
+    Run *run;
+
+    g_clear_handle_id(&search.debounce_id, g_source_remove);
+    stop_run();
+    clear_results();
+    if (!*q.text) {
+        set_summary("", FALSE);
+        g_free(rg);
+        return;
+    }
+    regex = search_regex(&q, &error);
+    if (!regex) {
+        set_summary("Invalid regular expression", TRUE);
+        g_error_free(error);
+        g_free(rg);
+        return;
+    }
+    argv = search_argv(&q, rg != NULL);
+    launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+    g_subprocess_launcher_set_cwd(launcher, t->root);
+    run = g_new0(Run, 1);
+    run->regex = regex;
+    run->root = g_strdup(t->root);
+    run->proc = g_subprocess_launcher_spawnv(launcher, (const char *const *)argv, &error);
+    g_object_unref(launcher);
+    g_strfreev(argv);
     g_free(rg);
+    if (!run->proc) {
+        set_summary(error->message, TRUE);
+        g_error_free(error);
+        run_free(run);
+        return;
+    }
+    run->out = g_data_input_stream_new(g_subprocess_get_stdout_pipe(run->proc));
+    run->cancel = g_cancellable_new();
+    search.run = run;
+    update_summary();
+    g_data_input_stream_read_line_async(run->out, G_PRIORITY_DEFAULT, run->cancel, on_line, run);
+}
+
+static gboolean on_debounced(gpointer data G_GNUC_UNUSED)
+{
+    search.debounce_id = 0;
+    start_search();
     return G_SOURCE_REMOVE;
 }
 
-static void query(App *t, const char *text, guint generation)
+/* Typing: search once it pauses. */
+static void schedule_search(void)
 {
-    if (debounce_id) {
-        g_source_remove(debounce_id);
-        search_free(pending);
-        debounce_id = 0;
-        pending = NULL;
-    }
-    if (running) {
-        g_cancellable_cancel(running);
-        g_clear_object(&running);
-    }
-    if (running_proc) {
-        g_subprocess_force_exit(running_proc);
-        g_clear_object(&running_proc);
-    }
-    if (strlen(text) < 2) {
-        picker_message(t, generation, "Type at least two characters to search all files");
+    g_clear_handle_id(&search.debounce_id, g_source_remove);
+    search.debounce_id = g_timeout_add(DEBOUNCE_MS, on_debounced, NULL);
+}
+
+/* The panel ------------------------------------------------------------------------------------- */
+
+static void on_row_activated(GtkListBox *list G_GNUC_UNUSED, GtkListBoxRow *row, gpointer data G_GNUC_UNUSED)
+{
+    const char *path = g_object_get_data(G_OBJECT(row), "path");
+
+    if (!path) {
+        set_folded(GTK_WIDGET(row), !is_folded(GTK_WIDGET(row)));
         return;
     }
-
-    Search *s = g_new0(Search, 1);
-    s->app = t;
-    s->generation = generation;
-    s->text = g_strdup(text);
-    picker_message(t, generation, "Searching…");
-    pending = s;
-    debounce_id = g_timeout_add(200, start, s); /* wait until typing pauses */
+    open_file_at(search.app, path, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "line")),
+                 GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "column")));
 }
 
-static void choose(App *t, const char *payload)
+/* Folds every file; when all are folded already, unfolds them. */
+static void fold_all(void)
 {
-    char **parts = g_strsplit(payload, "\n", 3);
-    char *path = g_build_filename(t->root, parts[0], NULL);
+    gboolean all = TRUE;
 
-    open_file_at(t, path, atoi(parts[1]), parts[2] ? atoi(parts[2]) : 1);
-    g_free(path);
-    g_strfreev(parts);
+    for (GtkWidget *row = gtk_widget_get_first_child(GTK_WIDGET(search.list)); row; row = gtk_widget_get_next_sibling(row))
+        if (!g_object_get_data(G_OBJECT(row), "path") && !is_folded(row))
+            all = FALSE;
+    for (GtkWidget *row = gtk_widget_get_first_child(GTK_WIDGET(search.list)); row; row = gtk_widget_get_next_sibling(row))
+        if (!g_object_get_data(G_OBJECT(row), "path"))
+            set_folded(row, !all);
 }
 
-void search_show(App *t)
+static void clear_search(void)
 {
-    picker_open(t, "Search in files", query, choose);
+    gtk_editable_set_text(GTK_EDITABLE(search.entry), ""); /* the change clears the results */
+    start_search();
+    gtk_widget_grab_focus(GTK_WIDGET(search.entry));
+}
+
+static void on_details(GtkToggleButton *button, gpointer data G_GNUC_UNUSED)
+{
+    gtk_widget_set_visible(search.details_box, gtk_toggle_button_get_active(button));
+}
+
+/* Down from the text goes to the results. */
+static gboolean on_entry_key(GtkEventControllerKey *controller G_GNUC_UNUSED, guint key, guint code G_GNUC_UNUSED,
+                             GdkModifierType state G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+    if (key != GDK_KEY_Down)
+        return FALSE;
+    return gtk_widget_child_focus(GTK_WIDGET(search.list), GTK_DIR_TAB_FORWARD);
+}
+
+static GtkEntry *new_entry(const char *placeholder)
+{
+    GtkWidget *entry = gtk_entry_new();
+
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), placeholder);
+    gtk_widget_set_hexpand(entry, TRUE);
+    g_signal_connect_swapped(entry, "changed", G_CALLBACK(schedule_search), NULL);
+    g_signal_connect_swapped(entry, "activate", G_CALLBACK(start_search), NULL);
+    return GTK_ENTRY(entry);
+}
+
+/* A framed field: the entry, with option buttons on its right. */
+static GtkWidget *field(GtkEntry *entry)
+{
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+    gtk_widget_add_css_class(box, "field");
+    gtk_box_append(GTK_BOX(box), GTK_WIDGET(entry));
+    return box;
+}
+
+static GtkToggleButton *option(GtkWidget *field, const char *text, const char *tooltip)
+{
+    GtkWidget *button = gtk_toggle_button_new_with_label(text);
+
+    gtk_widget_add_css_class(button, "option");
+    gtk_widget_set_focusable(button, FALSE);
+    gtk_widget_set_tooltip_text(button, tooltip);
+    gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
+    g_signal_connect_swapped(button, "toggled", G_CALLBACK(start_search), NULL);
+    gtk_box_append(GTK_BOX(field), button);
+    return GTK_TOGGLE_BUTTON(button);
+}
+
+static GtkWidget *small_label(const char *text)
+{
+    GtkWidget *label = gtk_label_new(text);
+
+    gtk_widget_add_css_class(label, "label");
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    return label;
+}
+
+static GtkWidget *tool_button(const char *text, const char *tooltip, GCallback clicked)
+{
+    GtkWidget *button = gtk_button_new_with_label(text);
+
+    gtk_button_set_has_frame(GTK_BUTTON(button), FALSE);
+    gtk_widget_set_focusable(button, FALSE);
+    gtk_widget_set_tooltip_text(button, tooltip);
+    gtk_widget_add_css_class(button, "tool");
+    g_signal_connect_swapped(button, "clicked", clicked, NULL);
+    return button;
+}
+
+GtkWidget *search_panel(App *t)
+{
+    GtkCssProvider *provider = gtk_css_provider_new();
+    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *query, *details, *head, *scroll = gtk_scrolled_window_new();
+    GtkEventController *keys = gtk_event_controller_key_new();
+
+    gtk_css_provider_load_from_string(provider, css);
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+
+    search.app = t;
+    gtk_widget_add_css_class(panel, "tcode-search");
+
+    search.entry = new_entry("Search");
+    g_signal_connect(keys, "key-pressed", G_CALLBACK(on_entry_key), NULL);
+    gtk_widget_add_controller(GTK_WIDGET(search.entry), keys);
+    query = field(search.entry);
+    search.match_case = option(query, "Aa", "Match Case");
+    search.whole_word = option(query, "ab", "Match Whole Word");
+    search.regex = option(query, ".*", "Use Regular Expression");
+    gtk_box_append(GTK_BOX(panel), query);
+
+    search.details = GTK_TOGGLE_BUTTON(gtk_toggle_button_new_with_label("⋯"));
+    gtk_widget_add_css_class(GTK_WIDGET(search.details), "details");
+    gtk_widget_set_focusable(GTK_WIDGET(search.details), FALSE);
+    gtk_widget_set_tooltip_text(GTK_WIDGET(search.details), "Toggle Search Details");
+    gtk_widget_set_halign(GTK_WIDGET(search.details), GTK_ALIGN_END);
+    g_signal_connect(search.details, "toggled", G_CALLBACK(on_details), NULL);
+    gtk_box_append(GTK_BOX(panel), GTK_WIDGET(search.details));
+
+    search.details_box = details = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    search.include = new_entry("e.g. *.c, src/**/include");
+    search.exclude = new_entry("e.g. build, *.o");
+    gtk_box_append(GTK_BOX(details), small_label("files to include"));
+    gtk_box_append(GTK_BOX(details), field(search.include));
+    gtk_box_append(GTK_BOX(details), small_label("files to exclude"));
+    gtk_box_append(GTK_BOX(details), field(search.exclude));
+    gtk_widget_set_visible(details, FALSE);
+    gtk_box_append(GTK_BOX(panel), details);
+
+    head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    search.summary = GTK_LABEL(gtk_label_new(NULL));
+    gtk_widget_add_css_class(GTK_WIDGET(search.summary), "summary");
+    gtk_label_set_xalign(search.summary, 0);
+    gtk_label_set_wrap(search.summary, TRUE);
+    gtk_widget_set_hexpand(GTK_WIDGET(search.summary), TRUE);
+    gtk_box_append(GTK_BOX(head), GTK_WIDGET(search.summary));
+    gtk_box_append(GTK_BOX(head), tool_button("⟳", "Refresh", G_CALLBACK(start_search)));
+    gtk_box_append(GTK_BOX(head), tool_button("⊟", "Collapse / Expand All", G_CALLBACK(fold_all)));
+    gtk_box_append(GTK_BOX(head), tool_button("✕", "Clear Search Results", G_CALLBACK(clear_search)));
+    gtk_box_append(GTK_BOX(panel), head);
+
+    search.list = GTK_LIST_BOX(gtk_list_box_new());
+    gtk_list_box_set_selection_mode(search.list, GTK_SELECTION_SINGLE);
+    gtk_list_box_set_activate_on_single_click(search.list, TRUE);
+    g_signal_connect(search.list, "row-activated", G_CALLBACK(on_row_activated), NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), GTK_WIDGET(search.list));
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_box_append(GTK_BOX(panel), scroll);
+    return panel;
+}
+
+/* The keyboard goes to the search text, all of it selected to type over. */
+void search_focus(void)
+{
+    gtk_widget_grab_focus(GTK_WIDGET(search.entry));
+    gtk_editable_select_region(GTK_EDITABLE(search.entry), 0, -1);
+}
+
+/* Another project: the same search there. */
+void search_reset(void)
+{
+    if (search.entry)
+        start_search();
 }

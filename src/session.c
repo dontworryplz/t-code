@@ -133,8 +133,8 @@ void session_apply_window(App *t)
     gtk_widget_set_visible(t->sidebar, get_bool(kf, "window", "files-visible", TRUE));
     gtk_widget_set_visible(GTK_WIDGET(t->shell), get_bool(kf, "window", "shell-visible", TRUE));
     char *page = g_key_file_get_string(kf, "window", "sidebar-page", NULL);
-    if (g_strcmp0(page, "scm") == 0)
-        gtk_stack_set_visible_child_name(t->sidebar_stack, "scm");
+    if (g_strcmp0(page, "scm") == 0 || g_strcmp0(page, "search") == 0)
+        gtk_stack_set_visible_child_name(t->sidebar_stack, page);
     g_free(page);
     if (!error && scale > 0)
         set_font_scale(t, scale);

@@ -290,9 +290,16 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
     tab->tab_size = MAX(tab_size, 1);
     tab->start_col = start_col;
     tab->visual_col = visual_col;
+
+    /* The problem lines ("e12,w30" or "-"), then the path. */
+    const char *problems = title + 7 + end, *path = strchr(problems, ' ');
+    if (!path)
+        return;
+    char *spec = g_strndup(problems, path++ - problems);
+    editor_view_set_problems(tab, spec);
+    g_free(spec);
     editor_view_update(tab, top);
 
-    const char *path = title + 7 + end;
     if (!tab->title && g_path_is_absolute(path) && g_strcmp0(tab->path, path) != 0) {
         /* Another file was opened inside micro (Ctrl+E open). When a tab has it already, that tab
          * takes over: two editors on one file would overwrite each other's saves. */

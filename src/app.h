@@ -40,8 +40,8 @@ typedef struct {
 struct App {
     GtkWindow *window;
     GtkPaned *hpaned, *vpaned, *split;
-    GtkWidget *sidebar;         /* left: tabs for the file manager and Source Control */
-    GtkStack *sidebar_stack;    /* pages "files" and "scm" */
+    GtkWidget *sidebar;         /* left: tabs for the file manager, Source Control and Search */
+    GtkStack *sidebar_stack;    /* pages "files", "scm" and "search" */
     GtkWidget *scm;
     GtkStack *editor_area;
     GtkNotebook *groups[GROUPS];
@@ -134,6 +134,7 @@ GtkWidget *editor_page(VteTerminal *term);
 const char *editor_view_init(Tab *tab, int number);
 void editor_view_set_path(Tab *tab);
 void editor_view_update(Tab *tab, int top);
+void editor_view_set_problems(Tab *tab, const char *spec);
 void editor_view_show_minimap(Tab *tab, gboolean show);
 void editor_view_redraw(Tab *tab);
 void editor_view_free(EditorView *view);
@@ -163,9 +164,13 @@ void picker_message(App *t, guint generation, const char *text);
 void picker_requery(App *t, PickerQuery query);
 int fuzzy_score(const char *query, const char *text);
 
-/* quickopen.c, search.c */
+/* quickopen.c */
 void quick_open_show(App *t);
-void search_show(App *t);
+
+/* search.c */
+GtkWidget *search_panel(App *t);
+void search_focus(void);
+void search_reset(void);
 
 /* scm.c */
 GtkWidget *scm_panel(App *t);

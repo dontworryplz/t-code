@@ -43,12 +43,16 @@ void set_pane_visible(App *t, GtkWidget *pane, gboolean visible)
     gtk_widget_set_visible(pane, visible);
 }
 
-/* Shows the sidebar on one of its pages ("files" or "scm") and gives that page the keyboard. */
+/* Shows the sidebar on one of its pages ("files", "scm" or "search") and gives that page the
+ * keyboard. */
 void show_sidebar_page(App *t, const char *page)
 {
     set_pane_visible(t, t->sidebar, TRUE);
     gtk_stack_set_visible_child_name(t->sidebar_stack, page);
-    gtk_widget_grab_focus(strcmp(page, "files") == 0 ? GTK_WIDGET(t->fm) : t->scm);
+    if (strcmp(page, "search") == 0)
+        search_focus();
+    else
+        gtk_widget_grab_focus(strcmp(page, "files") == 0 ? GTK_WIDGET(t->fm) : t->scm);
 }
 
 void toggle_pane(App *t, GtkWidget *pane)
@@ -146,7 +150,7 @@ static void keep_sidebar_width(GtkPaned *paned, GParamSpec *spec G_GNUC_UNUSED, 
         gtk_paned_set_position(paned, SIDEBAR_MIN_WIDTH);
 }
 
-/* The left side: the file manager and the Source Control panel, as tabs. */
+/* The left side: the file manager, the Source Control and the Search panels, as tabs. */
 static GtkWidget *sidebar(App *t)
 {
     static const char *const css =
@@ -168,6 +172,7 @@ static GtkWidget *sidebar(App *t)
     t->sidebar_stack = GTK_STACK(gtk_stack_new());
     gtk_stack_add_titled(t->sidebar_stack, GTK_WIDGET(t->fm), "files", "FILES");
     gtk_stack_add_titled(t->sidebar_stack, t->scm, "scm", "SOURCE CONTROL");
+    gtk_stack_add_titled(t->sidebar_stack, clip_width(search_panel(t)), "search", "SEARCH");
     gtk_widget_set_vexpand(GTK_WIDGET(t->sidebar_stack), TRUE);
     gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher), t->sidebar_stack);
     gtk_widget_set_focusable(switcher, FALSE);
