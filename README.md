@@ -38,7 +38,7 @@ or updates by itself.
 ## Requirements
 
 `micro` (2.0.14 or newer), `clangd`, `git`, the Cascadia Code font (`ripgrep` is optional, for a faster Search
-panel), and to build: `gcc` 14 or newer (C23), `make` and the GTK4, VTE, WebKitGTK and md4c
+panel), and to build: `gcc` 13 or newer (C23), `make` and the GTK4, VTE, WebKitGTK and md4c
 headers. The packages below pull in all of these by themselves.
 
 ```sh

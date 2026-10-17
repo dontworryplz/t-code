@@ -5,7 +5,9 @@ FM_SRC  := $(wildcard src/fm/*.c)
 LSP_SRC := $(wildcard src/lsp/*.c)
 TEST_SRC := $(wildcard tests/*.c)
 CFLAGS  ?= -O2 -g
-CFLAGS  += -Wall -Wextra -std=c23
+# C23. gcc 13 (and clang before 18) knows it only by its draft name, c2x.
+CSTD    := $(shell $(CC) -std=c23 -E -x c /dev/null >/dev/null 2>&1 && echo c23 || echo c2x)
+CFLAGS  += -Wall -Wextra -std=$(CSTD)
 # Where 'make install' puts things. t-code finds its helpers next to itself, so LIBEXECDIR must be
 # $(PREFIX)/libexec or $(PREFIX)/lib, and DATADIR $(PREFIX)/share.
 PREFIX     ?= /usr/local
@@ -70,7 +72,7 @@ test: build/test-searchmatch build/test-lsp build/test-search-panel build/test-m
 # The tests that need no display again, under AddressSanitizer and UBSan: out-of-bounds access, use
 # after free, undefined behavior, and (LeakSanitizer, at exit) every block that was not freed.
 ASAN_FLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all \
-              -Wall -Wextra -std=c23 -Isrc
+              -Wall -Wextra -std=$(CSTD) -Isrc
 ASAN_ENV   := G_DEBUG=gc-friendly ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 \
               LSAN_OPTIONS=suppressions=$(CURDIR)/tests/lsan.supp:print_suppressions=0
 
