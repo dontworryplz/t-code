@@ -21,6 +21,10 @@ void settings_editor_args(App *t, GPtrArray *argv)
     g_ptr_array_add(argv, g_strdup(t->settings.tabs_to_spaces ? "true" : "false"));
     g_ptr_array_add(argv, g_strdup("-autosave"));
     g_ptr_array_add(argv, g_strdup(t->settings.autosave ? "1" : "0"));
+    g_ptr_array_add(argv, g_strdup("-softwrap"));
+    g_ptr_array_add(argv, g_strdup(t->settings.word_wrap ? "true" : "false"));
+    g_ptr_array_add(argv, g_strdup("-wordwrap"));
+    g_ptr_array_add(argv, g_strdup("true")); /* wrapped lines break between words */
 }
 
 static void each_editor(App *t, const char *command)
@@ -95,6 +99,15 @@ static void on_guides(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointe
     t->settings.guides = gtk_switch_get_active(toggle);
     for (int i = 0; i < n; i++)
         editor_view_redraw(tab_nth(t, i));
+    session_save_settings(t);
+}
+
+static void on_word_wrap(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+    App *t = app_of(GTK_WIDGET(toggle));
+
+    t->settings.word_wrap = gtk_switch_get_active(toggle);
+    each_editor(t, t->settings.word_wrap ? "setlocal softwrap true" : "setlocal softwrap false");
     session_save_settings(t);
 }
 
@@ -262,6 +275,8 @@ void show_settings(App *t)
             switch_for(!t->plain, G_CALLBACK(on_coloring)));
     add_row(GTK_GRID(grid), &row, "Indent guides", "Lines at each indentation level; the block around the cursor in color",
             switch_for(t->settings.guides, G_CALLBACK(on_guides)));
+    add_row(GTK_GRID(grid), &row, "Word wrap", "Lines longer than the editor continue on the next row",
+            switch_for(t->settings.word_wrap, G_CALLBACK(on_word_wrap)));
     add_row(GTK_GRID(grid), &row, "Tab size", NULL,
             spin_for(1, 16, 1, t->settings.tab_size, G_CALLBACK(on_tab_size)));
     add_row(GTK_GRID(grid), &row, "Insert spaces for Tab", NULL,

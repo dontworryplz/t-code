@@ -244,11 +244,20 @@ local function control(line)
     local verb, arg = line:match("^(%S+) ?(.*)$")
     if verb == "scroll" and tonumber(arg) ~= nil then
         local wanted = math.max(0, math.min(tonumber(arg), bp.Buf:LinesNum() - 1))
+        -- Scrolling counts screen rows: with softwrap a line can take several, so repeat until
+        -- the wanted line is on top (a step never goes past it).
         local top = bp:BufView().StartLine.Line
-        if wanted > top then
-            bp:ScrollDown(wanted - top)
-        elseif wanted < top then
-            bp:ScrollUp(top - wanted)
+        while top ~= wanted do
+            if wanted > top then
+                bp:ScrollDown(wanted - top)
+            else
+                bp:ScrollUp(top - wanted)
+            end
+            local now = bp:BufView().StartLine.Line
+            if now == top then
+                break
+            end
+            top = now
         end
     elseif verb == "command" and arg ~= "" then
         bp:HandleCommand(arg)

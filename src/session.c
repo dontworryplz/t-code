@@ -85,6 +85,7 @@ void session_load_settings(App *t)
     t->settings.tab_size = CLAMP(get_int(kf, "settings", "tab-size", 4), 1, 16);
     t->settings.detect_indent = get_bool(kf, "settings", "detect-indentation", TRUE);
     t->settings.guides = get_bool(kf, "settings", "indent-guides", TRUE);
+    t->settings.word_wrap = get_bool(kf, "settings", "word-wrap", FALSE);
     t->plain = !get_bool(kf, "settings", "code-coloring", TRUE);
     g_free(t->settings.font);
     g_free(t->settings.fm_font);
@@ -108,6 +109,7 @@ void session_save_settings(App *t)
     g_key_file_set_integer(kf, "settings", "tab-size", t->settings.tab_size);
     g_key_file_set_boolean(kf, "settings", "detect-indentation", t->settings.detect_indent);
     g_key_file_set_boolean(kf, "settings", "indent-guides", t->settings.guides);
+    g_key_file_set_boolean(kf, "settings", "word-wrap", t->settings.word_wrap);
     g_key_file_set_boolean(kf, "settings", "code-coloring", !t->plain);
     g_key_file_set_string(kf, "settings", "font", t->settings.font);
     g_key_file_set_string(kf, "settings", "file-manager-font", t->settings.fm_font);

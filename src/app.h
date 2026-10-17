@@ -75,6 +75,7 @@ struct App {
         int tab_size;
         gboolean detect_indent;  /* a file's own indentation overrides the two above */
         gboolean guides;         /* indent and bracket pair guides in editors */
+        gboolean word_wrap;      /* long lines continue on the next row instead of running off */
         char *font;              /* editors and the shell, a Pango font description */
         char *fm_font;           /* the file manager */
     } settings;
