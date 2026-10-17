@@ -76,11 +76,18 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
     const char *bytes = out ? g_bytes_get_data(out, &size) : NULL;
     char *branch = NULL;
     gboolean dirty = FALSE;
+    /* Started before another project opened: that project's status, not this one's. */
+    gboolean stale = g_strcmp0(g_object_get_data(source, "root"), t->root) != 0;
 
     branch_busy = FALSE;
-    if (branch_again && !t->closing) {
+    if ((branch_again || stale) && !t->closing) {
         branch_again = FALSE;
         refresh_branch(t);
+    }
+    if (stale) {
+        if (out)
+            g_bytes_unref(out);
+        return;
     }
     if (ok && bytes && !t->closing) {
         /* Records end with NUL; only the header lines matter here. */
@@ -129,6 +136,7 @@ static gboolean poll_branch(gpointer data)
                             "git", "-C", t->root, "status", "--porcelain=v2", "--branch", "-z",
                             "--untracked-files=all", NULL);
     if (proc) {
+        g_object_set_data_full(G_OBJECT(proc), "root", g_strdup(t->root), g_free);
         branch_busy = TRUE;
         g_subprocess_communicate_async(proc, NULL, NULL, on_branch, t);
         g_object_unref(proc);

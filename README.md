@@ -55,8 +55,8 @@ To remove everything it installed:
 ```
 
 For development, `make` builds into `build/`, and `build/t-code` runs straight from the repo.
-`make test` runs the tests in `tests/` (the Search panel and minimap ones open a window, so they
-need a display).
+`make test` runs the tests in `tests/` (the Search panel, minimap and Source Control ones open a
+window, so they need a display).
 
 ## Usage
 
@@ -183,7 +183,7 @@ src/                 t-code, the window (see src/app.h for how the parts call ea
   session.c          remembering the window and the tabs
   preview.c          markdown preview
   fm/                t-code-fm, the file manager (see src/fm/fm.h)
-tests/               make test: searchmatch.c, the Search panel and the minimap
+tests/               make test: searchmatch.c, the Search panel, the minimap and Source Control
 micro/               editor config: settings, colors, C and C++ syntax, the clangd plugin, and the tcode
                      plugin that reports the editor's state to t-code and sets the git comparison
 desktop/             app menu entry template and the app icon

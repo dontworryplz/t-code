@@ -645,10 +645,16 @@ static void on_commit_activated(GtkListBox *list G_GNUC_UNUSED, GtkListBoxRow *r
     run_git(args, NULL, TRUE, on_commit_files, g_strdup(commit));
 }
 
-static void on_log(gboolean ok, const char *out, const char *err G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+/* data: the HEAD the log was asked for. A log that comes after another project opened, or after
+ * HEAD moved again, is not shown. */
+static void on_log(gboolean ok, const char *out, const char *err G_GNUC_UNUSED, gpointer data)
 {
     char **lines;
+    gboolean stale = g_strcmp0(data, scm.head) != 0;
 
+    g_free(data);
+    if (stale)
+        return;
     clear_list(scm.commits_list);
     g_clear_pointer(&scm.open_commit, g_free);
     if (!ok)
@@ -686,7 +692,7 @@ static void load_commits(void)
 {
     const char *args[] = { "log", "-n", "100", "--format=%H%x1f%h%x1f%s%x1f%an%x1f%ar", NULL };
 
-    run_git(args, NULL, TRUE, on_log, NULL);
+    run_git(args, NULL, TRUE, on_log, g_strdup(scm.head));
 }
 
 /* Status ----------------------------------------------------------------------------------------- */
@@ -726,10 +732,11 @@ static void update_buttons(void)
 
 /* Takes the output of "git status --porcelain=v2 --branch -z --untracked-files=all" (NULL: not a
  * repository, or git failed). */
+static void show_changes(App *t);
+
 void scm_update(App *t, const char *out, gsize size)
 {
     char *head = NULL;
-    char *title;
 
     if (!scm.app || t->closing)
         return;
@@ -782,6 +789,32 @@ void scm_update(App *t, const char *out, gsize size)
     }
     g_ptr_array_sort(scm.staged, compare_changes);
     g_ptr_array_sort(scm.changes, compare_changes);
+    show_changes(t);
+    gtk_widget_set_sensitive(scm.commit, out != NULL);
+    gtk_widget_set_sensitive(scm.push, out != NULL && !scm.initial);
+    if (!out)
+        set_note(t->git_top ? NULL : "This folder is not in a git repository.", FALSE);
+
+    /* Commits are listed again after a commit, a checkout or another project; outside a
+     * repository (no HEAD) and before the first commit there are none. */
+    if (!head || scm.initial || g_strcmp0(head, scm.head) != 0) {
+        g_free(scm.head);
+        scm.head = head;
+        if (head && !scm.initial)
+            load_commits();
+        else
+            clear_list(scm.commits_list);
+    } else {
+        g_free(head);
+    }
+}
+
+/* Fills the Staged Changes and Changes lists, their counts and the tab's badge, and the buttons
+ * from scm.staged / scm.changes. */
+static void show_changes(App *t)
+{
+    char *title;
+
     fill_changes(scm.staged_list, scm.staged, TRUE);
     fill_changes(scm.changes_list, scm.changes, FALSE);
     gtk_widget_set_visible(scm.staged_box, scm.staged->len > 0);
@@ -797,21 +830,6 @@ void scm_update(App *t, const char *out, gsize size)
                                                : g_strdup("SOURCE CONTROL");
     gtk_stack_page_set_title(gtk_stack_get_page(t->sidebar_stack, t->scm), title);
     g_free(title);
-    gtk_widget_set_sensitive(scm.commit, out != NULL);
-    gtk_widget_set_sensitive(scm.push, out != NULL && !scm.initial);
-    if (!out)
-        set_note(t->git_top ? NULL : "This folder is not in a git repository.", FALSE);
-
-    if (g_strcmp0(head, scm.head) != 0) { /* a commit, a checkout, another project */
-        g_free(scm.head);
-        scm.head = head;
-        if (head && !scm.initial)
-            load_commits();
-        else
-            clear_list(scm.commits_list);
-    } else {
-        g_free(head);
-    }
 }
 
 /* Building the panel ------------------------------------------------------------------------------ */
@@ -949,13 +967,21 @@ GtkWidget *scm_panel(App *t)
     return panel;
 }
 
-/* Another project: its commits are listed afresh. */
+/* Another project: nothing of the last one stays while git status runs for the new one, and its
+ * commits are listed afresh. */
 void scm_reset(void)
 {
     g_clear_pointer(&scm.head, g_free);
     g_clear_pointer(&scm.open_commit, g_free);
-    if (scm.message)
-        gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(scm.message)), "", -1);
-    if (scm.note)
-        set_note(NULL, FALSE);
+    if (!scm.app)
+        return;
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(scm.message)), "", -1);
+    set_note(NULL, FALSE);
+    g_ptr_array_set_size(scm.staged, 0);
+    g_ptr_array_set_size(scm.changes, 0);
+    g_clear_pointer(&scm.upstream, g_free);
+    scm.ahead = scm.behind = 0;
+    scm.initial = FALSE;
+    show_changes(scm.app);
+    clear_list(scm.commits_list);
 }

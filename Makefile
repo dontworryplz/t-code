@@ -32,8 +32,8 @@ build/compile_commands.json: Makefile $(APP_SRC) $(FM_SRC) $(LSP_SRC) $(TEST_SRC
 	       "$$sep" "$(CURDIR)" "$$f" "$(CFLAGS)" "$$f"; sep=,; done; \
 	   printf '\n]\n' ) > $@
 
-# Tests: searchmatch.c alone (GLib); the Search panel in a window and the minimap (which need a
-# display for some of their tests).
+# Tests: searchmatch.c alone (GLib); the Search panel, the minimap and Source Control in a window
+# (they need a display for some or all of their tests).
 build/test-searchmatch: tests/test_searchmatch.c src/searchmatch.c src/searchmatch.h | build
 	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags gio-2.0) -o $@ tests/test_searchmatch.c src/searchmatch.c \
 	  $(shell pkg-config --libs gio-2.0)
@@ -45,10 +45,14 @@ build/test-search-panel: tests/test_search_panel.c src/search.c src/searchmatch.
 build/test-minimap: tests/test_minimap.c src/editorview.c src/app.h | build
 	$(CC) $(CFLAGS) -Isrc $(APP_CFLAGS) -o $@ tests/test_minimap.c $(shell pkg-config --libs $(PKGS))
 
-test: build/test-searchmatch build/test-search-panel build/test-minimap
+build/test-scm: tests/test_scm.c src/scm.c src/status.c src/app.h | build
+	$(CC) $(CFLAGS) -Isrc $(APP_CFLAGS) -o $@ tests/test_scm.c src/scm.c $(shell pkg-config --libs $(PKGS))
+
+test: build/test-searchmatch build/test-search-panel build/test-minimap build/test-scm
 	build/test-searchmatch
 	build/test-search-panel
 	build/test-minimap
+	build/test-scm
 
 build:
 	mkdir -p build
