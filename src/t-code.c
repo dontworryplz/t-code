@@ -90,11 +90,14 @@ static void find_files(App *t)
     static const char *const fm[] = { "t-code-fm", "../libexec/t-code/t-code-fm", NULL };
     static const char *const lsp[] = { "t-code-lsp", "../libexec/t-code/t-code-lsp", NULL };
     static const char *const micro[] = { "../share/t-code/micro", "../micro", NULL };
+    /* Installed, the icon is in ~/.local/share/icons; from the build tree it is in desktop/. */
+    static const char *const icons[] = { "../desktop", NULL };
     char *versions = g_strdup_printf("t-code-%d-versions", getpid());
 
     t->fm_program = find_beside_exe(fm);
     t->lsp_program = find_beside_exe(lsp);
     t->micro_config = find_beside_exe(micro);
+    t->icon_dir = find_beside_exe(icons);
     t->temp_dir = g_build_filename(g_get_user_runtime_dir(), versions, NULL);
     g_free(versions);
 }
@@ -196,7 +199,9 @@ static void build_window(App *t, GtkApplication *app)
     find_files(t);
     start_socket(t);
     lsp_start(t);
-    gtk_window_set_default_icon_name("utilities-terminal");
+    gtk_icon_theme_add_search_path(gtk_icon_theme_get_for_display(gdk_display_get_default()),
+                                   t->icon_dir);
+    gtk_window_set_default_icon_name("io.github.tcode");
 
     t->window = GTK_WINDOW(gtk_application_window_new(app));
     gtk_window_set_default_size(t->window, 1400, 900);
@@ -331,6 +336,7 @@ int main(int argc, char **argv)
     g_free(t.fm_program);
     g_free(t.lsp_program);
     g_free(t.micro_config);
+    g_free(t.icon_dir);
     g_free(t.temp_dir);
     g_free(t.git_top);
     g_free(t.root);

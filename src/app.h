@@ -59,6 +59,7 @@ struct App {
     char *fm_program;   /* t-code-fm */
     char *lsp_program;  /* t-code-lsp: connects an editor's lsp plugin to the shared servers */
     char *micro_config; /* micro -config-dir */
+    char *icon_dir;     /* desktop/ in the build tree, holding the app icon */
     char *temp_dir;     /* old file versions for comparisons */
     GSocketService *service;
     double font_scale;

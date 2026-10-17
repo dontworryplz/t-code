@@ -5,6 +5,7 @@
 #   ~/.local/libexec/t-code/t-code-lsp                   shares one clangd between editors
 #   ~/.local/share/t-code/micro/                         editor config (colors, C syntax, clangd plugin)
 #   ~/.local/share/applications/io.github.tcode.desktop app menu entry
+#   ~/.local/share/icons/hicolor/scalable/apps/io.github.tcode.svg
 # Run it again after pulling changes to update the installed copy.
 set -euo pipefail
 
@@ -15,6 +16,7 @@ BIN="$PREFIX/bin/t-code"
 LIBEXEC="$PREFIX/libexec/t-code"
 SHARE="$PREFIX/share/t-code"
 APP_DIR="$DATA_HOME/applications"
+ICON="$DATA_HOME/icons/hicolor/scalable/apps/io.github.tcode.svg"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m  %s\n' "$*"; }
@@ -58,7 +60,9 @@ for item in settings.json bindings.json colorschemes syntax plug; do
 done
 info "Installed editor config in $SHARE/micro"
 
-# 5. App menu entry
+# 5. App menu entry and icon
+install -Dm644 "$ROOT/desktop/io.github.tcode.svg" "$ICON"
+touch "$DATA_HOME/icons/hicolor" # tells the desktop to rescan its icon cache
 mkdir -p "$APP_DIR"
 sed "s|@BIN@|$BIN|" "$ROOT/desktop/io.github.tcode.desktop.in" > "$APP_DIR/io.github.tcode.desktop"
 command -v update-desktop-database >/dev/null && update-desktop-database "$APP_DIR" 2>/dev/null || true
