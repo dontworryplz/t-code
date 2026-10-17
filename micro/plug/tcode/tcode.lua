@@ -30,6 +30,10 @@ local goos = import("os")
 
 local last = nil
 local report_pending = false
+-- micro runs onAnyEvent after every event, our own timers included. Set by tick and the burst
+-- report so that onAnyEvent skips them: otherwise the 30ms report schedules itself forever and
+-- micro redraws its screen 30 times a second while idle.
+local own_timer = false
 local ticks = 0
 
 -- Per file: head (the commit the gutter follows), pinned (comparing with something other than
@@ -266,6 +270,7 @@ local function set_base(bp, kind, value)
 end
 
 local function tick()
+    own_timer = true
     report()
     ticks = ticks + 1
     if ticks % 2 == 0 then
@@ -383,12 +388,17 @@ function onSetActive(bp) report() end
 function onSave(bp) report() end
 -- Events come in bursts (typing, scrolling, mouse drags): report once the burst has passed.
 function onAnyEvent()
+    if own_timer then
+        own_timer = false
+        return
+    end
     if report_pending then
         return
     end
     report_pending = true
     micro.After(30 * time.Millisecond, function()
         report_pending = false
+        own_timer = true
         report()
     end)
 end
