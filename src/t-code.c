@@ -235,7 +235,7 @@ static GtkWidget *sidebar(App *t)
     return box;
 }
 
-/* Open Folder and Recent Folders on the left, Settings and Split Editor on the right. */
+/* Open Folder and Recent Folders on the left; the main menu, Settings and Split Editor on the right. */
 static GtkWidget *header_bar(App *t)
 {
     GtkWidget *header = gtk_header_bar_new();
@@ -243,6 +243,8 @@ static GtkWidget *header_bar(App *t)
     GtkWidget *recent = gtk_menu_button_new();
     GtkWidget *split = gtk_toggle_button_new();
     GtkWidget *settings = gtk_button_new_from_icon_name("emblem-system-symbolic");
+    GtkWidget *menu = gtk_menu_button_new();
+    GMenu *items = g_menu_new();
 
     gtk_widget_set_tooltip_text(open, "Open Folder… (Ctrl+Shift+O)");
     gtk_actionable_set_action_name(GTK_ACTIONABLE(open), "win.open-folder");
@@ -262,6 +264,15 @@ static GtkWidget *header_bar(App *t)
     gtk_widget_set_tooltip_text(settings, "Settings (Ctrl+,)");
     g_signal_connect_swapped(settings, "clicked", G_CALLBACK(show_settings), t);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), settings);
+
+    g_menu_append(items, "Keyboard Shortcuts", "win.keybinds");
+    g_menu_append(items, "About t-code", "win.about");
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu), "open-menu-symbolic");
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu), G_MENU_MODEL(items));
+    gtk_menu_button_set_primary(GTK_MENU_BUTTON(menu), TRUE);
+    gtk_widget_set_tooltip_text(menu, "Main Menu");
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu);
+    g_object_unref(items);
     return header;
 }
 

@@ -307,6 +307,7 @@ src/                 t-code, the window (see src/app.h for how the parts call ea
   editorview.c       next to each editor: the minimap, the scrollbar and the indent guides
   status.c           the status bar (and the thin title bar's style)
   keybinds.c         the Keybinds window
+  about.c            the About window: version, MIT license, library and program versions
   project.c          switching folders, recent folders
   socket.c           requests from the file manager over $TCODE_SOCKET
   gitcompare.c       comparing with HEAD or a commit from the history

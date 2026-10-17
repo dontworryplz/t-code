@@ -157,16 +157,28 @@ static void on_open_folder_action(GSimpleAction *action G_GNUC_UNUSED, GVariant 
     choose_folder(t);
 }
 
+static void on_keybinds_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer t)
+{
+    show_keybinds(t);
+}
+
+static void on_about_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer t)
+{
+    show_about(t);
+}
+
 static void on_open_recent_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *param, gpointer t)
 {
     open_project(t, g_variant_get_string(param, NULL));
 }
 
-/* win.open-folder and win.open-recent, used by the title bar buttons; and the recent menu. */
+/* win.open-folder, win.open-recent, win.keybinds and win.about, used by the title bar buttons and menus; and the recent menu. */
 void add_project_actions(App *t)
 {
     static const GActionEntry actions[] = {
         { .name = "open-folder", .activate = on_open_folder_action },
+        { .name = "keybinds", .activate = on_keybinds_action },
+        { .name = "about", .activate = on_about_action },
         { .name = "open-recent", .activate = on_open_recent_action, .parameter_type = "s" },
     };
 

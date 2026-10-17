@@ -115,6 +115,7 @@ static const Command commands[] = {
     { "Open Folder…", "<Control><Shift>o", "Ctrl+Shift+O", choose_folder },
     { "Settings…", "<Control>comma", "Ctrl+,", show_settings },
     { "Keyboard Shortcuts", NULL, NULL, show_keybinds },
+    { "About t-code", NULL, NULL, show_about },
 };
 
 const KeyHelp *window_keys(int *n)

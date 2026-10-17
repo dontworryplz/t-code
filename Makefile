@@ -14,13 +14,17 @@ PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
 LIBEXECDIR ?= $(PREFIX)/libexec
 DATADIR    ?= $(PREFIX)/share
-APP_CFLAGS := $(shell pkg-config --cflags $(PKGS))
+APP_CFLAGS := $(shell pkg-config --cflags $(PKGS)) -Ibuild
 
 all: build/t-code build/t-code-fm build/t-code-lsp build/compile_commands.json
 
-build/t-code: $(APP_SRC) src/app.h Makefile | build
+build/t-code: $(APP_SRC) src/app.h build/license.h Makefile | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ $(APP_SRC) $(LDFLAGS) \
 	  $(shell pkg-config --libs $(PKGS))
+
+# LICENSE as a C string for the About window (src/about.c).
+build/license.h: LICENSE | build
+	sed 's/\\/\\\\/g; s/"/\\"/g; s/.*/"&\\n"/' $< > $@
 
 build/t-code-fm: $(FM_SRC) src/fm/fm.h | build
 	$(CC) $(CFLAGS) -o $@ $(FM_SRC) $(LDFLAGS)
@@ -42,7 +46,7 @@ build/compile_commands.json: Makefile $(APP_SRC) $(FM_SRC) $(LSP_SRC) $(TEST_SRC
 	       "$$sep" "$(CURDIR)" "$$f" "$(CFLAGS)" "$$f"; sep=,; done; \
 	   printf '\n]\n' ) > $@
 
-# Tests: searchmatch.c alone (GLib); the Search panel, the minimap and Source Control in a window
+# Tests: searchmatch.c alone (GLib); the Search panel, the minimap, Source Control and About in a window
 # (they need a display for some or all of their tests).
 build/test-searchmatch: tests/test_searchmatch.c src/searchmatch.c src/searchmatch.h | build
 	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags gio-2.0) -o $@ tests/test_searchmatch.c src/searchmatch.c \
@@ -62,12 +66,17 @@ build/test-scm: tests/test_scm.c src/scm.c src/status.c src/app.h | build
 build/test-lsp: tests/test_lsp.c src/lsp.c src/app.h | build
 	$(CC) $(CFLAGS) -Isrc $(APP_CFLAGS) -o $@ tests/test_lsp.c $(LDFLAGS) $(shell pkg-config --libs gio-unix-2.0)
 
-test: build/test-searchmatch build/test-lsp build/test-search-panel build/test-minimap build/test-scm
+build/test-about: tests/test_about.c src/about.c src/app.h build/license.h | build
+	$(CC) $(CFLAGS) -Isrc $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_about.c \
+	  $(shell pkg-config --libs $(PKGS))
+
+test: build/test-searchmatch build/test-lsp build/test-search-panel build/test-minimap build/test-scm build/test-about
 	build/test-searchmatch
 	build/test-lsp
 	build/test-search-panel
 	build/test-minimap
 	build/test-scm
+	build/test-about
 
 # The tests that need no display again, under AddressSanitizer and UBSan: out-of-bounds access, use
 # after free, undefined behavior, and (LeakSanitizer, at exit) every block that was not freed.

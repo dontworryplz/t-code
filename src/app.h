@@ -154,6 +154,9 @@ const KeyHelp *window_keys(int *n);
 /* keybinds.c */
 void show_keybinds(App *t);
 
+/* about.c */
+void show_about(App *t);
+
 /* picker.c: the popup list behind Ctrl+P, the command palette, search and file history.
  * query() is called with each new text and fills the list with picker_add(), now or later
  * (results for an older generation are dropped). */
