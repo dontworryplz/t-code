@@ -2,9 +2,9 @@
 
 One window, three kinds of terminals, nothing else.
 
-![t-code editing a small C project: file manager with git colors on the left, two editor groups side by side, make output in the shell, and the status bar](docs/screenshot.png)
+![t-code editing its own source: the file manager on the left, src/t-code.c open in the editor with indent guides and the minimap, the shell below, and the status bar](docs/screenshot.png)
 
-<sub>A small Makefile project in git: the file manager marks the changed <code>main.c</code>, the editor marks the changed line in the gutter and clangd's unused-variable warning with <code>&gt;&gt;</code>, the header is open to the side, and the shell has built and run the program.</sub>
+<sub>t-code open on its own repository: the file manager with the <code>src/</code> tree expanded, <code>src/t-code.c</code> in the editor with indent guides (the block around the cursor highlighted) and the minimap next to the scrollbar, the shell below, and the status bar with the git branch, clangd's errors and warnings, Build / Run and the cursor position.</sub>
 
 Two small C programs for Linux. Uses 100-150MB RAM (language server is not included, it also uses approximately ~1GB RAM). `t-code` (GTK4) is the window; every pane in it is a real terminal (VTE, the
 same widget GNOME's terminals use):
@@ -142,6 +142,11 @@ saving the same file would overwrite each other.
 Switching remembers and closes the current project's tabs, restarts the file manager and the
 shell in the new folder, and brings back that folder's tabs from last time. t-code also remembers
 the window size, pane sizes, hidden panes and text size (in `~/.config/t-code/session.ini`).
+
+**Settings** (`Ctrl+,` or the gear in the title bar): minimap, code coloring, indent guides,
+word wrap (off by default; long lines then continue on the next row instead of running off the
+screen), tab size, spaces for Tab, detecting a file's own indentation, autosave, fonts, text size
+and reopening the last project. Changes apply at once and are kept in `session.ini`.
 
 **Markdown preview** opens as a tab and follows the file as you type. Links to other markdown
 files open their preview, other local files open in an editor, and web links open in the browser.
