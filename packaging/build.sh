@@ -4,7 +4,9 @@
 #   arch    .pkg.tar.zst, in an Arch Linux container
 #   debian  .deb, in a Debian 13 (trixie) container
 # Usage: packaging/build.sh [fedora|arch|debian|all]...   (default: all)
-# Then packaging/test.sh installs them in fresh containers and checks that they work.
+# packaging/packages/release/ then holds just the packages to publish (no debug or source
+# packages) with their SHA256SUMS. packaging/test.sh installs them in fresh containers and checks
+# that they work.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 build_fedora() {
@@ -43,6 +45,20 @@ build_debian() {
   rm -f "$out/t-code-$VERSION.tar.gz"
 }
 
+# The installable package of each distribution built for this version, side by side for a release.
+collect_release() {
+  local release="$OUT/release" files=()
+  rm -rf "$release" && mkdir -p "$release"
+  for f in "$OUT/fedora/t-code-$VERSION-"[0-9]*.x86_64.rpm \
+           "$OUT/arch/t-code-$VERSION-"[0-9]*-x86_64.pkg.tar.zst \
+           "$OUT/debian/t-code_$VERSION-"[0-9]*_amd64.deb; do
+    [[ -f "$f" ]] && files+=("$f")
+  done
+  ((${#files[@]})) || return 0
+  cp "${files[@]}" "$release/"
+  (cd "$release" && sha256sum -- * > SHA256SUMS)
+}
+
 targets=("$@")
 ((${#targets[@]})) || targets=(all)
 [[ " ${targets[*]} " == *" all "* ]] && targets=("${DISTROS[@]}")
@@ -53,6 +69,9 @@ for distro in "${targets[@]}"; do
     *) die "Unknown target '$distro' (fedora, arch, debian or all)" ;;
   esac
 done
+collect_release
 info "Packages (t-code $VERSION):"
-find "$OUT" -type f \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' \) | sort |
-  sed "s|^$ROOT/|  |"
+find "$OUT" -path "$OUT/release" -prune -o -type f \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' \) \
+  -print | sort | sed "s|^$ROOT/|  |"
+info "To publish (packaging/packages/release/):"
+ls "$OUT/release" | sed 's|^|  |'

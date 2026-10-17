@@ -1,4 +1,4 @@
-VERSION := 0.1
+VERSION := 0.1.1
 PKGS    := gtk4 vte-2.91-gtk4 gio-unix-2.0 webkitgtk-6.0 md4c-html
 APP_SRC := $(wildcard src/*.c)
 FM_SRC  := $(wildcard src/fm/*.c)
@@ -16,7 +16,7 @@ APP_CFLAGS := $(shell pkg-config --cflags $(PKGS))
 
 all: build/t-code build/t-code-fm build/t-code-lsp build/compile_commands.json
 
-build/t-code: $(APP_SRC) src/app.h | build
+build/t-code: $(APP_SRC) src/app.h Makefile | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ $(APP_SRC) $(LDFLAGS) \
 	  $(shell pkg-config --libs $(PKGS))
 

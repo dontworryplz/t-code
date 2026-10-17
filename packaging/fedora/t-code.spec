@@ -1,5 +1,5 @@
 Name:           t-code
-Version:        0.1
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        Terminal-centric C/C++ IDE: file manager, micro editor tabs and a shell
 License:        MIT
@@ -42,8 +42,9 @@ Control, git comparisons and Markdown previews.
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.tcode.desktop
 %{buildroot}%{_bindir}/t-code --version | grep -qx 't-code %{version}'
 # The other tests open windows and need a display.
-%make_build build/test-searchmatch
+%make_build build/test-searchmatch build/test-lsp
 build/test-searchmatch
+build/test-lsp
 
 %files
 %license LICENSE
@@ -55,5 +56,12 @@ build/test-searchmatch
 %{_datadir}/icons/hicolor/scalable/apps/io.github.tcode.svg
 
 %changelog
+* Sat Oct 17 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.1.1-1
+- Much less memory and CPU: editors start when their tab is first shown, hidden
+  editors stay idle, clangd runs with two malloc arenas, the Markdown preview's
+  network process exits with the last preview
+- Opening t-code no longer flashes clipboard windows or clears the clipboard
+- Tests for the shared language servers, including a heap growth check
+
 * Sat Oct 17 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.1-1
 - First release

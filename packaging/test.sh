@@ -5,14 +5,15 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Installs the package, then what smoke-test.sh needs: a headless X server, a session bus,
-# python3 (to drive micro through a pty) and pgrep.
+# python3 (to drive micro through a pty) and pgrep. Only this version's package ($VERSION, set in the
+# container), when older ones are still in packaging/packages.
 declare -A INSTALL=(
-  [fedora]='dnf -y install $(ls /out/t-code-[0-9]*.x86_64.rpm) xorg-x11-server-Xvfb dbus-daemon
+  [fedora]='dnf -y install $(ls /out/t-code-$VERSION-[0-9]*.x86_64.rpm) xorg-x11-server-Xvfb dbus-daemon
             python3 procps-ng desktop-file-utils fontconfig util-linux'
-  [arch]='pacman -Syu --noconfirm && pacman -U --noconfirm $(ls /out/t-code-[0-9]*.pkg.tar.*) &&
+  [arch]='pacman -Syu --noconfirm && pacman -U --noconfirm $(ls /out/t-code-$VERSION-[0-9]*-x86_64.pkg.tar.*) &&
           pacman -S --noconfirm --needed xorg-server-xvfb dbus python procps-ng desktop-file-utils'
   [debian]='apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y
-            $(ls /out/t-code_*.deb) xvfb dbus python3
+            $(ls /out/t-code_$VERSION-[0-9]*_amd64.deb) xvfb dbus python3
             procps desktop-file-utils'
 )
 

@@ -2,14 +2,16 @@
 
 One window, three kinds of terminals, nothing else.
 
-**Version 0.1** — the first release, with packages for Fedora, Arch Linux and Debian
-([Install](#install)). `t-code --version` prints the installed version.
+**Version 0.1.1** — uses about 8 times less memory than 0.1 and almost no CPU while idle
+([Performance](#performance)); packages for Fedora, Arch Linux and Debian ([Install](#install)).
+`t-code --version` prints the installed version.
 
 ![t-code editing its own source: the file manager on the left, src/t-code.c open in the editor with indent guides and the minimap, the shell below, and the status bar](docs/screenshot.png)
 
 <sub>t-code open on its own repository: the file manager with the <code>src/</code> tree expanded, <code>src/t-code.c</code> in the editor with indent guides (the block around the cursor highlighted) and the minimap next to the scrollbar, the shell below, and the status bar with the git branch, clangd's errors and warnings, Build / Run and the cursor position.</sub>
 
-Two small C programs for Linux. Uses 100-150MB RAM (language server is not included, it also uses approximately ~1GB RAM). `t-code` (GTK4) is the window; every pane in it is a real terminal (VTE, the
+Two small C programs for Linux. With 25 files open it uses about 275 MB of RAM in all, clangd
+included ([Performance](#performance)). `t-code` (GTK4) is the window; every pane in it is a real terminal (VTE, the
 same widget GNOME's terminals use):
 
 - **left:** `t-code-fm`, a file manager written in plain C (no libraries)
@@ -46,13 +48,13 @@ sudo dnf install gtk4-devel vte291-gtk4-devel webkitgtk6.0-devel md4c-devel
 
 ### With a package (Fedora, Arch Linux, Debian)
 
-t-code 0.1 has packages for Fedora 44, Arch Linux and Debian 13 (trixie), x86_64. Install the one
+t-code 0.1.1 has packages for Fedora 44, Arch Linux and Debian 13 (trixie), x86_64. Install the one
 for your distribution; the package manager pulls in micro, clangd, git and the Cascadia Code font:
 
 ```sh
-sudo dnf install ./t-code-0.1-1.fc44.x86_64.rpm          # Fedora
-sudo pacman -U t-code-0.1-1-x86_64.pkg.tar.zst           # Arch Linux
-sudo apt install ./t-code_0.1-1_amd64.deb                # Debian
+sudo dnf install ./t-code-0.1.1-1.fc44.x86_64.rpm        # Fedora
+sudo pacman -U t-code-0.1.1-1-x86_64.pkg.tar.zst         # Arch Linux
+sudo apt install ./t-code_0.1.1-1_amd64.deb              # Debian
 ```
 
 Then start `t-code` from the app menu, or `t-code [folder]` in a terminal. To remove it, use
@@ -75,7 +77,9 @@ packaging/build.sh                # all three, or pick: packaging/build.sh fedor
 packaging/test.sh                 # tries each package out in a fresh container
 ```
 
-The packages land in `packaging/packages/fedora/`, `arch/` and `debian/`. On Fedora, the RPM is
+The packages land in `packaging/packages/fedora/`, `arch/` and `debian/` (with the debug and
+source packages); `packaging/packages/release/` gets just the three to publish and their
+`SHA256SUMS`. On Fedora, the RPM is
 built directly with `rpmbuild`; install its build dependencies once with
 `sudo dnf install rpm-build dnf-plugins-core && sudo dnf builddep packaging/fedora/t-code.spec`.
 
@@ -159,7 +163,7 @@ palette) finds any command by name.
 
 ### What else is there
 
-**Editing.** Files with changes are saved every second (micro's `autosave`), and closing a tab
+**Editing.** Files with changes are saved every second (the autosave setting), and closing a tab
 saves too, so `Ctrl+S` is rarely needed; a tab shows `●` while its file has unsaved changes.
 clangd marks problem lines with `>>` in the gutter, and the minimap shows them as red (errors)
 or yellow (warnings) lines across its width; move the cursor onto the line to read the message at
@@ -212,6 +216,68 @@ and reopening the last project. Changes apply at once and are kept in `session.i
 
 **Markdown preview** opens as a tab and follows the file as you type. Links to other markdown
 files open their preview, other local files open in an editor, and web links open in the browser.
+
+## Performance
+
+t-code is meant to be light: a few small C programs around micro and clangd. Version 0.1.1 was
+measured against 0.1 on the same machine (Fedora 44, x86_64), both built from source and run
+with the same 25 C files of this repository, after clangd had finished indexing.
+
+**25 files open, one tab looked at** (the usual case):
+
+| | 0.1 | 0.1.1 | |
+|---|---:|---:|---:|
+| clangd | 1718 MB | 208 MB | −88% |
+| editors (micro) | 25 running, 466 MB | 1 running, 19 MB | −96% |
+| t-code window | 46 MB | 44 MB | |
+| helper processes | 50, 6 MB | 2, 0.2 MB | |
+| **memory in all** | **2239 MB** | **275 MB** | **−88%** |
+| **CPU while idle** (one core) | **120%** | **under 3%** | |
+| first editor ready | 0.93 s | 1.01 s | |
+
+**All 25 tabs opened one after another** (the worst case: every editor running):
+
+| | 0.1 | 0.1.1 |
+|---|---:|---:|
+| clangd | 1718 MB (peak 1760 MB) | 433 MB (peak 482 MB) |
+| editors (micro) | 466 MB, 84% CPU | 442 MB, 0% CPU |
+| **memory in all** | **2254 MB** | **942 MB** |
+| **CPU while idle** | **130%** | **under 3%** |
+
+In a normal desktop session with 25 tabs (Wayland, GNOME) 0.1.1 used 232 MB in all and 0.3% of
+one core while idle. Memory is PSS: pages shared between processes are split between them, so
+the rows add up.
+
+What changed:
+
+- **An editor starts when its tab is first shown.** A restored session with many tabs runs micro
+  only for the visible ones; each one costs about 20 MB, a connection to clangd and its file in
+  clangd's memory.
+- **clangd runs with two malloc arenas** (`GLIBC_TUNABLES=glibc.malloc.arena_max=2`). With 25
+  files clangd itself accounted for 130 MB, yet held 1.5 GB: glibc's per-thread arenas kept
+  memory it had freed. With two arenas it stays around 700 MB in the worst case, also after
+  hours of editing, at the same speed. (jemalloc did not help.)
+- **Idle editors write nothing.** In 0.1 a timer in the editor plugin re-armed itself every 30 ms
+  and every editor redrew its screen about 35 times a second, which the window then had to read.
+  Now a shown editor redraws once a second, a hidden one not at all, and autosave is done by
+  t-code for the files that changed instead of by a timer in every editor.
+- **The Markdown preview's network process** (about 60 MB) exits with the last preview.
+- **No clipboard windows at startup:** each editor's clipboard check used to flash a window in
+  GNOME's dock and could clear the clipboard.
+
+How to measure it yourself (see `tools/`):
+
+```sh
+tools/proc-report.sh 10              # the running t-code: processes, memory and CPU by program
+tools/headless.sh src/*.c            # build/t-code run invisibly with these files, then the same report
+tools/clangd-mem.py --churn 3        # clangd alone: resident memory vs what it says it uses
+tools/micro-redraws.py               # an idle editor's screen writes per second, shown and hidden
+make test-asan                       # the tests under AddressSanitizer, failing on any leak
+```
+
+The tests also check memory: `tests/test_lsp.c` connects and disconnects 400 editors to the shared
+language server and fails if the heap grows by 32 KB (it grew by under 1 KB), and the package
+tests check that 5 opened files start only 1 editor and that clangd has the arena limit.
 
 ## Files
 

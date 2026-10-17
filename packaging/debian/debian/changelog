@@ -1,3 +1,13 @@
+t-code (0.1.1-1) unstable; urgency=medium
+
+  * Much less memory and CPU: editors start when their tab is first shown,
+    hidden editors stay idle, clangd runs with two malloc arenas, the Markdown
+    preview's network process exits with the last preview.
+  * Opening t-code no longer flashes clipboard windows or clears the clipboard.
+  * Tests for the shared language servers, including a heap growth check.
+
+ -- suacayipkisi <ufukdenizcaglayan@gmail.com>  Sat, 17 Oct 2026 18:30:00 +0300
+
 t-code (0.1-1) unstable; urgency=medium
 
   * First release.

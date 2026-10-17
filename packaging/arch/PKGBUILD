@@ -1,6 +1,6 @@
 # Maintainer: suacayipkisi <ufukdenizcaglayan@gmail.com>
 pkgname=t-code
-pkgver=0.1
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Terminal-centric C/C++ IDE: file manager, micro editor tabs and a shell'
 arch=('x86_64')
@@ -25,8 +25,9 @@ check() {
   cd "$pkgname-$pkgver"
   build/t-code --version | grep -qx "t-code $pkgver"
   # The other tests open windows and need a display.
-  make build/test-searchmatch
+  make build/test-searchmatch build/test-lsp
   build/test-searchmatch
+  build/test-lsp
 }
 
 package() {
