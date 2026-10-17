@@ -129,12 +129,10 @@ static void on_split_toggled(GtkToggleButton *button, App *t)
 static GtkWidget *sidebar(App *t)
 {
     static const char *const css =
-        ".tcode-sidebar { background: #1f1f1f; }"
-        ".tcode-sidebar stackswitcher { background: #181818; border-bottom: 1px solid #2b2b2b; }"
-        ".tcode-sidebar stackswitcher button { min-height: 0; padding: 4px 10px; border-radius: 0;"
-        "  background: none; box-shadow: none; color: #9d9d9d; font-size: 0.8em; font-weight: bold;"
-        "  border-bottom: 1px solid transparent; }"
-        ".tcode-sidebar stackswitcher button:checked { color: #e7e7e7; border-bottom-color: #0078d4; }"
+        ".tcode-sidebar stackswitcher { padding: 5px; border-spacing: 4px; border-bottom: 1px solid #2b2b2b; }"
+        ".tcode-sidebar stackswitcher button { min-height: 0; padding: 3px 10px; border-radius: 7px;"
+        "  background: none; box-shadow: none; border: none; color: #9d9d9d; font-size: 0.8em; font-weight: bold; }"
+        ".tcode-sidebar stackswitcher button:checked { color: #e7e7e7; background: rgba(255, 255, 255, .08); }"
         ".tcode-sidebar stackswitcher button:hover { color: #e7e7e7; }";
     GtkCssProvider *provider = gtk_css_provider_new();
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -154,6 +152,7 @@ static GtkWidget *sidebar(App *t)
     gtk_widget_set_focusable(switcher, FALSE);
 
     gtk_widget_add_css_class(box, "tcode-sidebar");
+    make_card(box);
     gtk_box_append(GTK_BOX(box), switcher);
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(t->sidebar_stack));
     t->sidebar = box;
@@ -195,7 +194,7 @@ static void build_window(App *t, GtkApplication *app)
     GtkWidget *overlay = gtk_overlay_new();
     GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
-    g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
+    load_theme();
     find_files(t);
     start_socket(t);
     lsp_start(t);
@@ -213,6 +212,11 @@ static void build_window(App *t, GtkApplication *app)
     create_fixed_terminals(t);
     create_groups(t);
 
+    make_card(GTK_WIDGET(t->editor_area));
+    /* The terminal paints no background of its own: the card's rounded one shows instead. */
+    gtk_widget_add_css_class(GTK_WIDGET(t->shell), "tcode-shell");
+    make_card(GTK_WIDGET(t->shell));
+    vte_terminal_set_clear_background(t->shell, FALSE);
     t->vpaned = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_VERTICAL));
     gtk_paned_set_start_child(t->vpaned, GTK_WIDGET(t->editor_area));
     gtk_paned_set_end_child(t->vpaned, GTK_WIDGET(t->shell));
@@ -226,6 +230,7 @@ static void build_window(App *t, GtkApplication *app)
     gtk_paned_set_shrink_start_child(t->hpaned, FALSE);
     gtk_paned_set_position(t->hpaned, 280);
     gtk_widget_set_vexpand(GTK_WIDGET(t->hpaned), TRUE);
+    gtk_widget_add_css_class(GTK_WIDGET(t->hpaned), "tcode-workspace");
 
     gtk_box_append(GTK_BOX(content), GTK_WIDGET(t->hpaned));
     gtk_box_append(GTK_BOX(content), status_bar(t));

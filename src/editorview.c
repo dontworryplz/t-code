@@ -743,8 +743,8 @@ static void redraw_guides(VteTerminal *term G_GNUC_UNUSED, EditorView *v)
 /* Setting up --------------------------------------------------------------------------------- */
 
 static const char *const css =
-    ".tcode-editor scrollbar { background: #1f1f1f; border-left: 1px solid #2b2b2b; }"
-    ".tcode-editor scrollbar slider { min-width: 8px; border-radius: 0; background: rgba(121, 121, 121, .4); }"
+    ".tcode-editor scrollbar { background: #1f1f1f; border: none; }"
+    ".tcode-editor scrollbar slider { min-width: 6px; margin: 2px; border-radius: 6px; background: rgba(121, 121, 121, .4); }"
     ".tcode-editor scrollbar slider:hover { background: rgba(100, 100, 100, .7); }"
     ".tcode-editor .minimap { background: #1f1f1f; }"
     ".tcode-editor vte-terminal { padding: 1px; }"; /* TERM_PADDING */

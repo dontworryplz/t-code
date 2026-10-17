@@ -40,6 +40,7 @@ static struct {
 static const char *const css =
     ".tcode-scm { background: #1f1f1f; }"
     ".tcode-scm textview, .tcode-scm textview text { background: #313131; color: #cccccc; }"
+    ".tcode-scm .message { padding: 4px; background: #313131; }"
     ".tcode-scm .message { border: 1px solid #3c3c3c; margin: 0 10px; }"
     ".tcode-scm .message:focus-within { border-color: #0078d4; }"
     ".tcode-scm .placeholder { color: #8b8b8b; margin: 4px 6px; }"
@@ -51,7 +52,7 @@ static const char *const css =
     ".tcode-scm .note.error { color: #f14c4c; }"
     ".tcode-scm .section { font-size: 0.8em; font-weight: bold; color: #cccccc; padding: 2px 10px; }"
     ".tcode-scm list { background: transparent; }"
-    ".tcode-scm row { padding: 0 6px 0 18px; min-height: 22px; color: #cccccc; }"
+    ".tcode-scm row { padding: 0 6px 0 18px; margin: 0 4px; min-height: 22px; border-radius: 6px; color: #cccccc; }"
     ".tcode-scm row:hover { background: #2a2d2e; }"
     ".tcode-scm row:selected { background: #04395e; }"
     ".tcode-scm row .dim { color: #8b8b8b; font-size: 0.9em; }"
@@ -901,6 +902,7 @@ GtkWidget *scm_panel(App *t)
     gtk_overlay_set_child(GTK_OVERLAY(overlay), scm.message);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), scm.placeholder);
     gtk_widget_add_css_class(overlay, "message");
+    gtk_widget_set_overflow(overlay, GTK_OVERFLOW_HIDDEN); /* the text view inside follows its rounded corners */
     gtk_box_append(GTK_BOX(content), overlay);
 
     scm.commit = gtk_button_new_with_label("✓ Commit");

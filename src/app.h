@@ -78,6 +78,10 @@ struct App {
     } settings;
 };
 
+/* theme.c */
+void load_theme(void);
+void make_card(GtkWidget *widget);
+
 /* terminal.c */
 VteTerminal *new_terminal(App *t);
 void spawn(App *t, VteTerminal *term, char **argv, char **extra_env, GPid *pid);

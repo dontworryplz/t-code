@@ -22,10 +22,10 @@ struct Picker {
 };
 
 static const char *const css =
-    ".tcode-picker { background: #222222; border: 1px solid #454545; border-radius: 6px;"
+    ".tcode-picker { background: #222222; border: 1px solid #454545; border-radius: 12px;"
     "  box-shadow: 0 4px 16px rgba(0,0,0,.6); padding: 6px; }"
     ".tcode-picker list { background: transparent; }"
-    ".tcode-picker row { padding: 3px 8px; border-radius: 3px; }"
+    ".tcode-picker row { padding: 3px 8px; border-radius: 7px; }"
     ".tcode-picker row:selected { background: #04395e; }"
     ".tcode-picker .detail { color: #9d9d9d; font-size: smaller; }"
     ".tcode-picker .message { color: #9d9d9d; padding: 6px 8px; }";

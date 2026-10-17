@@ -10,15 +10,10 @@
 #include <string.h>
 
 static const char *const css =
-    /* A thin title bar, like VS Code's. */
-    "headerbar { min-height: 30px; padding: 0 4px; background: #181818; box-shadow: none;"
-    "  border-bottom: 1px solid #2b2b2b; }"
-    "headerbar * { min-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }"
-    "headerbar .title { font-size: 0.9em; font-weight: normal; }"
-    "headerbar button { min-height: 22px; min-width: 22px; padding: 0 4px; margin: 4px 0; }"
-    "headerbar windowcontrols button { min-height: 18px; min-width: 18px; padding: 1px; margin: 0 1px; }"
-    ".tcode-status { background: #181818; border-top: 1px solid #2b2b2b; padding: 0 6px; }"
-    ".tcode-status button { min-height: 0; padding: 1px 8px; border-radius: 0; color: #cccccc; }"
+    /* The title bar is in theme.c. */
+    ".tcode-status { background: #181818; padding: 3px 6px; }"
+    ".tcode-status button { min-height: 0; padding: 1px 8px; border-radius: 6px; background: none;"
+    "  box-shadow: none; border: none; color: #cccccc; }"
     ".tcode-status button:hover { background: rgba(255, 255, 255, .12); }"
     ".tcode-status label { color: #cccccc; padding: 0 8px; }"
     ".tcode-status label.dim { color: #9d9d9d; }";
