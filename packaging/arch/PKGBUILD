@@ -1,0 +1,37 @@
+# Maintainer: suacayipkisi <ufukdenizcaglayan@gmail.com>
+pkgname=t-code
+pkgver=0.1
+pkgrel=1
+pkgdesc='Terminal-centric C/C++ IDE: file manager, micro editor tabs and a shell'
+arch=('x86_64')
+url='https://github.com/suacayipkisi/t-code'
+license=('MIT')
+depends=('glib2' 'gtk4' 'vte4' 'webkitgtk-6.0' 'md4c' 'micro' 'clang' 'git'
+         'ttf-cascadia-code' 'hicolor-icon-theme')
+makedepends=('pkgconf')
+optdepends=('ripgrep: faster Search panel (falls back to grep)'
+            'wl-clipboard: clipboard on Wayland'
+            'xclip: clipboard on X11')
+# packaging/build.sh makes this tarball from the working tree
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  make build/t-code build/t-code-fm build/t-code-lsp
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  build/t-code --version | grep -qx "t-code $pkgver"
+  # The other tests open windows and need a display.
+  make build/test-searchmatch
+  build/test-searchmatch
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  # Arch keeps helper programs in /usr/lib, t-code looks there too.
+  make DESTDIR="$pkgdir" PREFIX=/usr LIBEXECDIR=/usr/lib install
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

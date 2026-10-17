@@ -18,6 +18,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifndef TCODE_VERSION /* set by the Makefile */
+#define TCODE_VERSION "unknown"
+#endif
+
 /* View --------------------------------------------------------------------------------------- */
 
 void set_font_scale(App *t, double scale)
@@ -89,10 +93,56 @@ static char *find_beside_exe(const char *const *candidates)
     return found;
 }
 
+/* A micro config the user cannot write to (/usr/share/t-code/micro, installed by a package):
+ * micro keeps backups and history in its config dir and saves files through it, so editors get
+ * ~/.local/state/t-code/micro instead, whose entries link to the shared files. A real file the
+ * user put there in place of a link is left alone. */
+static char *writable_micro_config(char *shared)
+{
+    char *own;
+    GDir *dir;
+    const char *name;
+
+    if (access(shared, W_OK) == 0 || !g_file_test(shared, G_FILE_TEST_IS_DIR))
+        return shared;
+    own = g_build_filename(g_get_user_state_dir(), "t-code", "micro", NULL);
+    if (g_mkdir_with_parents(own, 0700) != 0 || !(dir = g_dir_open(shared, 0, NULL))) {
+        g_free(own);
+        return shared;
+    }
+    while ((name = g_dir_read_name(dir))) {
+        char *target = g_build_filename(shared, name, NULL);
+        char *link = g_build_filename(own, name, NULL);
+        char *current = g_file_read_link(link, NULL);
+        GFile *file = g_file_new_for_path(link);
+        GError *error = NULL;
+
+        if (!current || strcmp(current, target) != 0) {
+            if (current)
+                g_file_delete(file, NULL, NULL);
+            if (!g_file_test(link, G_FILE_TEST_EXISTS) &&
+                !g_file_make_symbolic_link(file, target, NULL, &error)) {
+                g_warning("Cannot link %s: %s", link, error->message);
+                g_error_free(error);
+            }
+        }
+        g_object_unref(file);
+        g_free(current);
+        g_free(link);
+        g_free(target);
+    }
+    g_dir_close(dir);
+    g_free(shared);
+    return own;
+}
+
 static void find_files(App *t)
 {
-    static const char *const fm[] = { "t-code-fm", "../libexec/t-code/t-code-fm", NULL };
-    static const char *const lsp[] = { "t-code-lsp", "../libexec/t-code/t-code-lsp", NULL };
+    /* libexec/t-code (Fedora, Debian, ~/.local) or lib/t-code (Arch) */
+    static const char *const fm[] = { "t-code-fm", "../libexec/t-code/t-code-fm",
+                                      "../lib/t-code/t-code-fm", NULL };
+    static const char *const lsp[] = { "t-code-lsp", "../libexec/t-code/t-code-lsp",
+                                       "../lib/t-code/t-code-lsp", NULL };
     static const char *const micro[] = { "../share/t-code/micro", "../micro", NULL };
     /* Installed, the icon is in ~/.local/share/icons; from the build tree it is in desktop/. */
     static const char *const icons[] = { "../desktop", NULL };
@@ -100,7 +150,7 @@ static void find_files(App *t)
 
     t->fm_program = find_beside_exe(fm);
     t->lsp_program = find_beside_exe(lsp);
-    t->micro_config = find_beside_exe(micro);
+    t->micro_config = writable_micro_config(find_beside_exe(micro));
     t->icon_dir = find_beside_exe(icons);
     t->temp_dir = g_build_filename(g_get_user_runtime_dir(), versions, NULL);
     g_free(versions);
@@ -347,6 +397,17 @@ static gboolean on_signal(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* --version: answered before GTK starts, so it works without a display. */
+static int on_local_options(GApplication *app G_GNUC_UNUSED, GVariantDict *options,
+                            App *t G_GNUC_UNUSED)
+{
+    if (g_variant_dict_contains(options, "version")) {
+        g_print("t-code %s\n", TCODE_VERSION);
+        return 0;
+    }
+    return -1;
+}
+
 int main(int argc, char **argv)
 {
     App t = { .root = g_get_current_dir(), .font_scale = 1.0 };
@@ -354,6 +415,9 @@ int main(int argc, char **argv)
                                               G_APPLICATION_HANDLES_OPEN | G_APPLICATION_NON_UNIQUE);
     int status;
 
+    g_application_add_main_option(G_APPLICATION(app), "version", 'v', G_OPTION_FLAG_NONE,
+                                  G_OPTION_ARG_NONE, "Show the version and exit", NULL);
+    g_signal_connect(app, "handle-local-options", G_CALLBACK(on_local_options), &t);
     session_load_settings(&t);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &t);
     g_signal_connect(app, "open", G_CALLBACK(on_open), &t);

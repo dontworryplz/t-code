@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+include /usr/share/dpkg/pkg-info.mk
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	dh_auto_build -- build/t-code build/t-code-fm build/t-code-lsp
+
+override_dh_auto_install:
+	dh_auto_install -- PREFIX=/usr LIBEXECDIR=/usr/libexec
+	desktop-file-validate debian/t-code/usr/share/applications/io.github.tcode.desktop
+
+# The other tests open windows and need a display.
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	build/t-code --version | grep -qx 't-code $(DEB_VERSION_UPSTREAM)'
+	$(MAKE) build/test-searchmatch
+	build/test-searchmatch
+endif

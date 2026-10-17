@@ -104,6 +104,24 @@ local function write_osc(text)
     end
 end
 
+-- micro 2.0.15 gave Cursor:GetVisualX a wrap argument; 2.0.14 (Debian 13) takes none and calling
+-- it with one is an error that stops the plugin.
+local visualx_wrap_arg = nil
+
+local function visual_x(cursor)
+    if visualx_wrap_arg == nil then
+        local ok, x = pcall(cursor.GetVisualX, cursor, false)
+        visualx_wrap_arg = ok
+        if ok then
+            return x
+        end
+    end
+    if visualx_wrap_arg then
+        return cursor:GetVisualX(false)
+    end
+    return cursor:GetVisualX()
+end
+
 local function report()
     local bp = current()
     if bp == nil then
@@ -116,7 +134,7 @@ local function report()
     local state = string.format("%d %d %d %d %d %d %d %d %d %d %d %s %s", bp.Buf:Modified() and 1 or 0,
                                 cursor.Y + 1, cursor.X + 1, errors, warnings, view.StartLine.Line,
                                 view.Height, bp.Buf:LinesNum(), math.floor(bp.Buf.Settings["tabsize"]),
-                                view.StartCol, cursor:GetVisualX(false), problems, path)
+                                view.StartCol, visual_x(cursor), problems, path)
     if state ~= last then
         last = state
         write_osc("\027]0;t-code " .. state .. "\007")

@@ -1,3 +1,4 @@
+VERSION := 0.1
 PKGS    := gtk4 vte-2.91-gtk4 gio-unix-2.0 webkitgtk-6.0 md4c-html
 APP_SRC := $(wildcard src/*.c)
 FM_SRC  := $(wildcard src/fm/*.c)
@@ -5,18 +6,25 @@ LSP_SRC := $(wildcard src/lsp/*.c)
 TEST_SRC := $(wildcard tests/*.c)
 CFLAGS  ?= -O2 -g
 CFLAGS  += -Wall -Wextra -std=c23
+# Where 'make install' puts things. t-code finds its helpers next to itself, so LIBEXECDIR must be
+# $(PREFIX)/libexec or $(PREFIX)/lib, and DATADIR $(PREFIX)/share.
+PREFIX     ?= /usr/local
+BINDIR     ?= $(PREFIX)/bin
+LIBEXECDIR ?= $(PREFIX)/libexec
+DATADIR    ?= $(PREFIX)/share
 APP_CFLAGS := $(shell pkg-config --cflags $(PKGS))
 
 all: build/t-code build/t-code-fm build/t-code-lsp build/compile_commands.json
 
 build/t-code: $(APP_SRC) src/app.h | build
-	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ $(APP_SRC) $(shell pkg-config --libs $(PKGS))
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ $(APP_SRC) $(LDFLAGS) \
+	  $(shell pkg-config --libs $(PKGS))
 
 build/t-code-fm: $(FM_SRC) src/fm/fm.h | build
-	$(CC) $(CFLAGS) -o $@ $(FM_SRC)
+	$(CC) $(CFLAGS) -o $@ $(FM_SRC) $(LDFLAGS)
 
 build/t-code-lsp: $(LSP_SRC) | build
-	$(CC) $(CFLAGS) -o $@ $(LSP_SRC)
+	$(CC) $(CFLAGS) -o $@ $(LSP_SRC) $(LDFLAGS)
 
 # How each file is compiled, so clangd (in micro, VS Code, ...) finds the GTK, VTE and WebKit headers.
 build/compile_commands.json: Makefile $(APP_SRC) $(FM_SRC) $(LSP_SRC) $(TEST_SRC) | build
@@ -54,10 +62,27 @@ test: build/test-searchmatch build/test-search-panel build/test-minimap build/te
 	build/test-minimap
 	build/test-scm
 
+# System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).
+MICRO_FILES := settings.json bindings.json colorschemes syntax plug bin
+
+install: build/t-code build/t-code-fm build/t-code-lsp
+	install -Dm755 build/t-code $(DESTDIR)$(BINDIR)/t-code
+	install -Dm755 build/t-code-fm $(DESTDIR)$(LIBEXECDIR)/t-code/t-code-fm
+	install -Dm755 build/t-code-lsp $(DESTDIR)$(LIBEXECDIR)/t-code/t-code-lsp
+	install -d $(DESTDIR)$(DATADIR)/t-code/micro
+	cd micro && cp -R $(MICRO_FILES) $(DESTDIR)$(DATADIR)/t-code/micro/
+	chmod -R u=rwX,go=rX $(DESTDIR)$(DATADIR)/t-code
+	install -Dm644 desktop/io.github.tcode.svg \
+	  $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/io.github.tcode.svg
+	install -d $(DESTDIR)$(DATADIR)/applications
+	sed 's|@BIN@|$(BINDIR)/t-code|' desktop/io.github.tcode.desktop.in \
+	  > $(DESTDIR)$(DATADIR)/applications/io.github.tcode.desktop
+	chmod 644 $(DESTDIR)$(DATADIR)/applications/io.github.tcode.desktop
+
 build:
 	mkdir -p build
 
 clean:
 	rm -rf build
 
-.PHONY: all clean test
+.PHONY: all clean test install

@@ -2,6 +2,9 @@
 
 One window, three kinds of terminals, nothing else.
 
+**Version 0.1** — the first release, with packages for Fedora, Arch Linux and Debian
+([Install](#install)). `t-code --version` prints the installed version.
+
 ![t-code editing its own source: the file manager on the left, src/t-code.c open in the editor with indent guides and the minimap, the shell below, and the status bar](docs/screenshot.png)
 
 <sub>t-code open on its own repository: the file manager with the <code>src/</code> tree expanded, <code>src/t-code.c</code> in the editor with indent guides (the block around the cursor highlighted) and the minimap next to the scrollbar, the shell below, and the status bar with the git branch, clangd's errors and warnings, Build / Run and the cursor position.</sub>
@@ -31,14 +34,58 @@ or updates by itself.
 
 ## Requirements
 
-`micro`, `clangd`, `git`, the Cascadia Code font, and to build: `gcc`, `make` and the GTK4, VTE,
-WebKitGTK and md4c headers.
+`micro` (2.0.14 or newer), `clangd`, `git`, the Cascadia Code font (`ripgrep` is optional, for a faster Search
+panel), and to build: `gcc` 14 or newer (C23), `make` and the GTK4, VTE, WebKitGTK and md4c
+headers. The packages below pull in all of these by themselves.
 
 ```sh
 sudo dnf install gtk4-devel vte291-gtk4-devel webkitgtk6.0-devel md4c-devel
 ```
 
 ## Install
+
+### With a package (Fedora, Arch Linux, Debian)
+
+t-code 0.1 has packages for Fedora 44, Arch Linux and Debian 13 (trixie), x86_64. Install the one
+for your distribution; the package manager pulls in micro, clangd, git and the Cascadia Code font:
+
+```sh
+sudo dnf install ./t-code-0.1-1.fc44.x86_64.rpm          # Fedora
+sudo pacman -U t-code-0.1-1-x86_64.pkg.tar.zst           # Arch Linux
+sudo apt install ./t-code_0.1-1_amd64.deb                # Debian
+```
+
+Then start `t-code` from the app menu, or `t-code [folder]` in a terminal. To remove it, use
+your package manager (`sudo dnf remove t-code`, `sudo pacman -R t-code`, `sudo apt remove t-code`).
+
+The package puts `t-code` in `/usr/bin`, the file manager and `t-code-lsp` in
+`/usr/libexec/t-code/` (`/usr/lib/t-code/` on Arch), the editor config in
+`/usr/share/t-code/micro/`, and the app menu entry and icon. Each user gets their own editor
+folder in `~/.local/state/t-code/micro/`, where micro keeps its backups and history; it links to
+the shared config, so package updates reach it.
+
+### Building the packages yourself
+
+All three packages are built from this repository with one script. The Arch and Debian packages
+(and the Fedora one, when you are not on Fedora) are built in containers, so all you need is
+`podman` or `docker`:
+
+```sh
+packaging/build.sh                # all three, or pick: packaging/build.sh fedora arch debian
+packaging/test.sh                 # tries each package out in a fresh container
+```
+
+The packages land in `packaging/packages/fedora/`, `arch/` and `debian/`. On Fedora, the RPM is
+built directly with `rpmbuild`; install its build dependencies once with
+`sudo dnf install rpm-build dnf-plugins-core && sudo dnf builddep packaging/fedora/t-code.spec`.
+
+`packaging/test.sh` installs each package in a fresh container of its distribution (so the
+package manager has to find every dependency), checks the installed files, and starts t-code on
+a headless X server with a C file: the file manager, micro, `t-code-lsp` and clangd have to come
+up, t-code has to quit cleanly, and micro has to load its plugins and save a file. While they
+build, the packages also run the tests that need no display.
+
+### From the source, into ~/.local
 
 ```sh
 ./install.sh
@@ -54,7 +101,9 @@ To remove everything it installed:
 ./uninstall.sh
 ```
 
-For development, `make` builds into `build/`, and `build/t-code` runs straight from the repo.
+`make install` installs system-wide instead (`PREFIX=/usr/local` by default, `DESTDIR` for
+staging; the packages use it). For development, `make` builds into `build/`, and `build/t-code`
+runs straight from the repo.
 `make test` runs the tests in `tests/` (the Search panel, minimap and Source Control ones open a
 window, so they need a display).
 
@@ -187,9 +236,12 @@ tests/               make test: searchmatch.c, the Search panel, the minimap and
 micro/               editor config: settings, colors, C and C++ syntax, the clangd plugin, and the tcode
                      plugin that reports the editor's state to t-code and sets the git comparison
 desktop/             app menu entry template and the app icon
+packaging/           build.sh, test.sh: Fedora (fedora/t-code.spec), Arch (arch/PKGBUILD) and Debian
+                     (debian/debian/) packages, built into packaging/packages/ (not in git)
 install.sh, uninstall.sh
 LICENSE
-Makefile             also writes build/compile_commands.json, so clangd understands this code
+Makefile             VERSION, make install; also writes build/compile_commands.json, so clangd
+                     understands this code
 ```
 
 ## License
