@@ -9,23 +9,42 @@
 #include <string.h>
 #include <unistd.h>
 
-#define TERMINAL_FONT "Cascadia Code 11"
-
 /* VS Code's terminal colors on its Dark Modern background. */
 static const char *const palette_hex[16] = {
     "#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
     "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#e5e5e5",
 };
 
+void set_terminal_font(App *t, VteTerminal *term, const char *font)
+{
+    PangoFontDescription *desc = pango_font_description_from_string(font ? font : DEFAULT_FONT);
+
+    vte_terminal_set_font(term, desc);
+    vte_terminal_set_font_scale(term, t->font_scale);
+    pango_font_description_free(desc);
+}
+
+/* Gives every terminal the font the settings choose for it. */
+void apply_fonts(App *t)
+{
+    int n = tab_count(t);
+
+    set_terminal_font(t, t->fm, t->settings.fm_font);
+    set_terminal_font(t, t->shell, t->settings.font);
+    for (int i = 0; i < n; i++) {
+        Tab *tab = tab_nth(t, i);
+        if (tab->kind == TAB_EDITOR)
+            set_terminal_font(t, tab->term, t->settings.font);
+    }
+}
+
+/* A terminal in the editor font; the file manager gets its own in create_fixed_terminals(). */
 VteTerminal *new_terminal(App *t)
 {
     VteTerminal *term = VTE_TERMINAL(vte_terminal_new());
-    PangoFontDescription *font = pango_font_description_from_string(TERMINAL_FONT);
     GdkRGBA fg, bg, palette[16];
 
-    vte_terminal_set_font(term, font);
-    vte_terminal_set_font_scale(term, t->font_scale);
-    pango_font_description_free(font);
+    set_terminal_font(t, term, t->settings.font);
 
     gdk_rgba_parse(&fg, "#cccccc");
     gdk_rgba_parse(&bg, "#1f1f1f");
@@ -299,6 +318,7 @@ void create_fixed_terminals(App *t)
 {
     t->fm = new_terminal(t);
     t->shell = new_terminal(t);
+    set_terminal_font(t, t->fm, t->settings.fm_font);
     g_signal_connect(t->fm, "child-exited", G_CALLBACK(on_fixed_exited), t);
     g_signal_connect(t->shell, "child-exited", G_CALLBACK(on_fixed_exited), t);
     add_location_links(t);

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <wchar.h>
@@ -139,6 +140,102 @@ int body_height(bool bottom_line)
     return h > 0 ? h : 1;
 }
 
+/* File type icons --------------------------------------------------------------------------- */
+
+/* Nerd Font glyphs; Cascadia Code has none, fontconfig falls back to an installed Nerd Font. */
+typedef struct {
+    const char *glyph;
+    const char *color;
+} Icon;
+
+#define ICON_COLOR(r, g, b) "\x1b[38;2;" #r ";" #g ";" #b "m"
+
+static const Icon icon_folder = { "", ICON_COLOR(220, 182, 122) };
+static const Icon icon_folder_open = { "", ICON_COLOR(220, 182, 122) };
+static const Icon icon_file = { "", ICON_COLOR(150, 150, 150) };
+
+static const Icon icon_c = { "", ICON_COLOR(89, 158, 255) };
+static const Icon icon_cpp = { "", ICON_COLOR(243, 75, 125) };
+static const Icon icon_h = { "", ICON_COLOR(160, 116, 196) };
+static const Icon icon_make = { "", ICON_COLOR(109, 128, 134) };
+static const Icon icon_config = { "", ICON_COLOR(109, 128, 134) };
+static const Icon icon_markdown = { "", ICON_COLOR(66, 165, 245) };
+static const Icon icon_json = { "", ICON_COLOR(203, 203, 65) };
+static const Icon icon_shell = { "", ICON_COLOR(137, 224, 81) };
+static const Icon icon_python = { "", ICON_COLOR(255, 188, 3) };
+static const Icon icon_lua = { "", ICON_COLOR(81, 160, 207) };
+static const Icon icon_js = { "", ICON_COLOR(203, 203, 65) };
+static const Icon icon_ts = { "", ICON_COLOR(81, 154, 186) };
+static const Icon icon_html = { "", ICON_COLOR(228, 77, 38) };
+static const Icon icon_css = { "", ICON_COLOR(66, 165, 245) };
+static const Icon icon_rust = { "", ICON_COLOR(222, 165, 132) };
+static const Icon icon_go = { "", ICON_COLOR(81, 154, 186) };
+static const Icon icon_java = { "", ICON_COLOR(204, 62, 68) };
+static const Icon icon_image = { "", ICON_COLOR(160, 116, 196) };
+static const Icon icon_archive = { "", ICON_COLOR(236, 165, 23) };
+static const Icon icon_pdf = { "", ICON_COLOR(230, 70, 60) };
+static const Icon icon_text = { "", ICON_COLOR(137, 224, 81) };
+static const Icon icon_binary = { "", ICON_COLOR(150, 150, 150) };
+static const Icon icon_git = { "", ICON_COLOR(241, 76, 40) };
+static const Icon icon_license = { "", ICON_COLOR(203, 203, 65) };
+static const Icon icon_lock = { "", ICON_COLOR(187, 187, 187) };
+
+static const struct {
+    const char *name;
+    const Icon *icon;
+} icon_names[] = {
+    { "Makefile", &icon_make },        { "makefile", &icon_make },
+    { "GNUmakefile", &icon_make },     { "CMakeLists.txt", &icon_make },
+    { ".gitignore", &icon_git },       { ".gitattributes", &icon_git },
+    { ".gitmodules", &icon_git },      { ".clang-format", &icon_config },
+    { ".clang-tidy", &icon_config },   { ".clangd", &icon_config },
+    { ".editorconfig", &icon_config }, { "LICENSE", &icon_license },
+    { "LICENSE.md", &icon_license },   { "LICENSE.txt", &icon_license },
+    { "COPYING", &icon_license },
+};
+
+static const struct {
+    const char *ext;
+    const Icon *icon;
+} icon_exts[] = {
+    { "c", &icon_c },         { "cpp", &icon_cpp },       { "cc", &icon_cpp },
+    { "cxx", &icon_cpp },     { "c++", &icon_cpp },       { "h", &icon_h },
+    { "hpp", &icon_h },       { "hh", &icon_h },          { "hxx", &icon_h },
+    { "inl", &icon_h },       { "mk", &icon_make },       { "cmake", &icon_make },
+    { "md", &icon_markdown }, { "markdown", &icon_markdown },
+    { "json", &icon_json },   { "yaml", &icon_config },   { "yml", &icon_config },
+    { "toml", &icon_config }, { "ini", &icon_config },    { "conf", &icon_config },
+    { "cfg", &icon_config },  { "xml", &icon_config },    { "desktop", &icon_config },
+    { "sh", &icon_shell },    { "bash", &icon_shell },    { "zsh", &icon_shell },
+    { "py", &icon_python },   { "lua", &icon_lua },       { "js", &icon_js },
+    { "mjs", &icon_js },      { "ts", &icon_ts },         { "html", &icon_html },
+    { "htm", &icon_html },    { "css", &icon_css },       { "rs", &icon_rust },
+    { "go", &icon_go },       { "java", &icon_java },     { "png", &icon_image },
+    { "jpg", &icon_image },   { "jpeg", &icon_image },    { "gif", &icon_image },
+    { "svg", &icon_image },   { "ico", &icon_image },     { "webp", &icon_image },
+    { "bmp", &icon_image },   { "zip", &icon_archive },   { "tar", &icon_archive },
+    { "gz", &icon_archive },  { "xz", &icon_archive },    { "bz2", &icon_archive },
+    { "zst", &icon_archive }, { "7z", &icon_archive },    { "pdf", &icon_pdf },
+    { "txt", &icon_text },    { "log", &icon_text },      { "o", &icon_binary },
+    { "a", &icon_binary },    { "so", &icon_binary },     { "bin", &icon_binary },
+    { "lock", &icon_lock },
+};
+
+static const Icon *icon_of(const Row *row)
+{
+    if (row->dir)
+        return is_expanded(row->path) >= 0 ? &icon_folder_open : &icon_folder;
+    for (int i = 0; i < N_ELEMENTS(icon_names); i++)
+        if (strcmp(row->name, icon_names[i].name) == 0)
+            return icon_names[i].icon;
+    const char *ext = strrchr(row->name, '.');
+    if (ext && ext != row->name)
+        for (int i = 0; i < N_ELEMENTS(icon_exts); i++)
+            if (strcasecmp(ext + 1, icon_exts[i].ext) == 0)
+                return icon_exts[i].icon;
+    return &icon_file;
+}
+
 static void draw_row(Buf *b, const Row *row, int index)
 {
     int cols = fm.width;
@@ -159,6 +256,13 @@ static void draw_row(Buf *b, const Row *row, int index)
         } else {
             buf_puts(b, "  ");
         }
+        cols -= 2;
+    }
+    if (cols >= 2) {
+        const Icon *icon = icon_of(row);
+        buf_puts(b, cut ? COLOR_DIM : icon->color);
+        buf_puts(b, icon->glyph);
+        buf_add(b, " ", 1);
         cols -= 2;
     }
     const char *badge = row->dir ? NULL : git_badge(row->git);

@@ -86,6 +86,14 @@ void session_load_settings(App *t)
     t->settings.detect_indent = get_bool(kf, "settings", "detect-indentation", TRUE);
     t->settings.guides = get_bool(kf, "settings", "indent-guides", TRUE);
     t->plain = !get_bool(kf, "settings", "code-coloring", TRUE);
+    g_free(t->settings.font);
+    g_free(t->settings.fm_font);
+    t->settings.font = g_key_file_get_string(kf, "settings", "font", NULL);
+    t->settings.fm_font = g_key_file_get_string(kf, "settings", "file-manager-font", NULL);
+    if (!t->settings.font || !*t->settings.font)
+        g_set_str(&t->settings.font, DEFAULT_FONT);
+    if (!t->settings.fm_font || !*t->settings.fm_font)
+        g_set_str(&t->settings.fm_font, DEFAULT_FONT);
     g_key_file_free(kf);
 }
 
@@ -101,6 +109,8 @@ void session_save_settings(App *t)
     g_key_file_set_boolean(kf, "settings", "detect-indentation", t->settings.detect_indent);
     g_key_file_set_boolean(kf, "settings", "indent-guides", t->settings.guides);
     g_key_file_set_boolean(kf, "settings", "code-coloring", !t->plain);
+    g_key_file_set_string(kf, "settings", "font", t->settings.font);
+    g_key_file_set_string(kf, "settings", "file-manager-font", t->settings.fm_font);
     g_key_file_set_double(kf, "window", "font-scale", t->font_scale);
     store(kf);
     g_key_file_free(kf);

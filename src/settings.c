@@ -122,6 +122,46 @@ static void on_text_size(GtkSpinButton *spin, gpointer data G_GNUC_UNUSED)
     session_save_settings(t); /* kept even if t-code does not close normally */
 }
 
+/* Font buttons: data is the setting (&t->settings.font or fm_font) they change. */
+static void on_font(GtkFontDialogButton *button, GParamSpec *spec G_GNUC_UNUSED, gpointer data)
+{
+    App *t = app_of(GTK_WIDGET(button));
+    PangoFontDescription *desc = gtk_font_dialog_button_get_font_desc(button);
+    char **setting = data;
+
+    if (!desc)
+        return;
+    g_free(*setting);
+    *setting = pango_font_description_to_string(desc);
+    apply_fonts(t);
+    session_save_settings(t);
+}
+
+static gboolean is_monospace(gpointer item, gpointer data G_GNUC_UNUSED)
+{
+    PangoFontFamily *family = PANGO_IS_FONT_FACE(item) ? pango_font_face_get_family(item) : item;
+
+    return PANGO_IS_FONT_FAMILY(family) && pango_font_family_is_monospace(family);
+}
+
+/* A font button for a font setting. Only fixed width fonts are listed: a terminal puts every
+ * character in a cell of the same width, so other fonts come out spaced apart. */
+static GtkWidget *font_for(char **setting)
+{
+    GtkFontDialog *dialog = gtk_font_dialog_new();
+    GtkWidget *button = gtk_font_dialog_button_new(dialog); /* takes the dialog */
+    PangoFontDescription *desc = pango_font_description_from_string(*setting);
+    GtkCustomFilter *filter = gtk_custom_filter_new(is_monospace, NULL, NULL);
+
+    gtk_font_dialog_set_title(dialog, "Font");
+    gtk_font_dialog_set_filter(dialog, GTK_FILTER(filter));
+    g_object_unref(filter);
+    gtk_font_dialog_button_set_font_desc(GTK_FONT_DIALOG_BUTTON(button), desc);
+    pango_font_description_free(desc);
+    g_signal_connect(button, "notify::font-desc", G_CALLBACK(on_font), setting);
+    return button;
+}
+
 static void add_heading(GtkGrid *grid, int *row, const char *title)
 {
     GtkWidget *heading = gtk_label_new(title);
@@ -233,6 +273,10 @@ void show_settings(App *t)
             switch_for(t->settings.autosave, G_CALLBACK(on_autosave)));
 
     add_heading(GTK_GRID(grid), &row, "Window");
+    add_row(GTK_GRID(grid), &row, "Editor font", "Editors and the terminal",
+            font_for(&t->settings.font));
+    add_row(GTK_GRID(grid), &row, "File manager font", "Icons need a Nerd Font installed",
+            font_for(&t->settings.fm_font));
     add_row(GTK_GRID(grid), &row, "Text size (%)", "Also Ctrl+= and Ctrl+-",
             spin_for(50, 300, 10, t->font_scale * 100, G_CALLBACK(on_text_size)));
     add_row(GTK_GRID(grid), &row, "Reopen the last project",

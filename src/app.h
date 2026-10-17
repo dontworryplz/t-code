@@ -75,6 +75,8 @@ struct App {
         int tab_size;
         gboolean detect_indent;  /* a file's own indentation overrides the two above */
         gboolean guides;         /* indent and bracket pair guides in editors */
+        char *font;              /* editors and the shell, a Pango font description */
+        char *fm_font;           /* the file manager */
     } settings;
 };
 
@@ -83,7 +85,10 @@ void load_theme(void);
 void make_card(GtkWidget *widget);
 
 /* terminal.c */
+#define DEFAULT_FONT "Cascadia Code 11"
 VteTerminal *new_terminal(App *t);
+void set_terminal_font(App *t, VteTerminal *term, const char *font);
+void apply_fonts(App *t);
 void spawn(App *t, VteTerminal *term, char **argv, char **extra_env, GPid *pid);
 void create_fixed_terminals(App *t);
 void start_fixed_terminals(App *t);
