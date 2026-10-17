@@ -125,6 +125,27 @@ static void on_split_toggled(GtkToggleButton *button, App *t)
     focus_current_tab(t);
 }
 
+#define SIDEBAR_MIN_WIDTH 48 /* pixels: a few columns of the file manager */
+
+/* Holds child without asking for its width: narrower, it is cut off on the right. */
+static GtkWidget *clip_width(GtkWidget *child)
+{
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_EXTERNAL, GTK_POLICY_NEVER);
+    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(scrolled), TRUE);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scrolled), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), child);
+    return scrolled;
+}
+
+/* The sidebar goes down to a few columns of the file manager, which then draws itself that narrow. */
+static void keep_sidebar_width(GtkPaned *paned, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+    if (gtk_paned_get_position(paned) < SIDEBAR_MIN_WIDTH)
+        gtk_paned_set_position(paned, SIDEBAR_MIN_WIDTH);
+}
+
 /* The left side: the file manager and the Source Control panel, as tabs. */
 static GtkWidget *sidebar(App *t)
 {
@@ -143,7 +164,7 @@ static GtkWidget *sidebar(App *t)
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(provider);
 
-    t->scm = scm_panel(t);
+    t->scm = clip_width(scm_panel(t));
     t->sidebar_stack = GTK_STACK(gtk_stack_new());
     gtk_stack_add_titled(t->sidebar_stack, GTK_WIDGET(t->fm), "files", "FILES");
     gtk_stack_add_titled(t->sidebar_stack, t->scm, "scm", "SOURCE CONTROL");
@@ -153,7 +174,7 @@ static GtkWidget *sidebar(App *t)
 
     gtk_widget_add_css_class(box, "tcode-sidebar");
     make_card(box);
-    gtk_box_append(GTK_BOX(box), switcher);
+    gtk_box_append(GTK_BOX(box), clip_width(switcher));
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(t->sidebar_stack));
     t->sidebar = box;
     return box;
@@ -228,6 +249,7 @@ static void build_window(App *t, GtkApplication *app)
     gtk_paned_set_end_child(t->hpaned, GTK_WIDGET(t->vpaned));
     gtk_paned_set_resize_start_child(t->hpaned, FALSE);
     gtk_paned_set_shrink_start_child(t->hpaned, FALSE);
+    g_signal_connect(t->hpaned, "notify::position", G_CALLBACK(keep_sidebar_width), NULL);
     gtk_paned_set_position(t->hpaned, 280);
     gtk_widget_set_vexpand(GTK_WIDGET(t->hpaned), TRUE);
     gtk_widget_add_css_class(GTK_WIDGET(t->hpaned), "tcode-workspace");
