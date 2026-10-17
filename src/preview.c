@@ -215,6 +215,19 @@ void preview_set_zoom(Tab *tab, double scale)
         webkit_web_view_set_zoom_level(tab->preview->view, scale * PREVIEW_ZOOM);
 }
 
+/* One network session for all previews, held only by their web views: WebKit's network process
+ * (~60 MB) quits when the last preview closes. The default session kept it until t-code quit. */
+static WebKitNetworkSession *preview_session(void)
+{
+    static WebKitNetworkSession *session;
+
+    if (session)
+        return g_object_ref(session);
+    session = webkit_network_session_new_ephemeral();
+    g_object_add_weak_pointer(G_OBJECT(session), (gpointer *)&session);
+    return session;
+}
+
 void open_preview(App *t, const char *path)
 {
     int n = tab_count(t);
@@ -230,8 +243,10 @@ void open_preview(App *t, const char *path)
     Preview *p = g_new0(Preview, 1);
     GdkRGBA background;
     GFile *file = g_file_new_for_path(path);
+    WebKitNetworkSession *session = preview_session();
 
-    p->view = WEBKIT_WEB_VIEW(webkit_web_view_new());
+    p->view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "network-session", session, NULL));
+    g_object_unref(session);
     gdk_rgba_parse(&background, "#1f1f1f");
     webkit_web_view_set_background_color(p->view, &background);
     /* Scripts inside the markdown never run; only the content swap above does. */

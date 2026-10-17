@@ -1,8 +1,7 @@
 /*
  * The Settings window (Ctrl+, or the gear in the title bar). Every change applies at once and is
  * saved in session.ini ([settings]). Editor settings reach micro as command line options for new
- * tabs and through setlocal for the open ones; autosave is global in micro, so it only applies to
- * tabs opened afterwards.
+ * tabs and through setlocal for the open ones. Autosave is t-code's (autosave_tick in tabs.c).
  */
 #include "app.h"
 
@@ -20,7 +19,7 @@ void settings_editor_args(App *t, GPtrArray *argv)
     g_ptr_array_add(argv, g_strdup("-tabstospaces"));
     g_ptr_array_add(argv, g_strdup(t->settings.tabs_to_spaces ? "true" : "false"));
     g_ptr_array_add(argv, g_strdup("-autosave"));
-    g_ptr_array_add(argv, g_strdup(t->settings.autosave ? "1" : "0"));
+    g_ptr_array_add(argv, g_strdup("0")); /* t-code saves instead (autosave_tick in tabs.c) */
     g_ptr_array_add(argv, g_strdup("-softwrap"));
     g_ptr_array_add(argv, g_strdup(t->settings.word_wrap ? "true" : "false"));
     g_ptr_array_add(argv, g_strdup("-wordwrap"));

@@ -105,7 +105,10 @@ To remove everything it installed:
 staging; the packages use it). For development, `make` builds into `build/`, and `build/t-code`
 runs straight from the repo.
 `make test` runs the tests in `tests/` (the Search panel, minimap and Source Control ones open a
-window, so they need a display).
+window, so they need a display). `make test-asan` runs the ones without a window again under
+AddressSanitizer, which also fails on memory leaks. `tools/` has scripts that measure what a
+running t-code costs in memory and CPU (`tools/proc-report.sh`), or run it invisibly to measure a
+change (`tools/headless.sh`).
 
 ## Usage
 
@@ -232,7 +235,10 @@ src/                 t-code, the window (see src/app.h for how the parts call ea
   session.c          remembering the window and the tabs
   preview.c          markdown preview
   fm/                t-code-fm, the file manager (see src/fm/fm.h)
-tests/               make test: searchmatch.c, the Search panel, the minimap and Source Control
+tests/               make test: searchmatch.c, the shared language servers (lsp.c), the Search panel,
+                     the minimap and Source Control; make test-asan: the first two under ASan
+tools/               measuring memory and CPU: the running process tree, a headless t-code, clangd,
+                     idle editors
 micro/               editor config: settings, colors, C and C++ syntax, the clangd plugin, and the tcode
                      plugin that reports the editor's state to t-code and sets the git comparison
 desktop/             app menu entry template and the app icon

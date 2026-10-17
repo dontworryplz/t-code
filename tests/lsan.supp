@@ -1,0 +1,2 @@
+# LeakSanitizer suppressions for make test-asan: memory GLib keeps for the whole process on
+# purpose (type system, caches), not leaks in t-code. Keep this list short and specific.

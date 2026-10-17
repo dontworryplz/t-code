@@ -1,7 +1,7 @@
 # Runs as a normal user inside a fresh container with the t-code package installed (test.sh):
-# checks the installed files, starts t-code on a headless X server with a C file and checks that
-# the file manager, micro, the shared clangd and the per-user micro config come up, and that micro
-# can save a file through that config.
+# checks the installed files, starts t-code on a headless X server with five C files and checks
+# that the file manager, micro (only for the tab shown), the shared clangd (with fewer malloc
+# arenas) and the per-user micro config come up, and that micro can save a file through that config.
 set -uo pipefail
 
 failures=0
@@ -37,11 +37,12 @@ mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 project="$HOME/project"
 mkdir -p "$project"
 printf '#include <stdio.h>\n\nint main(void)\n{\n    printf("hi\\n");\n    return 0;\n}\n' > "$project/main.c"
+for f in a b c d; do printf 'int %s(void) { return 0; }\n' "$f" > "$project/$f.c"; done
 git -C "$project" init -q
 Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
 xvfb=$!
 sleep 2
-(cd "$project" && exec dbus-run-session -- t-code "$project/main.c") > /tmp/t-code.log 2>&1 &
+(cd "$project" && exec dbus-run-session -- t-code "$project"/{a,b,c,d}.c "$project/main.c") > /tmp/t-code.log 2>&1 &
 app=$!
 # clangd starts when micro's lsp plugin asks t-code for it; give it time. (clangd names its main
 # thread "clangd.main", so it is found by its command line.)
@@ -53,6 +54,11 @@ check "file manager (t-code-fm) started" pgrep -u "$USER" -f "$helpers/t-code-fm
 check "micro started with the per-user config" pgrep -u "$USER" -f "micro -config-dir $state"
 check "micro's lsp plugin connected through t-code-lsp" pgrep -u "$USER" -f "$helpers/t-code-lsp"
 check "shared clangd started" pgrep -u "$USER" -f '^clangd '
+# Five tabs, one shown: the hidden tabs' editors start when they are first shown.
+check "micro runs for the shown tab only (1 of 5)" \
+  test "$(pgrep -u "$USER" -fc "micro -config-dir $state")" -eq 1
+check "clangd runs with 2 malloc arenas" \
+  sh -c "tr '\\0' '\\n' < /proc/\$(pgrep -u $USER -f '^clangd ' | head -1)/environ | grep -q arena_max=2"
 check "per-user config links to the shared one" test "$(readlink "$state/plug")" = "$share/plug"
 check "control socket created" sh -c "ls $XDG_RUNTIME_DIR/t-code-*.sock"
 kill -TERM "${tcode:-0}" 2>/dev/null

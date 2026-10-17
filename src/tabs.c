@@ -12,6 +12,8 @@
 
 static void tab_free(Tab *tab)
 {
+    if (tab->start_id)
+        g_source_remove(tab->start_id);
     if (tab->pid > 0) {
         kill(-tab->pid, SIGTERM);
         kill(tab->pid, SIGTERM);
@@ -19,6 +21,8 @@ static void tab_free(Tab *tab)
     if (tab->preview)
         preview_free(tab->preview);
     editor_view_free(tab->view);
+    g_strfreev(tab->argv);
+    g_strfreev(tab->env);
     g_free(tab->compare_with);
     g_free(tab->title);
     g_free(tab->path);
@@ -138,6 +142,10 @@ static void remove_tab(Tab *tab)
  * goes to the prompt. */
 void quit_editor(Tab *tab)
 {
+    if (tab->argv) { /* never shown: no micro to ask */
+        remove_tab(tab);
+        return;
+    }
     if (!editor_control(tab, "command quit"))
         vte_terminal_feed_child(tab->term, "\x11", 1);
 }
@@ -318,7 +326,40 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
         update_status(tab->app);
 }
 
-/* Starts micro on path in a new tab of the active group. line > 0 puts the cursor there. */
+/* micro starts when its tab is first shown: restoring a session with many tabs starts one or two
+ * editors instead of all of them (each with a language server connection and its open file in
+ * clangd's memory). Until then the commands sent to it wait in its control pipe. Shown and hidden
+ * editors are told so: a hidden one stops its once-a-second report (micro/plug/tcode). */
+static gboolean start_editor(gpointer data)
+{
+    Tab *tab = data;
+
+    tab->start_id = 0;
+    if (tab->argv && gtk_widget_get_mapped(GTK_WIDGET(tab->term))) {
+        spawn(tab->app, tab->term, tab->argv, tab->env, &tab->pid);
+        g_clear_pointer(&tab->argv, g_strfreev);
+        g_clear_pointer(&tab->env, g_strfreev);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+/* Not at once: in a shown window, every tab added is mapped while it is the current one, also the
+ * ones a restored session adds before the next. */
+static void on_editor_mapped(GtkWidget *term G_GNUC_UNUSED, Tab *tab)
+{
+    if (tab->argv && !tab->start_id)
+        tab->start_id = g_idle_add(start_editor, tab);
+    editor_control(tab, "visible 1");
+}
+
+static void on_editor_unmapped(GtkWidget *term G_GNUC_UNUSED, Tab *tab)
+{
+    if (!tab->argv)
+        editor_control(tab, "visible 0");
+}
+
+/* Opens path in a new tab of the active group; micro starts once the tab is shown. line > 0 puts
+ * the cursor there. */
 Tab *open_editor(App *t, const char *path, int line, int column, gboolean readonly, char **extra_env)
 {
     /* micro shows the path it was given in its status line: keep it short inside the project. */
@@ -363,10 +404,13 @@ Tab *open_editor(App *t, const char *path, int line, int column, gboolean readon
     g_ptr_array_add(env, NULL);
     g_signal_connect(term, "child-exited", G_CALLBACK(on_editor_exited), tab);
     g_signal_connect(term, "termprop-changed::" VTE_TERMPROP_XTERM_TITLE, G_CALLBACK(on_editor_title), tab);
-    spawn(t, term, (char **)argv->pdata, (char **)env->pdata, &tab->pid);
+    g_signal_connect(term, "map", G_CALLBACK(on_editor_mapped), tab);
+    g_signal_connect(term, "unmap", G_CALLBACK(on_editor_unmapped), tab);
+    tab->argv = (char **)g_ptr_array_free(argv, FALSE);
+    tab->env = (char **)g_ptr_array_free(env, FALSE);
+    if (gtk_widget_get_mapped(GTK_WIDGET(term)))
+        on_editor_mapped(GTK_WIDGET(term), tab);
 
-    g_ptr_array_free(env, TRUE);
-    g_ptr_array_free(argv, TRUE);
     g_free(position);
     g_free(relative);
     g_object_unref(file);
@@ -597,6 +641,22 @@ static GtkNotebook *new_group(App *t)
     return group;
 }
 
+/* The autosave setting. micro's own autosave timer woke every editor each second, changed or not,
+ * and every wake redrew its screen for t-code to read: instead, once a second, the editors that
+ * report unsaved changes are told to save. */
+static gboolean autosave_tick(gpointer data)
+{
+    App *t = data;
+    int n = tab_count(t);
+
+    for (int i = 0; t->settings.autosave && !t->closing && i < n; i++) {
+        Tab *tab = tab_nth(t, i);
+        if (tab->kind == TAB_EDITOR && tab->modified && !tab->compare_with)
+            editor_command(tab, "save");
+    }
+    return G_SOURCE_CONTINUE;
+}
+
 /* The editor area: a hint while nothing is open, otherwise the two groups. */
 void create_groups(App *t)
 {
@@ -614,4 +674,5 @@ void create_groups(App *t)
     gtk_stack_add_named(t->editor_area, hint, "empty");
     gtk_stack_add_named(t->editor_area, GTK_WIDGET(t->split), "tabs");
     gtk_stack_set_visible_child_name(t->editor_area, "empty");
+    g_timeout_add_seconds(1, autosave_tick, t);
 }

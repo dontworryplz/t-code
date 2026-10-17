@@ -21,7 +21,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifndef IDLE_SECONDS /* tests set a shorter one */
 #define IDLE_SECONDS 60
+#endif
 #define MAX_HEADER 65536
 
 /* Messages framed with Content-Length over a pair of streams ---------------------------------- */
@@ -657,6 +659,23 @@ static void server_message(gpointer owner, const char *body)
     g_free(method);
 }
 
+/* glibc gives every thread that allocates its own malloc arena and rarely hands their freed
+ * memory back: clangd, whose worker threads build ASTs and preambles, measured 1.5 GB resident
+ * with 25 open files while it accounted for 130 MB itself. Two arenas kept it at 700 MB, also
+ * after rebuilds, at the same speed. Other C libraries ignore the variable. */
+static void set_malloc_arenas(GSubprocessLauncher *launcher)
+{
+    const char *tunables = g_getenv("GLIBC_TUNABLES");
+    char *value;
+
+    if (tunables && strstr(tunables, "glibc.malloc.arena_max"))
+        return;
+    value = tunables && *tunables ? g_strconcat(tunables, ":glibc.malloc.arena_max=2", NULL)
+                                  : g_strdup("glibc.malloc.arena_max=2");
+    g_subprocess_launcher_setenv(launcher, "GLIBC_TUNABLES", value, TRUE);
+    g_free(value);
+}
+
 static Server *server_start(const char *key)
 {
     char **fields = g_strsplit(key, "\t", -1);
@@ -672,6 +691,7 @@ static Server *server_start(const char *key)
     launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE |
                                          G_SUBPROCESS_FLAGS_STDERR_SILENCE);
     g_subprocess_launcher_set_cwd(launcher, fields[0]);
+    set_malloc_arenas(launcher);
     process = g_subprocess_launcher_spawnv(launcher, (const char *const *)fields + 1, &error);
     g_object_unref(launcher);
     if (!process) {

@@ -35,6 +35,11 @@ local report_pending = false
 -- micro redraws its screen 30 times a second while idle.
 local own_timer = false
 local ticks = 0
+-- t-code says when the tab is hidden ("visible 0") or shown again: a hidden editor stops its tick,
+-- which redrew the screen every second for t-code to read. (micro's own autosave is off for the
+-- same reason: t-code tells changed editors to save.)
+local visible = true
+local ticking = false
 
 -- Per file: head (the commit the gutter follows), pinned (comparing with something other than
 -- HEAD), reflog and stamp (where HEAD's reflog is and its size and time when last looked at).
@@ -270,6 +275,10 @@ local function set_base(bp, kind, value)
 end
 
 local function tick()
+    if not visible then
+        ticking = false
+        return
+    end
     own_timer = true
     report()
     ticks = ticks + 1
@@ -311,6 +320,13 @@ local function control(line)
         end
     elseif verb == "command" and arg ~= "" then
         bp:HandleCommand(arg)
+    elseif verb == "visible" then
+        visible = arg ~= "0"
+        if visible and not ticking then
+            ticking = true
+            follow_head(bp.Buf)
+            micro.After(time.Second, tick)
+        end
     elseif verb == "prompt" then
         micro.InfoBar():Prompt("> ", arg, "Command", nil, function(input, canceled)
             if not canceled and input ~= "" then
@@ -363,6 +379,7 @@ end
 
 function init()
     config.MakeCommand("tcodebase", base_command, config.NoComplete)
+    ticking = true
     micro.After(time.Second, tick)
     listen()
 end

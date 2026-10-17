@@ -32,6 +32,8 @@ typedef struct {
     int visual_col;     /* the cursor's column from the line's start, tabs expanded (0-based) */
     EditorView *view;   /* editors only: minimap, scrollbar, control pipe */
     GPid pid;
+    char **argv, **env; /* an editor whose micro starts when it is first shown, else NULL */
+    guint start_id;     /* the start, due once the tab is still shown when the main loop is idle */
 } Tab;
 
 /* The editor area holds two tab groups side by side; the second one only while split. */
@@ -70,7 +72,7 @@ struct App {
     struct {
         gboolean minimap;
         gboolean reopen_last;    /* started from the app menu: open the last project */
-        gboolean autosave;       /* micro saves a second after each change */
+        gboolean autosave;       /* changed editors save every second (autosave_tick) */
         gboolean tabs_to_spaces;
         int tab_size;
         gboolean detect_indent;  /* a file's own indentation overrides the two above */

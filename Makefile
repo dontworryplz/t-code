@@ -56,11 +56,32 @@ build/test-minimap: tests/test_minimap.c src/editorview.c src/app.h | build
 build/test-scm: tests/test_scm.c src/scm.c src/status.c src/app.h | build
 	$(CC) $(CFLAGS) -Isrc $(APP_CFLAGS) -o $@ tests/test_scm.c src/scm.c $(shell pkg-config --libs $(PKGS))
 
-test: build/test-searchmatch build/test-search-panel build/test-minimap build/test-scm
+# The shared language servers (src/lsp.c), with the test program itself as the server.
+build/test-lsp: tests/test_lsp.c src/lsp.c src/app.h | build
+	$(CC) $(CFLAGS) -Isrc $(APP_CFLAGS) -o $@ tests/test_lsp.c $(LDFLAGS) $(shell pkg-config --libs gio-unix-2.0)
+
+test: build/test-searchmatch build/test-lsp build/test-search-panel build/test-minimap build/test-scm
 	build/test-searchmatch
+	build/test-lsp
 	build/test-search-panel
 	build/test-minimap
 	build/test-scm
+
+# The tests that need no display again, under AddressSanitizer and UBSan: out-of-bounds access, use
+# after free, undefined behavior, and (LeakSanitizer, at exit) every block that was not freed.
+ASAN_FLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all \
+              -Wall -Wextra -std=c23 -Isrc
+ASAN_ENV   := G_DEBUG=gc-friendly ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 \
+              LSAN_OPTIONS=suppressions=$(CURDIR)/tests/lsan.supp:print_suppressions=0
+
+test-asan: | build
+	mkdir -p build/asan
+	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gio-2.0) -o build/asan/test-searchmatch \
+	  tests/test_searchmatch.c src/searchmatch.c $(shell pkg-config --libs gio-2.0)
+	$(CC) $(ASAN_FLAGS) $(APP_CFLAGS) -o build/asan/test-lsp tests/test_lsp.c \
+	  $(shell pkg-config --libs gio-unix-2.0)
+	$(ASAN_ENV) build/asan/test-searchmatch
+	$(ASAN_ENV) build/asan/test-lsp
 
 # System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).
 MICRO_FILES := settings.json bindings.json colorschemes syntax plug bin
@@ -85,4 +106,4 @@ build:
 clean:
 	rm -rf build
 
-.PHONY: all clean test install
+.PHONY: all clean test test-asan install
