@@ -1,4 +1,4 @@
-# t-code
+# <img src="desktop/io.github.tcode.svg" alt="" width="48" align="top"> t-code
 
 One window, three kinds of terminals, nothing else.
 
@@ -14,8 +14,16 @@ same widget GNOME's terminals use):
   with clangd checking the code (micro is choosen because vim/neovim usage is hard for new users)
 - **bottom:** your shell
 
-All terminals use Cascadia Code and VS Code's Dark Modern colors, and C code is colored the way
-VS Code colors it (`micro/colorschemes/dark-modern.micro`, `micro/syntax/c.yaml`).
+All terminals use Cascadia Code and VS Code's Dark Modern colors. C and C++ code is colored the
+way VS Code with clangd colors it (`micro/colorschemes/dark-modern.micro`, `micro/syntax/c.yaml`,
+`micro/syntax/cpp.yaml`): the colors come from VS Code's own theme files, so functions are yellow,
+types teal, variables light blue, macros blue, enum constants bright blue, control flow
+(`if`, `return`, `#include`) purple, and comments, control flow and type keywords (`int`,
+`static`, `const`, `class`) are italic. clangd tells these apart by meaning; t-code tells them
+apart by the shape of the name (`GtkWidget` and `std::vector` are types, `FOO(...)` is a macro,
+`TAB_EDITOR` an enum constant), which is right almost always but not every time. VS Code's
+colored bracket pairs are not possible in micro. `.h` files open as C++ when they contain
+C++ (`class`, `namespace`, `std::`, ...).
 
 micro runs with its own config in `micro/` (your `~/.config/micro` is untouched). Its only plugin,
 the LSP client for clangd, is copied into `micro/plug/lsp` at a fixed version, so nothing downloads
@@ -38,7 +46,7 @@ sudo dnf install gtk4-devel vte291-gtk4-devel webkitgtk6.0-devel md4c-devel
 
 This builds t-code and installs it under `~/.local`: the `t-code` command, the file manager in
 `libexec/t-code/`, the editor config in `share/t-code/micro/`, and a "t-code" entry in the app menu
-(same icon as C IDE). Run it again after changing the code to update the installed copy.
+with its own icon (`desktop/io.github.tcode.svg`, installed to `~/.local/share/icons`). Run it again after changing the code to update the installed copy.
 
 To remove everything it installed:
 
@@ -158,9 +166,9 @@ src/                 t-code, the window (see src/app.h for how the parts call ea
   session.c          remembering the window and the tabs
   preview.c          markdown preview
   fm/                t-code-fm, the file manager (see src/fm/fm.h)
-micro/               editor config: settings, colors, C syntax, the clangd plugin, and the tcode
+micro/               editor config: settings, colors, C and C++ syntax, the clangd plugin, and the tcode
                      plugin that reports the editor's state to t-code and sets the git comparison
-desktop/             app menu entry template
+desktop/             app menu entry template and the app icon
 install.sh, uninstall.sh
 LICENSE
 Makefile             also writes build/compile_commands.json, so clangd understands this code
