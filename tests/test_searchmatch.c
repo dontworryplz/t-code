@@ -1,6 +1,6 @@
-/* Tests for src/searchmatch.c: command lines, match finding, parsing and snippets, and real
+/* Tests for src/search/searchmatch.c: command lines, match finding, parsing and snippets, and real
  * ripgrep / grep runs on a temporary folder. */
-#include "searchmatch.h"
+#include "search/searchmatch.h"
 
 #include <gio/gio.h>
 #include <glib/gstdio.h>

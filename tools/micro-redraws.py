@@ -6,7 +6,7 @@ times the number of open editors. Runs micro with t-code's config (micro/) in a 
 with a control pipe like t-code's, and counts the writes per second while the tab counts as shown,
 after "visible 0" (hidden) and after "visible 1" again. An idle hidden editor should write nothing.
 
-  tools/micro-redraws.py [file] [micro flags...]    (default: src/run.c, -autosave 0 as t-code runs it)
+  tools/micro-redraws.py [file] [micro flags...]    (default: src/project/run.c, -autosave 0 as t-code runs it)
 """
 import os
 import pty
@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "src", "run.c")
+    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "src", "project", "run.c")
     flags = sys.argv[2:] or ["-autosave", "0"]
     work = tempfile.mkdtemp(prefix="micro-redraws-")
     fifo = os.path.join(work, "control")

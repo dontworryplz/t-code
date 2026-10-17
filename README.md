@@ -295,28 +295,29 @@ tests check that 5 opened files start only 1 editor and that clangd has the aren
 ## Files
 
 ```
-src/                 t-code, the window (see src/app.h for how the parts call each other)
-  t-code.c           building the window, main()
-  terminal.c         terminals; Ctrl+click on compiler messages in the shell
-  tabs.c             editor tabs and the two groups
-  commands.c         every command: shortcuts, command palette and the Keybinds list come from it
-  picker.c           the popup list used by Ctrl+P, the palette and file history
-  quickopen.c        Ctrl+P
-  search.c           the Search tab, Ctrl+Shift+F (ripgrep)
-  searchmatch.c      its command lines and output parsing (GLib only, tested on its own)
-  editorview.c       next to each editor: the minimap, the scrollbar and the indent guides
-  status.c           the status bar (and the thin title bar's style)
-  keybinds.c         the Keybinds window
-  about.c            the About window: version, MIT license, library and program versions
-  project.c          switching folders, recent folders
-  socket.c           requests from the file manager over $TCODE_SOCKET
-  gitcompare.c       comparing with HEAD or a commit from the history
-  run.c              build and run
-  session.c          remembering the window and the tabs
-  preview.c          markdown preview
+src/                 t-code, the window (src/app.h: the shared types and a map of the folders;
+                     every .c file has a .h next to it with what it offers the others)
+  main.c             start and quit: the command line, the application, signals
+  window/            the window: layout and panes (window.c), where the helpers are (paths.c),
+                     theme, terminals and Ctrl+click on compiler messages (terminal.c), the status
+                     bar, every command: shortcuts, palette and Keybinds list (commands.c)
+  editor/            editor tabs and the two groups (tabs.c), micro in a tab (editor.c), the page
+                     around it (editorview.c): the control pipe to micro (control.c), the minimap
+                     (minimap.c, lexer.c) and the indent guides (guides.c); markdown preview
+  search/            the Search tab, Ctrl+Shift+F (ripgrep); searchmatch.c is its GLib-only part
+  git/               the Source Control tab (scm.c), git status in the background (gitstatus.c),
+                     comparing with HEAD or a commit from the history (compare.c)
+  popups/            the popup list (picker.c) used by Ctrl+P (quickopen.c), the palette and history
+  dialogs/           the Settings, Keyboard Shortcuts and About windows
+  project/           switching folders (project.c), remembering the window and tabs (session.c),
+                     build and run (run.c)
+  ipc/               requests from the file manager over $TCODE_SOCKET (socket.c), the shared
+                     language servers (lsp.c, with lspchannel.c and lspjson.c)
   fm/                t-code-fm, the file manager (see src/fm/fm.h)
-tests/               make test: searchmatch.c, the shared language servers (lsp.c), the Search panel,
-                     the minimap and Source Control; make test-asan: the first two under ASan
+  lsp/               t-code-lsp, connects an editor's lsp plugin to the shared servers
+tests/               make test: searchmatch.c, the shared language servers (ipc/lsp.c), the Search
+                     panel, the minimap, Source Control and About; make test-asan: the first two
+                     under ASan
 tools/               measuring memory and CPU: the running process tree, a headless t-code, clangd,
                      idle editors
 micro/               editor config: settings, colors, C and C++ syntax, the clangd plugin, and the tcode

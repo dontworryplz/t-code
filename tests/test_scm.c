@@ -1,12 +1,16 @@
-/* Tests for the Source Control panel (src/scm.c) and the git status that feeds it (src/status.c,
- * included to reach poll_branch) when projects switch: nothing of the last project may stay in
+/* Tests for the Source Control panel (src/git/scm.c) and the git status that feeds it
+ * (src/git/gitstatus.c, included to reach poll_branch) when projects switch: nothing of the last project may stay in
  * a folder without git, in a repository without commits, or when git answers late. Uses real
  * repositories in a temporary folder; needs a display. */
-#include "status.c"
+#include "git/gitstatus.c"
+
+#include "editor/editor.h"
+#include "editor/tabs.h"
+#include "git/compare.h"
 
 #include <glib/gstdio.h>
 
-/* What scm.c and status.c call elsewhere in t-code. */
+/* What scm.c and gitstatus.c call elsewhere in t-code. */
 gboolean any_unsaved(App *t G_GNUC_UNUSED) { return FALSE; }
 void save_all(App *t, SavedFunc then, gpointer data) { then(t, data); }
 Tab *find_tab(App *t G_GNUC_UNUSED, TabKind kind G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) { return NULL; }
@@ -17,12 +21,7 @@ void compare_with_head(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void compare_with_index(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void compare_revisions(App *t G_GNUC_UNUSED, const char *old_rev G_GNUC_UNUSED, const char *old_rel G_GNUC_UNUSED,
                        const char *new_rev G_GNUC_UNUSED, const char *new_rel G_GNUC_UNUSED) {}
-char *project_summary(App *t G_GNUC_UNUSED) { return g_strdup(""); }
-int tab_count(App *t G_GNUC_UNUSED) { return 0; }
-Tab *tab_nth(App *t G_GNUC_UNUSED, int index G_GNUC_UNUSED) { return NULL; }
-Tab *current_tab(App *t G_GNUC_UNUSED) { return NULL; }
-void show_keybinds(App *t G_GNUC_UNUSED) {}
-void build_project(App *t G_GNUC_UNUSED, gboolean run G_GNUC_UNUSED) {}
+void status_show_branch(App *t G_GNUC_UNUSED, const char *branch G_GNUC_UNUSED, gboolean dirty G_GNUC_UNUSED) {}
 
 static App app;
 static char *tmp, *with_commits, *no_git, *no_commits;
@@ -96,7 +95,7 @@ static const char *tab_title(void)
     return gtk_stack_page_get_title(gtk_stack_get_page(app.sidebar_stack, app.scm));
 }
 
-/* Opens a project the way switch_project (project.c) does, then waits for git. */
+/* Opens a project the way switch_project (project/project.c) does, then waits for git. */
 static void open_project_at(const char *root)
 {
     g_free(app.root);

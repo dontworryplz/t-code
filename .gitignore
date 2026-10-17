@@ -4,6 +4,6 @@ build/
 .clangd
 .vscode/
 CLAUDE.md
-REVIEW.md
+review/
 REVIEW_GUIDE.md
 packaging/packages/

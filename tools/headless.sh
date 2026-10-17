@@ -5,8 +5,8 @@
 #   tools/headless.sh [-w seconds] [-s seconds] [-c key=value]... [t-code args...]
 #     -w: wait before measuring (default 8: micro, clangd and its index come up)
 #     -s: measure CPU over this many seconds (default 5)
-#     -c: a setting in session.ini's [settings] (src/session.c), like -c minimap=false
-# Example: tools/headless.sh src/*.c        (opens every file: only the last tab's micro starts)
+#     -c: a setting in session.ini's [settings] (src/project/session.c), like -c minimap=false
+# Example: tools/headless.sh src/*/*.c      (opens every file: only the last tab's micro starts)
 set -euo pipefail
 
 wait=8 sample=5 settings=()

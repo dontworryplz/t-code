@@ -1,7 +1,7 @@
 /*
  * t-code-fm: the file manager pane of t-code, a tree view of the current directory that runs in
  * a terminal. It talks to t-code over the unix socket named by $TCODE_SOCKET, one line per
- * request (see src/socket.c): open, open-side, preview, project, compare, history, terminal, copy.
+ * request (see src/ipc/socket.c): open, open-side, preview, project, compare, history, terminal, copy.
  *
  *   main.c   the main loop          tree.c   the folder tree        git.c    git state colors
  *   draw.c   drawing                input.c  keys and mouse         menu.c   right-click menu

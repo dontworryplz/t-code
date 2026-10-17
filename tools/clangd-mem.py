@@ -4,7 +4,7 @@
 Starts its own clangd (not t-code's), opens files of the project like micro's lsp plugin does,
 waits until clangd is idle (background index done), optionally edits every file a few rounds,
 then prints its resident memory next to what clangd says it uses itself ($/memoryUsage). A big
-gap between the two is allocator overhead, not clangd's data (see set_malloc_arenas in src/lsp.c).
+gap between the two is allocator overhead, not clangd's data (see set_malloc_arenas in src/ipc/lsp.c).
 
   tools/clangd-mem.py                               # 25 files, t-code's flags (micro/settings.json)
   tools/clangd-mem.py --files 5 --churn 3
@@ -125,7 +125,7 @@ def main():
     for pair in args.env:
         name, value = pair.split("=", 1)
         env[name] = value
-    files = sorted(glob.glob(f"{ROOT}/src/*.c") + glob.glob(f"{ROOT}/src/*/*.c") + glob.glob(f"{ROOT}/src/*.h"))
+    files = sorted(glob.glob(f"{ROOT}/src/*.c") + glob.glob(f"{ROOT}/src/*/*.c") + glob.glob(f"{ROOT}/src/*.h") + glob.glob(f"{ROOT}/src/*/*.h"))
     files = files[:args.files]
 
     clangd = Clangd(args.flags or default_flags(), env)

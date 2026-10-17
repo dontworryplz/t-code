@@ -1,0 +1,22 @@
+/*
+ * The status bar at the bottom, like VS Code's:
+ *   left   git branch ("*" when there are changes), clangd errors and warnings in the open files,
+ *          Build and Run buttons and what they would build
+ *   right  cursor line and column, and the Keybinds button
+ */
+#pragma once
+
+#include "app.h"
+
+/* Creates the bar; its labels go to t->status. */
+GtkWidget *status_bar(App *t);
+
+/* Starts git status (git/gitstatus.c), whose answers fill the branch label, and fills the bar. */
+void start_status_updates(App *t);
+
+/* Fills the bar again from the tabs: problems, what Build would build, the cursor position. */
+void update_status(App *t);
+
+/* The branch label: "⎇ name", with "*" when the work tree has changes; branch NULL hides it
+ * (not a repository). */
+void status_show_branch(App *t, const char *branch, gboolean dirty);

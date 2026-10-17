@@ -1,11 +1,14 @@
-/* Tests for the shared language servers in src/lsp.c (included, to reach its static state): editors
+/* Tests for the shared language servers in src/ipc/lsp.c (included with its channels and JSON helpers,
+ * to reach their static state): editors
  * connect to its socket like t-code-lsp does, and this program itself, started with --fake-server,
  * is the language server. It logs every message it gets to a file, so the tests can see what reached
  * the server. Besides the routing, they check that nothing piles up over many editors coming and
  * going: no requests, documents or clients left behind, and (with glibc, without ASan) no growth of
  * the heap. make test-asan runs this under AddressSanitizer, whose leak check covers the rest. */
 #define IDLE_SECONDS 1
-#include "lsp.c"
+#include "ipc/lsp.c"
+#include "ipc/lspchannel.c"
+#include "ipc/lspjson.c"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -62,12 +65,12 @@ static int fake_server(const char *log_path)
         }
         body[size] = '\0';
         size = -1;
-        char *method = lookup_string(body, "method");
-        char *uri = lookup_string(body, "params.textDocument.uri");
-        Span id = lookup(body, "id");
+        char *method = json_lookup_string(body, "method");
+        char *uri = json_lookup_string(body, "params.textDocument.uri");
+        Span id = json_lookup(body, "id");
         fprintf(log, "%s %s\n", method ? method : "answer", uri ? uri : "-");
         if (method && id.start) {
-            char *server_id = span_text(id);
+            char *server_id = json_text(id);
             if (strcmp(method, "initialize") == 0)
                 fake_send("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"capabilities\":{}}}", server_id);
             else
@@ -77,7 +80,7 @@ static int fake_server(const char *log_path)
             fake_send("{\"jsonrpc\":\"2.0\",\"id\":\"config\",\"method\":\"workspace/configuration\","
                       "\"params\":{\"items\":[{}]}}");
         } else if (method && uri && strcmp(method, "textDocument/didOpen") == 0) {
-            char *quoted = quote(uri);
+            char *quoted = json_quote(uri);
             fake_send("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\","
                       "\"params\":{\"uri\":%s,\"diagnostics\":[]}}", quoted);
             g_free(quoted);
@@ -98,7 +101,7 @@ typedef struct {
     GByteArray *in;
 } Editor;
 
-/* Runs the main loop (lsp.c's side) until done() or ms have passed. */
+/* Runs the main loop (ipc/lsp.c's side) until done() or ms have passed. */
 static gboolean spin(gboolean (*done)(gpointer), gpointer data, int ms)
 {
     gint64 end = g_get_monotonic_time() + ms * 1000;
@@ -201,10 +204,10 @@ static void expect_answer(Editor *e, const char *id, const char *result)
     char *body = editor_receive(e, 3000);
 
     g_assert_nonnull(body);
-    Span got_id = lookup(body, "id"), got = lookup(body, "result");
+    Span got_id = json_lookup(body, "id"), got = json_lookup(body, "result");
     g_assert_nonnull(got_id.start);
     g_assert_nonnull(got.start);
-    char *id_text = span_text(got_id), *result_text = span_text(got);
+    char *id_text = json_text(got_id), *result_text = json_text(got);
     g_assert_cmpstr(id_text, ==, id);
     g_assert_cmpstr(result_text, ==, result);
     g_free(result_text);
@@ -217,7 +220,7 @@ static void expect_diagnostics(Editor *e, const char *uri)
     char *body = editor_receive(e, 3000), *got;
 
     g_assert_nonnull(body);
-    got = lookup_string(body, "params.uri");
+    got = json_lookup_string(body, "params.uri");
     g_assert_cmpstr(got, ==, uri);
     g_free(got);
     g_free(body);

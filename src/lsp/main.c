@@ -6,7 +6,7 @@
  * Connects to t-code's language server socket ($TCODE_LSP), says which server it wants and from
  * which folder (one line: "<cwd>\t<server>\t<arg>...\n") and then copies bytes both ways:
  * stdin to the socket, the socket to stdout. t-code runs one server per folder and command for
- * all its editors (src/lsp.c). Without t-code, or when it cannot be reached, it runs the server
+ * all its editors (src/ipc/lsp.c). Without t-code, or when it cannot be reached, it runs the server
  * itself, like the plugin would have.
  */
 #define _POSIX_C_SOURCE 200809L

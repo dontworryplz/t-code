@@ -1,6 +1,11 @@
-/* Tests for the minimap in src/editorview.c (included, to reach its static functions): the
- * colors its lexer gives C code, micro's problem lines and how they are drawn. */
-#include "editorview.c"
+/* Tests for the minimap in src/editor/minimap.c and its lexer (src/editor/lexer.c): the colors the
+ * lexer gives C code, micro's problem lines and how they are drawn. The editor page's files are
+ * included, to reach their static functions. */
+#include "editor/control.c"
+#include "editor/editorview.c"
+#include "editor/guides.c"
+#include "editor/lexer.c"
+#include "editor/minimap.c"
 
 #include <glib/gstdio.h>
 
@@ -141,7 +146,7 @@ static Tab tab;
 
 static void test_problem_spec(void)
 {
-    editor_view_set_problems(&tab, "e3,w7,e10,x4,w0,e");
+    minimap_set_problems(&tab, "e3,w7,e10,x4,w0,e");
     g_assert_cmpuint(tab.view->problem_lines->len, ==, 3);
     Problem *p = (Problem *)tab.view->problem_lines->data;
     g_assert_cmpint(p[0].line, ==, 2);
@@ -151,7 +156,7 @@ static void test_problem_spec(void)
     g_assert_cmpint(p[2].line, ==, 9);
     g_assert_true(p[2].error);
 
-    editor_view_set_problems(&tab, "-");
+    minimap_set_problems(&tab, "-");
     g_assert_cmpuint(tab.view->problem_lines->len, ==, 0);
 }
 
@@ -173,7 +178,7 @@ static void test_problem_drawing(void)
 
     tab.lines = 20;
     tab.height = 0; /* no viewport shade */
-    editor_view_set_problems(&tab, "e2,w4");
+    minimap_set_problems(&tab, "e2,w4");
     draw_minimap(NULL, cr, width, height, tab.view);
     cairo_surface_flush(surface);
 

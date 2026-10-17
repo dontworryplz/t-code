@@ -1,12 +1,12 @@
-/* Tests for the Search panel (src/search.c) as the user drives it: typing, the options, results
+/* Tests for the Search panel (src/search/search.c) as the user drives it: typing, the options, results
  * grouped by file, folding, opening a result, the result limit and switching projects. Needs a
  * display; skipped without one. */
-#include "app.h"
+#include "search/search.h"
 
 #include <glib/gstdio.h>
 #include <string.h>
 
-/* What the panel opened last (open_file_at stands in for tabs.c). */
+/* What the panel opened last (open_file_at stands in for editor.c). */
 static struct {
     char *path;
     int line, column;

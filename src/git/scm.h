@@ -1,0 +1,17 @@
+/*
+ * The Source Control panel, the second sidebar page (Ctrl+Shift+G), like VS Code's: a commit
+ * message with Commit and Push, the Staged Changes and Changes lists, and the last commits.
+ */
+#pragma once
+
+#include "app.h"
+
+/* Creates the panel. */
+GtkWidget *scm_panel(App *t);
+
+/* Fills the panel from the output of "git status --porcelain=v2 --branch -z --untracked-files=all"
+ * (size bytes; out NULL: not a repository, or git failed). gitstatus.c calls it with each answer. */
+void scm_update(App *t, const char *out, gsize size);
+
+/* Empties the panel at once (another project was opened); the next git status fills it again. */
+void scm_reset(void);

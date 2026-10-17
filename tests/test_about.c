@@ -1,7 +1,7 @@
-/* Tests for the About window (src/about.c): the license text, the versions of the programs t-code
+/* Tests for the About window (src/dialogs/about.c): the license text, the versions of the programs t-code
  * runs filled in once they answer, and closing the window before they do. Needs a display;
  * skipped without one. */
-#include "../src/about.c"
+#include "dialogs/about.c"
 
 static App app;
 
