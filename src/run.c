@@ -1,7 +1,8 @@
 /*
  * Build (Ctrl+Shift+B) and run (F5), in the shell pane, also on the status bar buttons.
  * The project is found from the current file upwards:
- *   CMakeLists.txt  configure + build in build/; run starts the newest executable there
+ *   CMakeLists.txt  configure + build in build/; run starts the project's executable there
+ *                  (named after the project, else the newest one that is not a test)
  *   Makefile        make; run uses "make run" when the Makefile has a run target
  *   neither         compile the current C/C++ file alone (with ASan/UBSan) into build/
  */
@@ -84,13 +85,20 @@ static char *cmake_command(const char *root, gboolean run)
         src, build, ninja ? "-G Ninja " : "", build);
 
     if (run) {
-        /* The newest executable anywhere under build/ (targets may sit in build/bin, build/src),
-         * leaving out CMake's own checks and shared libraries. */
+        /* The executable named after the project (CMAKE_PROJECT_NAME) anywhere under build/
+         * (targets may sit in build/bin, build/src); else the newest one that is not a test, else
+         * the newest one. CMake's own checks and shared libraries are left out. */
         char *with_run = g_strdup_printf(
-            "%s && exe=$(find %s -type f -executable -not -path '*/CMakeFiles/*' -not -name '*.so*'"
-            " -printf '%%T@ %%p\\n' | sort -nr | head -1 | cut -d' ' -f2-)"
-            " && if [ -n \"$exe\" ]; then echo \"▶ $exe\" && \"$exe\"; else echo 'No executable in build/'; fi",
-            cmd, build);
+            "%s && exe=$(cd %s && {"
+            " find . -type f -executable -not -path '*/CMakeFiles/*'"
+            " -name \"$(sed -n 's/^CMAKE_PROJECT_NAME:STATIC=//p' CMakeCache.txt)\";"
+            " find . -type f -executable -not -path '*/CMakeFiles/*' -not -name '*.so*'"
+            " -printf '%%T@ %%p\\n' | sort -nr | cut -d' ' -f2- | grep -vi test;"
+            " find . -type f -executable -not -path '*/CMakeFiles/*' -not -name '*.so*'"
+            " -printf '%%T@ %%p\\n' | sort -nr | cut -d' ' -f2-; } | head -1)"
+            " && if [ -n \"$exe\" ]; then exe=%s/${exe#./} && echo \"▶ $exe\" && \"$exe\";"
+            " else echo 'No executable in build/'; fi",
+            cmd, build, build);
         g_free(cmd);
         cmd = with_run;
     }

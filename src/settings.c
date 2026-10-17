@@ -79,6 +79,25 @@ static void on_tab_size(GtkSpinButton *spin, gpointer data G_GNUC_UNUSED)
     session_save_settings(t);
 }
 
+static void on_detect_indent(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+    App *t = app_of(GTK_WIDGET(toggle));
+
+    t->settings.detect_indent = gtk_switch_get_active(toggle);
+    session_save_settings(t);
+}
+
+static void on_guides(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+    App *t = app_of(GTK_WIDGET(toggle));
+    int n = tab_count(t);
+
+    t->settings.guides = gtk_switch_get_active(toggle);
+    for (int i = 0; i < n; i++)
+        editor_view_redraw(tab_nth(t, i));
+    session_save_settings(t);
+}
+
 static void on_autosave(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
 {
     App *t = app_of(GTK_WIDGET(toggle));
@@ -201,10 +220,15 @@ void show_settings(App *t)
             switch_for(t->settings.minimap, G_CALLBACK(on_minimap)));
     add_row(GTK_GRID(grid), &row, "Code coloring", "Also F7",
             switch_for(!t->plain, G_CALLBACK(on_coloring)));
+    add_row(GTK_GRID(grid), &row, "Indent guides", "Lines at each indentation level; the block around the cursor in color",
+            switch_for(t->settings.guides, G_CALLBACK(on_guides)));
     add_row(GTK_GRID(grid), &row, "Tab size", NULL,
             spin_for(1, 16, 1, t->settings.tab_size, G_CALLBACK(on_tab_size)));
     add_row(GTK_GRID(grid), &row, "Insert spaces for Tab", NULL,
             switch_for(t->settings.tabs_to_spaces, G_CALLBACK(on_tabs_to_spaces)));
+    add_row(GTK_GRID(grid), &row, "Detect indentation",
+            "Files indented with tabs or another number of spaces keep it (applies to tabs opened from now on)",
+            switch_for(t->settings.detect_indent, G_CALLBACK(on_detect_indent)));
     add_row(GTK_GRID(grid), &row, "Autosave", "Save a second after each change (applies to tabs opened from now on)",
             switch_for(t->settings.autosave, G_CALLBACK(on_autosave)));
 

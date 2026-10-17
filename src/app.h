@@ -28,6 +28,8 @@ typedef struct {
     int line, column;   /* cursor, errors and warnings: reported by micro (micro/plug/tcode) */
     int errors, warnings;
     int top, height, lines; /* first line shown (0-based), lines that fit, lines in the file */
+    int tab_size, start_col; /* micro's tabsize for the file, first column shown */
+    int visual_col;     /* the cursor's column from the line's start, tabs expanded (0-based) */
     EditorView *view;   /* editors only: minimap, scrollbar, control pipe */
     GPid pid;
 } Tab;
@@ -71,6 +73,8 @@ struct App {
         gboolean autosave;       /* micro saves a second after each change */
         gboolean tabs_to_spaces;
         int tab_size;
+        gboolean detect_indent;  /* a file's own indentation overrides the two above */
+        gboolean guides;         /* indent and bracket pair guides in editors */
     } settings;
 };
 

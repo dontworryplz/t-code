@@ -1,0 +1,43 @@
+#!/bin/sh
+# micro runs this for the system clipboard instead of wl-copy / wl-paste / xclip / xsel (t-code
+# puts this folder first in micro's PATH): "micro-clip -i|-o clipboard|primary", -i taking the
+# text to copy on stdin, -o writing the clipboard's text to stdout. micro also reads the clipboard
+# once when it starts. Reading has a time limit: on GNOME, wl-paste can wait for keyboard focus
+# forever, and micro waits with it, frozen (it neither draws nor quits).
+
+action=copy
+[ "$1" = -o ] && action=paste
+register=$2
+
+if [ -n "$WAYLAND_DISPLAY" ] && command -v wl-paste >/dev/null 2>&1; then
+    if [ "$register" = primary ]; then
+        set -- --primary
+    else
+        set --
+    fi
+    if [ "$action" = copy ]; then
+        exec wl-copy "$@"
+    fi
+    exec timeout 1 wl-paste --no-newline --type text "$@"
+fi
+
+if command -v xclip >/dev/null 2>&1; then
+    selection=clipboard
+    [ "$register" = primary ] && selection=primary
+    if [ "$action" = copy ]; then
+        exec xclip -in -selection "$selection"
+    fi
+    exec timeout 1 xclip -out -selection "$selection"
+fi
+
+if command -v xsel >/dev/null 2>&1; then
+    selection=--clipboard
+    [ "$register" = primary ] && selection=--primary
+    if [ "$action" = copy ]; then
+        exec xsel --input "$selection"
+    fi
+    exec timeout 1 xsel --output "$selection"
+fi
+
+echo "micro-clip: no wl-clipboard, xclip or xsel" >&2
+exit 1

@@ -1,7 +1,12 @@
 -- t-code: reports the editor's state to t-code through the terminal title, as
---   "t-code <modified 0|1> <line> <column> <errors> <warnings> <top> <height> <lines> <absolute path>"
+--   "t-code <modified 0|1> <line> <column> <errors> <warnings> <top> <height> <lines> <tabsize>
+--    <startcol> <visualcol> <absolute path>"
 -- (errors and warnings are clangd's; top is the first line shown, height the lines that fit and
--- lines the lines in the file, for t-code's scrollbar and minimap).
+-- lines the lines in the file, for t-code's scrollbar and minimap; tabsize, startcol (the first
+-- column shown) and visualcol (the cursor's column on the screen, tabs expanded) for its indent
+-- guides).
+-- With TCODE_DETECT_INDENT set, a file's own indentation (tabs, or spaces in steps of 2, 4, ...)
+-- overrides the tabsize and tabstospaces it was started with, like VS Code's "Detect Indentation".
 -- With TCODE_CONTROL set, it reads lines from that named pipe:
 --   scroll <line>       show the file from that line (0-based) on
 --   command <command>   run a micro command, as if typed after Ctrl+E
@@ -81,12 +86,57 @@ local function report()
     local errors, warnings = diagnostics(bp.Buf)
     local cursor = bp.Buf:GetActiveCursor()
     local view = bp:BufView()
-    local state = string.format("%d %d %d %d %d %d %d %d %s", bp.Buf:Modified() and 1 or 0,
+    local state = string.format("%d %d %d %d %d %d %d %d %d %d %d %s", bp.Buf:Modified() and 1 or 0,
                                 cursor.Y + 1, cursor.X + 1, errors, warnings, view.StartLine.Line,
-                                view.Height, bp.Buf:LinesNum(), path)
+                                view.Height, bp.Buf:LinesNum(), math.floor(bp.Buf.Settings["tabsize"]),
+                                view.StartCol, cursor:GetVisualX(false), path)
     if state ~= last then
         last = state
         write_osc("\027]0;t-code " .. state .. "\007")
+    end
+end
+
+-- Indentation ---------------------------------------------------------------------------------
+
+-- Tabs when more lines start with a tab than with spaces; else spaces, in the most common step
+-- between the indentation of neighboring lines. Single spaces (" * " in block comments) and blank
+-- lines do not count; without any indented line the settings stay.
+local function detect_indent(buf)
+    local tabs, spaces, steps, previous = 0, 0, {}, nil
+    for i = 0, math.min(buf:LinesNum(), 10000) - 1 do
+        local line = buf:Line(i)
+        local lead = line:match("^[ \t]*")
+        if #lead < #line then
+            if lead:find("\t", 1, true) then
+                tabs = tabs + 1
+                previous = nil
+            else
+                if #lead > 1 then
+                    spaces = spaces + 1
+                end
+                if previous ~= nil then
+                    local step = math.abs(#lead - previous)
+                    if step >= 2 and step <= 8 then
+                        steps[step] = (steps[step] or 0) + 1
+                    end
+                end
+                previous = #lead
+            end
+        end
+    end
+    if tabs > spaces then
+        buf:SetOptionNative("tabstospaces", false)
+    elseif spaces > 0 then
+        local best, count = nil, 0
+        for step = 2, 8 do
+            if (steps[step] or 0) > count then
+                best, count = step, steps[step]
+            end
+        end
+        buf:SetOptionNative("tabstospaces", true)
+        if best ~= nil then
+            buf:SetOptionNative("tabsize", best)
+        end
     end
 end
 
@@ -259,6 +309,9 @@ function init()
 end
 
 function onBufPaneOpen(bp)
+    if goos.Getenv("TCODE_DETECT_INDENT") ~= "" then
+        pcall(detect_indent, bp.Buf)
+    end
     report()
     local rev, file = goos.Getenv("TCODE_BASE_REV"), goos.Getenv("TCODE_BASE_FILE")
     if rev ~= "" or file ~= "" then

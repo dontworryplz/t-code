@@ -1,7 +1,8 @@
 /*
  * Editor tabs, in two groups side by side (the second one only while split). Each editor is a
  * terminal running micro; micro reports its state through the terminal title, as
- * "t-code <modified> <line> <column> <errors> <warnings> <top> <height> <lines> <path>"
+ * "t-code <modified> <line> <column> <errors> <warnings> <top> <height> <lines> <tabsize> <startcol>
+ * <visualcol> <path>"
  * (see micro/plug/tcode), and takes commands through a named pipe (see editorview.c).
  */
 #include "app.h"
@@ -261,7 +262,7 @@ static void on_editor_exited(VteTerminal *term G_GNUC_UNUSED, int status G_GNUC_
 static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, Tab *tab)
 {
     const char *title = vte_terminal_get_termprop_string(term, VTE_TERMPROP_XTERM_TITLE, NULL);
-    int modified, line, column, errors, warnings, top, height, lines, end = 0;
+    int modified, line, column, errors, warnings, top, height, lines, tab_size, start_col, visual_col, end = 0;
 
     if (!title)
         return;
@@ -274,8 +275,8 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
         return;
     }
     if (!g_str_has_prefix(title, "t-code ") ||
-        sscanf(title + 7, "%d %d %d %d %d %d %d %d %n", &modified, &line, &column, &errors, &warnings,
-               &top, &height, &lines, &end) < 8)
+        sscanf(title + 7, "%d %d %d %d %d %d %d %d %d %d %d %n", &modified, &line, &column, &errors, &warnings,
+               &top, &height, &lines, &tab_size, &start_col, &visual_col, &end) < 11)
         return;
     if (tab->modified && !modified)
         refresh_branch(tab->app); /* saved: the working tree changed */
@@ -286,6 +287,9 @@ static void on_editor_title(VteTerminal *term, const char *prop G_GNUC_UNUSED, T
     tab->warnings = warnings;
     tab->height = height;
     tab->lines = lines;
+    tab->tab_size = MAX(tab_size, 1);
+    tab->start_col = start_col;
+    tab->visual_col = visual_col;
     editor_view_update(tab, top);
 
     const char *path = title + 7 + end;
@@ -342,6 +346,12 @@ Tab *open_editor(App *t, const char *path, int line, int column, gboolean readon
         g_ptr_array_add(env, g_strdup(extra_env[i]));
     if (control)
         g_ptr_array_add(env, g_strconcat("TCODE_CONTROL=", control, NULL));
+    if (t->settings.detect_indent)
+        g_ptr_array_add(env, g_strdup("TCODE_DETECT_INDENT=1"));
+    /* micro-clip (micro/bin): the clipboard without micro freezing on a wl-paste that never returns. */
+    if (t->micro_config)
+        g_ptr_array_add(env, g_strdup_printf("PATH=%s/bin:%s", t->micro_config,
+                                             g_getenv("PATH") ? g_getenv("PATH") : "/usr/bin:/bin"));
     lsp_editor_env(t, env);
     g_ptr_array_add(env, NULL);
     g_signal_connect(term, "child-exited", G_CALLBACK(on_editor_exited), tab);

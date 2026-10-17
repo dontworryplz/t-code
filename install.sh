@@ -54,7 +54,7 @@ info "Installed $BIN"
 
 # 4. Editor config. micro keeps its own state (cursor positions, backups) next to it; that stays.
 mkdir -p "$SHARE/micro"
-for item in settings.json bindings.json colorschemes syntax plug; do
+for item in settings.json bindings.json colorschemes syntax plug bin; do
   rm -rf "${SHARE:?}/micro/$item"
   cp -r "$ROOT/micro/$item" "$SHARE/micro/$item"
 done
