@@ -2,6 +2,13 @@
 
 One window, three kinds of terminals, nothing else.
 
+> **`main` is moving to GtkSourceView.** The editor tabs are being rewritten on
+> [GtkSourceView 5](https://gitlab.gnome.org/GNOME/gtksourceview) instead of micro: clangd's errors
+> underlined in red, completion and parameter hints in popups while typing, and one process instead
+> of one micro per tab. The plan is in [`docs/gtksourceview-plan.md`](docs/gtksourceview-plan.md).
+> Until it is done, `main` may be unfinished; the micro-based t-code (0.1.1) lives on in the
+> [`micro-main`](../../tree/micro-main) branch.
+
 **Version 0.1.1** — uses about 8 times less memory than 0.1 and almost no CPU while idle
 ([Performance](#performance)); packages for Fedora, Arch Linux, Debian and Void Linux (glibc and
 musl) ([Install](#install)).
