@@ -9,6 +9,7 @@
 #include "git/compare.h"
 #include "ipc/lsp.h"
 #include "ipc/socket.h"
+#include "project/project.h"
 #include "project/session.h"
 #include "window/window.h"
 
@@ -20,6 +21,10 @@
 #endif
 
 /* Application -------------------------------------------------------------------------------- */
+
+/* --new-window (the desktop file's "New Window" action, e.g. a middle click on the dock): an empty
+ * window that asks for its folder, instead of the last project, which may be open in another one. */
+static gboolean new_window;
 
 /* Started with no folder from the home directory (the app menu does that): reopen the last project
  * instead. Started elsewhere, the current directory is meant. */
@@ -43,6 +48,11 @@ static void reopen_last_project(App *t)
  * above); its tabs from last time come back. */
 static void on_activate(GApplication *app, App *t)
 {
+    if (new_window) {
+        build_window(t, GTK_APPLICATION(app));
+        choose_folder(t);
+        return;
+    }
     reopen_last_project(t);
     build_window(t, GTK_APPLICATION(app));
     session_restore_tabs(t);
@@ -107,7 +117,24 @@ static int on_local_options(GApplication *app G_GNUC_UNUSED, GVariantDict *optio
         g_print("t-code %s\n", TCODE_VERSION);
         return 0;
     }
+    new_window = g_variant_dict_contains(options, "new-window");
     return -1;
+}
+
+/* app.new-window, on the session bus: the docks (GNOME's, Dash to Dock) open a new window on a
+ * middle click only when the running app exports it. Every window is its own process, so this
+ * starts another t-code with --new-window from the home directory. */
+static void on_new_window_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED,
+                                 gpointer data G_GNUC_UNUSED)
+{
+    char *exe = g_file_read_link("/proc/self/exe", NULL);
+    char *argv[] = { exe, "--new-window", NULL };
+    GError *error = NULL;
+
+    if (!exe || !g_spawn_async(g_get_home_dir(), argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, &error))
+        g_warning("t-code: cannot open a new window: %s", error ? error->message : "no /proc/self/exe");
+    g_clear_error(&error);
+    g_free(exe);
 }
 
 /* Everything happens inside g_application_run(): it parses the command line, calls on_activate or
@@ -121,6 +148,10 @@ int main(int argc, char **argv)
 
     g_application_add_main_option(G_APPLICATION(app), "version", 'v', G_OPTION_FLAG_NONE,
                                   G_OPTION_ARG_NONE, "Show the version and exit", NULL);
+    g_application_add_main_option(G_APPLICATION(app), "new-window", 0, G_OPTION_FLAG_NONE,
+                                  G_OPTION_ARG_NONE, "Open an empty window that asks for a folder", NULL);
+    static const GActionEntry app_actions[] = { { .name = "new-window", .activate = on_new_window_action } };
+    g_action_map_add_action_entries(G_ACTION_MAP(app), app_actions, G_N_ELEMENTS(app_actions), NULL);
     g_signal_connect(app, "handle-local-options", G_CALLBACK(on_local_options), &t);
     session_load_settings(&t);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), &t);

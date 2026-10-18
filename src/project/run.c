@@ -86,7 +86,10 @@ static char *cmake_command(const char *root, gboolean run)
 {
     char *build_dir = g_build_filename(root, "build", NULL);
     char *src = g_shell_quote(root), *build = g_shell_quote(build_dir);
-    char *ninja = g_find_program_in_path("ninja");
+    char *cache = g_build_filename(build_dir, "CMakeCache.txt", NULL);
+    /* Ninja only for a new build/: CMake refuses another generator than the one it was configured
+     * with (e.g. by hand with Unix Makefiles). */
+    char *ninja = g_file_test(cache, G_FILE_TEST_EXISTS) ? NULL : g_find_program_in_path("ninja");
     char *cmd = g_strdup_printf(
         "cmake -S %s -B %s %s-DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null"
         " && cmake --build %s",
@@ -111,6 +114,7 @@ static char *cmake_command(const char *root, gboolean run)
         cmd = with_run;
     }
     g_free(ninja);
+    g_free(cache);
     g_free(build);
     g_free(src);
     g_free(build_dir);

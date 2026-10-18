@@ -211,6 +211,8 @@ closes when its last tab does. A file is never open in both groups at once, sinc
 saving the same file would overwrite each other.
 
 **Projects.** The title bar has buttons to open another folder and to pick a recent one.
+For a second project next to the first, middle-click the dock icon (or pick "New Window" from
+its menu, or run `t-code --new-window`): a new window opens and asks for a folder.
 Switching remembers and closes the current project's tabs, restarts the file manager and the
 shell in the new folder, and brings back that folder's tabs from last time. t-code also remembers
 the window size, pane sizes, hidden panes and text size (in `~/.config/t-code/session.ini`).
