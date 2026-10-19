@@ -126,7 +126,9 @@ static int fake_server(void)
     uri = json_string_at(message, "params.textDocument.uri");
     if (g_strcmp0(method, "initialize") == 0) {
       char *reply = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":{\"capabilities\":"
-                                    "{\"positionEncoding\":\"%s\",\"hoverProvider\":true}}}",
+                                    "{\"positionEncoding\":\"%s\",\"hoverProvider\":true,\"semanticTokensProvider\":"
+                                    "{\"legend\":{\"tokenTypes\":[\"function\",\"variable\",\"comment\"],"
+                                    "\"tokenModifiers\":[\"declaration\",\"readonly\"]}}}}}",
                                     json_int_at(message, "id", 0), fake_utf16 ? "utf-16" : "utf-8");
       fake_send(reply);
       g_free(reply);
@@ -155,6 +157,22 @@ static int fake_server(void)
         fake_publish(uri, text);
     } else if (g_strcmp0(method, "textDocument/didClose") == 0) {
       g_hash_table_remove(fake_docs, uri);
+    } else if (g_strcmp0(method, "textDocument/signatureHelp") == 0) {
+      /* Where it was asked from, told as the file's one diagnostic; the answer is "no signature". */
+      char *quoted_uri = json_quote(uri), *reply;
+      char *note = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":"
+                                   "{\"uri\":%s,\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":0},"
+                                   "\"end\":{\"line\":0,\"character\":0}},\"message\":\"signature at %" G_GINT64_FORMAT
+                                   ":%" G_GINT64_FORMAT "\"}]}}",
+                                   quoted_uri, json_int_at(message, "params.position.line", 0),
+                                   json_int_at(message, "params.position.character", 0));
+      fake_send(note);
+      reply = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":null}",
+                              json_int_at(message, "id", 0));
+      fake_send(reply);
+      g_free(reply);
+      g_free(note);
+      g_free(quoted_uri);
     } else if (g_strcmp0(method, "textDocument/hover") == 0) {
       char *reply =
           g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":{\"contents\":"
@@ -475,6 +493,25 @@ static void test_churn(void)
   free_tab(tab);
 }
 
+/* Typing "(" (which closes itself) asks for the parameter hint from between the two brackets. */
+static void test_signature_position(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/signature.c", "f");
+  GtkTextIter end;
+  gint64 deadline;
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  gtk_text_buffer_get_end_iter(GTK_TEXT_BUFFER(tab->buffer), &end);
+  gtk_text_buffer_place_cursor(GTK_TEXT_BUFFER(tab->buffer), &end);
+  g_assert_true(on_typing_key(NULL, GDK_KEY_parenleft, 0, 0, tab));
+  for (deadline = g_get_monotonic_time() + 3 * G_USEC_PER_SEC;
+       !g_str_has_prefix(server_text(tab) ? server_text(tab) : "", "signature") && g_get_monotonic_time() < deadline;)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_cmpstr(server_text(tab), ==, "signature at 0:2"); /* f(|), not f()| */
+  free_tab(tab);
+}
+
 /* Completion, hints and edits --------------------------------------------------------------- */
 
 static JsonNode *json_of(const char *json)
@@ -599,6 +636,83 @@ static void test_edits_encodings(void)
   json_node_unref(utf8);
 }
 
+/* A server's column in a line with Turkish letters (two bytes each) and an emoji (two UTF-16
+ * units): the editor's column counts characters. */
+static void test_column_in(void)
+{
+  g_assert_cmpint(column_in("çağ x", 6, FALSE), ==, 5); /* "x": after 3 letters of 2 + 2 + 1 bytes and a space */
+  g_assert_cmpint(column_in("çağ x", 4, TRUE), ==, 5);
+  g_assert_cmpint(column_in("🙂y", 2, TRUE), ==, 2);
+  g_assert_cmpint(column_in("🙂y", 4, FALSE), ==, 2);
+  g_assert_cmpint(column_in("ab", 99, FALSE), ==, 3); /* past the end: the line's end */
+}
+
+/* Text typed right after a problem is not underlined with it (until the server says so). */
+static void test_problem_end(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/end.c", "abc\n");
+  JsonNode *list = json_of("[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,"
+                           "\"character\":3}},\"severity\":1,\"message\":\"m\"}]");
+  GtkTextIter at;
+  char *message;
+
+  diagnostics_show(tab, list);
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 0, 3);
+  gtk_text_buffer_insert(GTK_TEXT_BUFFER(tab->buffer), &at, "def", -1);
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 0, 5);
+  message = diagnostics_at(tab, &at, FALSE);
+  g_assert_null(message);
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 0, 1);
+  message = diagnostics_at(tab, &at, FALSE);
+  g_assert_cmpstr(message, ==, "error: m");
+  g_free(message);
+  json_node_unref(list);
+  free_tab(tab);
+}
+
+/* A snippet GtkSourceView cannot take goes in as plain text: the defaults, no tab stops. */
+static void test_snippet_text(void)
+{
+  char *text = snippet_text("f(${1:int x}, $2)$0");
+
+  g_assert_cmpstr(text, ==, "f(int x, )");
+  g_free(text);
+  text = snippet_text("a\\$b ${10:c}");
+  g_assert_cmpstr(text, ==, "a$b c");
+  g_free(text);
+}
+
+/* Semantic tokens get their colors through the server's legend; a readonly variable is a
+ * constant, a type without a color (comment) gets none. */
+static void test_semantic_colors(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/semantic.c", "int f; int v; int c; // x\n");
+  JsonNode *tokens = json_of("{\"data\":[0,4,1,0,0, 0,7,1,1,0, 0,7,1,1,2, 0,4,4,2,0]}");
+  GtkTextTagTable *table = gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer));
+  GtkTextIter at;
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  apply(tab, tokens);
+  gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 4); /* f */
+  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-#DCDCAA")));
+  gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 11); /* v */
+  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-#9CDCFE")));
+  gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 18); /* c, readonly */
+  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-#4FC1FF")));
+  gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 22); /* the comment */
+  GSList *tags = gtk_text_iter_get_tags(&at);
+  for (GSList *each = tags; each; each = each->next) {
+    char *name = NULL;
+    g_object_get(each->data, "name", &name, NULL);
+    g_assert_false(name && g_str_has_prefix(name, "semantic-"));
+    g_free(name);
+  }
+  g_slist_free(tags);
+  json_node_unref(tokens);
+  free_tab(tab);
+}
+
 int main(int argc, char **argv)
 {
   if (argc > 1 && strcmp(argv[1], "--fake-server") == 0)
@@ -622,6 +736,11 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/idle-stop", test_idle_stop);
   g_test_add_func("/lsp/crash", test_crash);
   g_test_add_func("/lsp/churn", test_churn);
+  g_test_add_func("/lsp/signature-position", test_signature_position);
+  g_test_add_func("/lsp/column-in", test_column_in);
+  g_test_add_func("/lsp/snippet-text", test_snippet_text);
+  g_test_add_func("/lsp/semantic-colors", test_semantic_colors);
+  g_test_add_func("/lsp/problem-end", test_problem_end);
   g_test_add_func("/lsp/completion-items", test_completion_items);
   g_test_add_func("/lsp/signature-markup", test_signature_markup);
   g_test_add_func("/lsp/edits", test_edits);

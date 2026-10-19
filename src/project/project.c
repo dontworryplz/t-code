@@ -11,6 +11,7 @@
 #include "editor/tabs.h"
 #include "git/gitstatus.h"
 #include "git/scm.h"
+#include "lsp/client.h"
 #include "project/session.h"
 #include "search/search.h"
 #include "window/statusbar.h"
@@ -116,6 +117,7 @@ static void switch_project(App *t, const char *root)
   session_save(t);
   close_all_tabs(t);
   set_split(t, FALSE);
+  lsp_stop(t); /* not a minute more of the old project's clangd: the next C file starts one here */
 
   g_free(t->root);
   t->root = g_strdup(root);

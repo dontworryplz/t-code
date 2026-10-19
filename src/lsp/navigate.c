@@ -7,6 +7,7 @@
 #include "editor/editor.h"
 #include "editor/editorview.h"
 #include "editor/tabs.h"
+#include "git/gitstatus.h"
 #include "lsp/client.h"
 #include "lsp/edits.h"
 #include "popups/picker.h"
@@ -68,21 +69,42 @@ static void remember(Tab *tab)
     place_free(g_queue_pop_tail(&back));
 }
 
-/* Opens path at an LSP position (its tab's text is used for the column when it is open). */
+static char *line_of(App *t, const char *path, int line, GHashTable *files);
+
+/* The 1-based column (in characters) of an LSP character position in a line's text (UTF-8 bytes,
+ * or UTF-16 units). */
+static int column_in(const char *text, gint64 character, gboolean utf16)
+{
+  const char *p = text;
+
+  for (gint64 at = 0; *p;) {
+    at += utf16 ? (g_utf8_get_char(p) >= 0x10000 ? 2 : 1) : (gint64)(g_utf8_next_char(p) - p);
+    if (at > character)
+      break;
+    p = g_utf8_next_char(p);
+  }
+  return (int)g_utf8_pointer_to_offset(text, p) + 1;
+}
+
+/* Opens path at an LSP position: from its tab's text when it is open and loaded, else from the
+ * file's line. */
 static void open_at(App *t, const char *path, JsonNode *position)
 {
   Tab *tab = find_tab(t, TAB_EDITOR, path);
   int line = (int)json_int_at(position, "line", 0) + 1;
+  gint64 character = json_int_at(position, "character", 0);
 
-  if (tab && !tab->view) /* not loaded yet */
-    tab = NULL;
-  if (tab) {
+  if (tab && tab->view && !tab->view->loading) {
     GtkTextIter iter;
     select_tab(tab);
     lsp_iter_at(tab, position, &iter);
     editor_goto(tab, line, gtk_text_iter_get_line_offset(&iter) + 1);
   } else {
-    open_file_at(t, path, line, (int)json_int_at(position, "character", 0) + 1);
+    GHashTable *files = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_strfreev);
+    char *text = line_of(t, path, line - 1, files);
+    open_file_at(t, path, line, column_in(text, character, lsp_utf16(t)));
+    g_free(text);
+    g_hash_table_destroy(files);
   }
 }
 
@@ -92,6 +114,7 @@ typedef struct {
   App *app;
   char *path;    /* the editor asking, by path: it may close meanwhile */
   gboolean save; /* formatting: save once it is done */
+  guint changes; /* formatting: the text's change count when it was asked */
 } Asked;
 
 static void asked_free(Asked *asked)
@@ -243,10 +266,10 @@ static void on_references(JsonNode *result, gpointer data)
     char *path = lsp_uri_to_path(json_string_at(ref, "uri") ? json_string_at(ref, "uri") : "");
     int line = (int)json_int_at(ref, "range.start.line", 0);
     char *text = path ? line_of(asked->app, path, line, files) : NULL;
-    if (path)
-      g_ptr_array_add(references,
-                      g_strdup_printf("%s\x1f%d\x1f%d\x1f%s", path, line + 1,
-                                      (int)json_int_at(ref, "range.start.character", 0) + 1, g_strstrip(text)));
+    if (path) {
+      int column = column_in(text, json_int_at(ref, "range.start.character", 0), lsp_utf16(asked->app));
+      g_ptr_array_add(references, g_strdup_printf("%s\x1f%d\x1f%d\x1f%s", path, line + 1, column, g_strstrip(text)));
+    }
     g_free(text);
     g_free(path);
   }
@@ -277,7 +300,8 @@ static void on_formatted(JsonNode *result, gpointer data)
   Asked *asked = data;
   Tab *tab = find_tab(asked->app, TAB_EDITOR, asked->path);
 
-  if (tab && result)
+  /* Typed on meanwhile: the edits are for the text it had, and would land in the wrong places. */
+  if (tab && result && tab->view->changes == asked->changes)
     edits_apply(tab, result);
   if (tab && asked->save)
     save_editor(tab); /* formatted or not (no server, nothing to change) */
@@ -299,6 +323,7 @@ static void format_then(Tab *tab, gboolean save)
     asked->app = tab->app;
     asked->path = g_strdup(tab->path);
     asked->save = save;
+    asked->changes = tab->view->changes;
     lsp_request(tab, "textDocument/formatting", params, NULL, on_formatted, asked);
   }
   g_free(params);
@@ -332,6 +357,7 @@ static void rename_in(App *t, const char *uri, JsonNode *edits)
 
   if (tab && tab->view && !tab->view->loading) {
     edits_apply(tab, edits);
+    save_editor(tab); /* like the files that are not open, which are written at once */
   } else if (path && g_file_get_contents(path, &text, NULL, NULL)) {
     char *changed = edits_apply_text(text, edits, lsp_utf16(t));
     g_file_set_contents(path, changed, -1, NULL);
@@ -362,6 +388,7 @@ static void on_renamed(JsonNode *result, gpointer data)
     if (uri)
       rename_in(asked->app, uri, json_at(document, "edits"));
   }
+  refresh_branch(asked->app); /* Source Control shows the changed files */
   asked_free(asked);
 }
 

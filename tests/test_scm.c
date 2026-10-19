@@ -10,6 +10,8 @@
 
 #include <glib/gstdio.h>
 
+static int head_moves; /* diff_gutter_head_moved() calls */
+
 /* What scm.c and gitstatus.c call elsewhere in t-code. */
 /* clang-format off */
 gboolean any_unsaved(App *t G_GNUC_UNUSED) { return FALSE; }
@@ -17,7 +19,7 @@ void save_all(App *t, SavedFunc then, gpointer data) { then(t, data); }
 Tab *find_tab(App *t G_GNUC_UNUSED, TabKind kind G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) { return NULL; }
 void open_file(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void editor_reload(Tab *tab G_GNUC_UNUSED) {}
-void diff_gutter_head_moved(App *t G_GNUC_UNUSED) {}
+void diff_gutter_head_moved(App *t G_GNUC_UNUSED) { head_moves++; }
 void quit_editor(Tab *tab G_GNUC_UNUSED) {}
 void compare_with_head(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void compare_with_index(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
@@ -194,6 +196,34 @@ static void test_late_status(void)
   g_assert_false(branch_busy);
 }
 
+/* Runs git status until diff_gutter_head_moved() was called more than before times (or 5 s). */
+static gboolean head_moved_after(int before)
+{
+  for (gint64 until = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+       head_moves == before && g_get_monotonic_time() < until;) {
+    if (!branch_busy)
+      poll_branch(&app);
+    runs_for(50);
+  }
+  return head_moves > before;
+}
+
+/* A commit on a branch moves the gutters' base; staging a file does not. */
+static void test_head_moves(void)
+{
+  int before;
+
+  open_with_commits();
+  runs_for(400);
+  before = head_moves;
+  git(with_commits, (const char *[]){ "add", "b.txt", NULL });
+  g_assert_false(head_moved_after(before));
+  git(with_commits,
+      (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "third", NULL });
+  commits++;
+  g_assert_true(head_moved_after(before));
+}
+
 int main(int argc, char **argv)
 {
   int status;
@@ -230,6 +260,7 @@ int main(int argc, char **argv)
   g_test_add_func("/scm/no-commits", test_no_commits);
   g_test_add_func("/scm/late-log", test_late_log);
   g_test_add_func("/scm/late-status", test_late_status);
+  g_test_add_func("/scm/head-moves", test_head_moves);
   status = g_test_run();
 
   app.closing = TRUE;

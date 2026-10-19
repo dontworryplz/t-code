@@ -14,7 +14,10 @@
 #include "window/window.h"
 
 #include <glib-unix.h>
+#include <signal.h>
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef TCODE_VERSION /* set by the Makefile */
 #define TCODE_VERSION "unknown"
@@ -26,8 +29,25 @@
  * window that asks for its folder, instead of the last project, which may be open in another one. */
 static gboolean new_window;
 
+/* TRUE when another t-code window is already running (has a live socket in XDG_RUNTIME_DIR). */
+static gboolean already_running(void)
+{
+  GDir *dir = g_dir_open(g_get_user_runtime_dir(), 0, NULL);
+  const char *name;
+  gboolean found = FALSE;
+
+  while (dir && !found && (name = g_dir_read_name(dir))) {
+    int pid = 0;
+    if (sscanf(name, "t-code-%d.sock", &pid) == 1 && pid > 0 && pid != getpid() && kill(pid, 0) == 0)
+      found = TRUE;
+  }
+  if (dir)
+    g_dir_close(dir);
+  return found;
+}
+
 /* Started with no folder from the home directory (the app menu does that): reopen the last project
- * instead. Started elsewhere, the current directory is meant. */
+ * instead. Started elsewhere (t-code in a terminal), the current directory is meant. */
 static void reopen_last_project(App *t)
 {
   char **recent;
@@ -44,11 +64,13 @@ static void reopen_last_project(App *t)
   g_strfreev(recent);
 }
 
-/* "activate": started without arguments. The project is the current folder, or the last one (see
- * above); its tabs from last time come back. */
+/* "activate": started without folder/file arguments. With another window open, a new one from the
+ * app menu (or --new-window) asks for its folder: the last project is probably open over there, and
+ * two editors on one file overwrite each other. Otherwise the current folder, or the last project
+ * (see above), comes back with its tabs. */
 static void on_activate(GApplication *app, App *t)
 {
-  if (new_window) {
+  if (already_running() && (new_window || strcmp(t->root, g_get_home_dir()) == 0)) {
     build_window(t, GTK_APPLICATION(app));
     choose_folder(t);
     return;

@@ -30,6 +30,12 @@ void set_pane_visible(App *t, GtkWidget *pane, gboolean visible);
 /* Hides a shown pane, or shows a hidden one and gives it the keyboard. */
 void toggle_pane(App *t, GtkWidget *pane);
 
-/* Shows the sidebar on one of its pages ("files", "scm" or "search") and gives that page the
- * keyboard. */
+/* Shows the dock holding page ("files", "scm", "search" or "shell"), switches to it and gives it
+ * the keyboard. */
 void show_sidebar_page(App *t, const char *page);
+
+/* Which dock holds page (0..3 left, 4..7 bottom, 8..11 right; see DOCKS in app.h), or -1. */
+int panel_dock(App *t, const char *page);
+
+/* Moves a panel ("files", "scm", "search" or "shell") to dock (0..DOCKS-1). */
+void move_panel(App *t, const char *page, int dock);

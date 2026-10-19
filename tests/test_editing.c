@@ -374,6 +374,46 @@ static void test_find_big_file(void)
   free_tab(tab);
 }
 
+/* Ctrl+H on the match the bar selected keeps it: "1 of 3", and Replace takes that one. */
+static void test_find_again(void)
+{
+  Tab *tab = new_tab("foo bar foo baz foo\n");
+  FindBar *f;
+
+  findbar_show(tab, FALSE);
+  f = tab->view->find;
+  gtk_editable_set_text(GTK_EDITABLE(f->find), "foo");
+  wait_for_count(f);
+  findbar_show(tab, TRUE);
+  wait_for_count(f);
+  g_assert_cmpstr(gtk_label_get_text(f->count), ==, "1 of 3");
+  gtk_editable_set_text(GTK_EDITABLE(f->replace), "x");
+  on_replace(f);
+  assert_text(tab, "x bar foo baz foo\n");
+  free_tab(tab);
+}
+
+/* Match Case on: the selection moves to a match that still is one. */
+static void test_find_option(void)
+{
+  Tab *tab = new_tab("FOO foo\n");
+  FindBar *f;
+  GtkTextIter start, end;
+  char *selected;
+
+  findbar_show(tab, FALSE);
+  f = tab->view->find;
+  gtk_editable_set_text(GTK_EDITABLE(f->find), "foo");
+  wait_for_count(f);
+  gtk_source_search_settings_set_case_sensitive(f->settings, TRUE);
+  on_option(NULL, f);
+  g_assert_true(gtk_text_buffer_get_selection_bounds(GTK_TEXT_BUFFER(tab->buffer), &start, &end));
+  selected = gtk_text_buffer_get_text(GTK_TEXT_BUFFER(tab->buffer), &start, &end, TRUE);
+  g_assert_cmpstr(selected, ==, "foo");
+  g_free(selected);
+  free_tab(tab);
+}
+
 /* The selection on one line is what is looked for. */
 static void test_find_selection(void)
 {
@@ -384,6 +424,26 @@ static void test_find_selection(void)
   g_assert_cmpstr(gtk_editable_get_text(GTK_EDITABLE(tab->view->find->find)), ==, "beta");
   wait_for_count(tab->view->find);
   g_assert_cmpstr(gtk_label_get_text(tab->view->find->count), ==, "1 of 1");
+  free_tab(tab);
+}
+
+/* The buffer keeps a file's last line break (an empty last line): an unchanged file that ends in a
+ * blank line has no marks, and a line break added at the end is an added line. */
+static void test_trailing_newline(void)
+{
+  char *base = g_build_filename(g_get_tmp_dir(), "t-code-test-trailing.c", NULL);
+  Tab *tab = new_tab("a\nb\n\n");
+  gint64 until;
+
+  g_assert_false(gtk_source_buffer_get_implicit_trailing_newline(tab->buffer));
+  g_file_set_contents(base, "a\nb\n\n", -1, NULL);
+  diff_gutter_compare_file(tab, base);
+  for (until = g_get_monotonic_time() + G_USEC_PER_SEC; g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, FALSE);
+  for (guint i = 0; i < tab->view->diff->marks->len; i++)
+    g_assert_cmpuint(g_array_index(tab->view->diff->marks, guint8, i), ==, LINE_SAME);
+  g_remove(base);
+  g_free(base);
   free_tab(tab);
 }
 
@@ -402,25 +462,52 @@ static void test_guide_brackets(void)
   g_array_free(found, TRUE);
 }
 
+/* The block around offset in text (see enclosing_pair): "open-close", or "-" for none. */
+static char *pair_at(const char *text, int offset)
+{
+  GArray *brackets = brackets_of(text);
+  int open, close;
+  char *pair = enclosing_pair(brackets, offset, &open, &close) ? g_strdup_printf("%d-%d", open, close) : g_strdup("-");
+
+  g_array_free(brackets, TRUE);
+  return pair;
+}
+
+static void check_pair(const char *text, const char *before_cursor, const char *expected)
+{
+  const char *at = strstr(text, before_cursor);
+  char *pair;
+
+  g_assert_nonnull(at);
+  pair = pair_at(text, (int)g_utf8_pointer_to_offset(text, at + strlen(before_cursor)));
+  g_assert_cmpstr(pair, ==, expected);
+  g_free(pair);
+}
+
 /* The block around the cursor: the innermost one with lines between its brackets. */
 static void test_guide_pair(void)
 {
-  Tab *tab = new_tab("void f(void)\n{\n    if (x) {\n        a();\n    }\n    b();\n}\n");
-  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
-  GtkTextIter at;
-  int open, close;
+  const char *text = "void f(void)\n{\n  if (x) {\n    a();\n  }\n  b();\n}\n";
 
-  gtk_text_buffer_get_iter_at_line_offset(buffer, &at, 5, 4); /* b(); */
-  g_assert_true(enclosing_pair(buffer, gtk_text_iter_get_offset(&at), &open, &close));
-  g_assert_cmpint(open, ==, 1);
-  g_assert_cmpint(close, ==, 6);
-  gtk_text_buffer_get_iter_at_line_offset(buffer, &at, 3, 8); /* a(); inside the if */
-  g_assert_true(enclosing_pair(buffer, gtk_text_iter_get_offset(&at), &open, &close));
-  g_assert_cmpint(open, ==, 2);
-  g_assert_cmpint(close, ==, 4);
-  gtk_text_buffer_get_iter_at_line_offset(buffer, &at, 0, 0); /* outside everything */
-  g_assert_false(enclosing_pair(buffer, gtk_text_iter_get_offset(&at), &open, &close));
-  free_tab(tab);
+  check_pair(text, "  b", "1-6");
+  check_pair(text, "    a", "2-4"); /* inside the if */
+  check_pair(text, "vo", "-");      /* outside everything */
+}
+
+/* The cursor inside a comment or a string: the brackets in them still do not count, after it too. */
+static void test_guide_pair_in_comment(void)
+{
+  const char *text = "int f()\n{\n  /* ( { */\n  s = \"(\";\n  x;\n}\n";
+
+  check_pair(text, "/* (", "1-5");
+  check_pair(text, "s = \"", "1-5");
+  check_pair(text, "  x", "1-5");
+}
+
+/* Offsets count characters: a "ğ" before the cursor is one. */
+static void test_guide_pair_utf8(void)
+{
+  check_pair("{ // ğğğ\n  a;\n\n}\n", "  a", "0-3");
 }
 
 /* A blank line gets the guides of the lines around it. */
@@ -495,10 +582,15 @@ int main(int argc, char **argv)
   g_test_add_func("/find/next-previous", test_find);
   g_test_add_func("/find/replace", test_replace);
   g_test_add_func("/find/selection", test_find_selection);
+  g_test_add_func("/find/again", test_find_again);
+  g_test_add_func("/find/option", test_find_option);
   g_test_add_func("/find/big-file", test_find_big_file);
   g_test_add_func("/diff-gutter/marks", test_diff_gutter);
+  g_test_add_func("/diff-gutter/trailing-newline", test_trailing_newline);
   g_test_add_func("/guides/brackets", test_guide_brackets);
   g_test_add_func("/guides/pair", test_guide_pair);
+  g_test_add_func("/guides/pair-in-comment", test_guide_pair_in_comment);
+  g_test_add_func("/guides/pair-utf8", test_guide_pair_utf8);
   g_test_add_func("/guides/blank-lines", test_guide_blank_lines);
   return g_test_run();
 }

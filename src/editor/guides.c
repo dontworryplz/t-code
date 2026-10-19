@@ -1,11 +1,12 @@
 /*
  * Indent guides (see guides.h): TcodeView, a GtkSourceView whose layer below the text (in buffer
  * coordinates, so it scrolls with it) gets the guides of the lines on the screen. The block around
- * the cursor comes from its brackets, found outside strings and comments; it is worked out again
- * only when the text or the cursor changed.
+ * the cursor comes from the file's brackets outside strings and comments, listed again only when
+ * the text changed; a cursor move only looks the block up in that list.
  */
 #include "editor/guides.h"
 
+#include "editor/diffgutter.h"
 #include "editor/editorview.h"
 
 #include <string.h>
@@ -13,11 +14,15 @@
 struct _TcodeView {
   GtkSourceView parent;
   Tab *tab;
+  GArray *brackets; /* Bracket: the file's, for the text with this change count: */
+  guint brackets_changes;
   struct {
     guint changes;
     int cursor;      /* offset */
     int open, close; /* lines of the brackets around the cursor, -1 for none */
   } pair;            /* the last pair worked out */
+  double char_width; /* of the font in font (0: not measured yet) */
+  PangoFontDescription *font;
 };
 
 #define TCODE_TYPE_VIEW (tcode_view_get_type())
@@ -32,16 +37,18 @@ static const GdkRGBA pair_inks[3] = { { 1.0, 0.84, 0.0, 1 }, { 0.85, 0.44, 0.84,
 /* Brackets ----------------------------------------------------------------------------------- */
 
 typedef struct {
+  int offset; /* in characters */
   int line;
   char c;
 } Bracket;
 
-/* The brackets of text outside strings and comments, in order, with their lines. */
+/* The brackets of text outside strings and comments, in order, with their places. */
 static GArray *brackets_of(const char *text)
 {
   GArray *found = g_array_new(FALSE, FALSE, sizeof(Bracket));
+  const char *counted = text; /* offsets are counted up to here */
   gboolean comment = FALSE;
-  int line = 0;
+  int line = 0, offset = 0;
 
   for (const char *p = text; *p; p++) {
     if (*p == '\n') {
@@ -67,7 +74,10 @@ static GArray *brackets_of(const char *text)
       if (*p == '\n')
         line++;
     } else if (strchr("([{)]}", *p)) {
-      Bracket b = { line, *p };
+      Bracket b = { 0, line, *p };
+      offset += (int)g_utf8_strlen(counted, p - counted);
+      counted = p;
+      b.offset = offset;
       g_array_append_val(found, b);
     }
   }
@@ -81,49 +91,36 @@ static gboolean is_opening(char c)
 
 /* The innermost bracket pair around offset with lines between its two lines: their lines in *open
  * and *close; FALSE when there is none. */
-static gboolean enclosing_pair(GtkTextBuffer *buffer, int offset, int *open, int *close)
+static gboolean enclosing_pair(GArray *brackets, int offset, int *open, int *close)
 {
-  GtkTextIter start, cursor, end;
-  char *before, *after;
-  GArray *head, *tail, *stack = g_array_new(FALSE, FALSE, sizeof(int));
-  int cursor_line, depth = 0;
+  GArray *stack = g_array_new(FALSE, FALSE, sizeof(int));
+  guint i = 0;
+  int depth = 0;
   gboolean found = FALSE;
 
-  gtk_text_buffer_get_bounds(buffer, &start, &end);
-  gtk_text_buffer_get_iter_at_offset(buffer, &cursor, offset);
-  cursor_line = gtk_text_iter_get_line(&cursor);
-  before = gtk_text_buffer_get_text(buffer, &start, &cursor, TRUE);
-  after = gtk_text_buffer_get_text(buffer, &cursor, &end, TRUE);
-  head = brackets_of(before);
-  tail = brackets_of(after); /* lines from the cursor's line on */
-
   /* Before the cursor, the stack ends up with the lines of the brackets still open. */
-  for (guint i = 0; i < head->len; i++) {
-    Bracket *b = &g_array_index(head, Bracket, i);
+  for (; i < brackets->len && g_array_index(brackets, Bracket, i).offset < offset; i++) {
+    Bracket *b = &g_array_index(brackets, Bracket, i);
     if (is_opening(b->c))
       g_array_append_val(stack, b->line);
     else if (stack->len > 0)
       g_array_set_size(stack, stack->len - 1);
   }
   /* After it, a closing bracket at depth 0 closes the innermost one still open. */
-  for (guint i = 0; i < tail->len && stack->len > 0 && !found; i++) {
-    Bracket *b = &g_array_index(tail, Bracket, i);
+  for (; i < brackets->len && stack->len > 0 && !found; i++) {
+    Bracket *b = &g_array_index(brackets, Bracket, i);
     if (is_opening(b->c)) {
       depth++;
     } else if (depth > 0) {
       depth--;
     } else {
       *open = g_array_index(stack, int, stack->len - 1);
-      *close = cursor_line + b->line;
+      *close = b->line;
       g_array_set_size(stack, stack->len - 1);
       found = *close - *open >= 2;
     }
   }
   g_array_free(stack, TRUE);
-  g_array_free(tail, TRUE);
-  g_array_free(head, TRUE);
-  g_free(after);
-  g_free(before);
   return found;
 }
 
@@ -177,10 +174,21 @@ static gboolean cursor_pair(TcodeView *self, int *open, int *close)
 
   gtk_text_buffer_get_iter_at_mark(buffer, &cursor, gtk_text_buffer_get_insert(buffer));
   offset = gtk_text_iter_get_offset(&cursor);
-  if (self->pair.changes != self->tab->view->changes || self->pair.cursor != offset || self->pair.open == -2) {
-    self->pair.changes = self->tab->view->changes;
+  if (!self->brackets || self->brackets_changes != self->tab->view->changes) {
+    GtkTextIter start, end;
+    char *text;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    text = gtk_text_buffer_get_text(buffer, &start, &end, TRUE);
+    if (self->brackets)
+      g_array_free(self->brackets, TRUE);
+    self->brackets = brackets_of(text);
+    self->brackets_changes = self->tab->view->changes;
+    self->pair.open = -2; /* worked out again below */
+    g_free(text);
+  }
+  if (self->pair.cursor != offset || self->pair.open == -2) {
     self->pair.cursor = offset;
-    if (!enclosing_pair(buffer, offset, &self->pair.open, &self->pair.close))
+    if (!enclosing_pair(self->brackets, offset, &self->pair.open, &self->pair.close))
       self->pair.open = self->pair.close = -1;
   }
   *open = self->pair.open;
@@ -193,20 +201,79 @@ static void draw_guide(GtkSnapshot *snapshot, const GdkRGBA *ink, double x, int 
   gtk_snapshot_append_color(snapshot, ink, &GRAPHENE_RECT_INIT((float)x, (float)y, 1, (float)height));
 }
 
+static void draw_diff_gaps(TcodeView *self, GtkSnapshot *snapshot)
+{
+  static const GdkRGBA deleted_bg = { 0.90f, 0.20f, 0.18f, 0.22f };
+  static const GdkRGBA deleted_edge = { 0.97f, 0.32f, 0.29f, 0.45f };
+  GtkTextView *view = GTK_TEXT_VIEW(self);
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(self->tab->buffer);
+  GdkRectangle visible;
+  GtkTextIter iter;
+  int first, last;
+
+  gtk_text_view_get_visible_rect(view, &visible);
+  gtk_text_view_get_line_at_y(view, &iter, visible.y, NULL);
+  first = gtk_text_iter_get_line(&iter);
+  gtk_text_view_get_line_at_y(view, &iter, visible.y + visible.height, NULL);
+  last = gtk_text_iter_get_line(&iter);
+
+  for (int line = first; line <= last; line++) {
+    int above_px = 0, below_px = 0, y = 0, height = 0;
+    if (!diff_gutter_line_gaps(self->tab, line, &above_px, &below_px) || (above_px <= 0 && below_px <= 0))
+      continue;
+    gtk_text_buffer_get_iter_at_line(buffer, &iter, line);
+    gtk_text_view_get_line_yrange(view, &iter, &y, &height);
+    if (above_px > 0) {
+      gtk_snapshot_append_color(snapshot, &deleted_bg,
+                                &GRAPHENE_RECT_INIT((float)visible.x, (float)y, (float)visible.width, (float)above_px));
+      gtk_snapshot_append_color(snapshot, &deleted_edge,
+                                &GRAPHENE_RECT_INIT((float)visible.x, (float)y, (float)visible.width, 1));
+      gtk_snapshot_append_color(
+          snapshot, &deleted_edge,
+          &GRAPHENE_RECT_INIT((float)visible.x, (float)(y + above_px - 1), (float)visible.width, 1));
+    }
+    if (below_px > 0) {
+      int gap_y = y + height - below_px;
+      gtk_snapshot_append_color(
+          snapshot, &deleted_bg,
+          &GRAPHENE_RECT_INIT((float)visible.x, (float)gap_y, (float)visible.width, (float)below_px));
+      gtk_snapshot_append_color(snapshot, &deleted_edge,
+                                &GRAPHENE_RECT_INIT((float)visible.x, (float)gap_y, (float)visible.width, 1));
+      gtk_snapshot_append_color(
+          snapshot, &deleted_edge,
+          &GRAPHENE_RECT_INIT((float)visible.x, (float)(gap_y + below_px - 1), (float)visible.width, 1));
+    }
+  }
+}
+
+/* A character's width in the view's font, measured again only when the font changed (Settings,
+ * zoom). */
+static double char_width(TcodeView *self)
+{
+  const PangoFontDescription *font = pango_context_get_font_description(gtk_widget_get_pango_context(GTK_WIDGET(self)));
+
+  if (self->char_width <= 0 || !self->font || !pango_font_description_equal(font, self->font)) {
+    PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), "0000000000");
+    int width = 0;
+    pango_layout_get_pixel_size(layout, &width, NULL);
+    g_object_unref(layout);
+    self->char_width = width / 10.0;
+    if (self->font)
+      pango_font_description_free(self->font);
+    self->font = pango_font_description_copy(font);
+  }
+  return self->char_width;
+}
+
 static void draw_guides(TcodeView *self, GtkSnapshot *snapshot)
 {
   GtkTextView *view = GTK_TEXT_VIEW(self);
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(self->tab->buffer);
   int ts = MAX((int)gtk_source_view_get_tab_width(GTK_SOURCE_VIEW(self)), 1), first, last, open, close;
-  int width = 0;
-  PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), "0000000000");
   GdkRectangle visible, start;
   GtkTextIter iter;
-  double cw, left;
+  double cw = char_width(self), left;
 
-  pango_layout_get_pixel_size(layout, &width, NULL);
-  g_object_unref(layout);
-  cw = width / 10.0;
   gtk_text_view_get_visible_rect(view, &visible);
   gtk_text_view_get_line_at_y(view, &iter, visible.y, NULL);
   first = gtk_text_iter_get_line(&iter);
@@ -216,23 +283,26 @@ static void draw_guides(TcodeView *self, GtkSnapshot *snapshot)
   last = gtk_text_iter_get_line(&iter);
 
   for (int line = first; line <= last; line++) {
-    int y, height, count = guide_count(buffer, line, ts);
+    int y, height, above_px = 0, below_px = 0, count = guide_count(buffer, line, ts);
+    diff_gutter_line_gaps(self->tab, line, &above_px, &below_px);
     gtk_text_buffer_get_iter_at_line(buffer, &iter, line);
     gtk_text_view_get_line_yrange(view, &iter, &y, &height);
+    int ty = y + above_px, th = MAX(height - above_px - below_px, 0);
     for (int k = 0; k < count; k++)
-      draw_guide(snapshot, &guide_ink, left + k * ts * cw, y, height);
+      draw_guide(snapshot, &guide_ink, left + k * ts * cw, ty, th);
   }
   if (cursor_pair(self, &open, &close)) {
     int column = MIN(indent_of(buffer, open, ts) < 0 ? G_MAXINT : indent_of(buffer, open, ts),
                      indent_of(buffer, close, ts) < 0 ? G_MAXINT : indent_of(buffer, close, ts));
     const GdkRGBA *ink = self->tab->app->plain ? &active_ink : &pair_inks[column / ts % 3];
     for (int line = MAX(open + 1, first); column != G_MAXINT && line < close && line <= last; line++) {
-      int y, height, indent = indent_of(buffer, line, ts);
+      int y, height, above_px = 0, below_px = 0, indent = indent_of(buffer, line, ts);
       if (indent >= 0 && indent <= column)
         continue;
+      diff_gutter_line_gaps(self->tab, line, &above_px, &below_px);
       gtk_text_buffer_get_iter_at_line(buffer, &iter, line);
       gtk_text_view_get_line_yrange(view, &iter, &y, &height);
-      draw_guide(snapshot, ink, left + column * cw, y, height);
+      draw_guide(snapshot, ink, left + column * cw, y + above_px, MAX(height - above_px - below_px, 0));
     }
   }
 }
@@ -242,13 +312,27 @@ static void snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapsho
   TcodeView *self = TCODE_VIEW(view);
 
   GTK_TEXT_VIEW_CLASS(tcode_view_parent_class)->snapshot_layer(view, layer, snapshot);
-  if (layer == GTK_TEXT_VIEW_LAYER_BELOW_TEXT && self->tab && self->tab->view && !self->tab->view->loading &&
-      self->tab->app->settings.guides)
-    draw_guides(self, snapshot);
+  if (layer == GTK_TEXT_VIEW_LAYER_BELOW_TEXT && self->tab && self->tab->view && !self->tab->view->loading) {
+    draw_diff_gaps(self, snapshot);
+    if (self->tab->app->settings.guides)
+      draw_guides(self, snapshot);
+  }
+}
+
+static void tcode_view_finalize(GObject *object)
+{
+  TcodeView *self = TCODE_VIEW(object);
+
+  if (self->brackets)
+    g_array_free(self->brackets, TRUE);
+  if (self->font)
+    pango_font_description_free(self->font);
+  G_OBJECT_CLASS(tcode_view_parent_class)->finalize(object);
 }
 
 static void tcode_view_class_init(TcodeViewClass *klass)
 {
+  G_OBJECT_CLASS(klass)->finalize = tcode_view_finalize;
   GTK_TEXT_VIEW_CLASS(klass)->snapshot_layer = snapshot_layer;
 }
 
@@ -257,11 +341,17 @@ static void tcode_view_init(TcodeView *self)
   self->pair.open = -2; /* not worked out yet */
 }
 
-/* The cursor moved: the block around it may be another one. */
+/* The cursor moved: when the block around it is another one, its guide is drawn again. */
 static void on_mark_set(GtkTextBuffer *buffer, const GtkTextIter *where G_GNUC_UNUSED, GtkTextMark *mark,
                         TcodeView *self)
 {
-  if (mark == gtk_text_buffer_get_insert(buffer) && self->tab->app->settings.guides)
+  int open = self->pair.open, close = self->pair.close, now_open, now_close;
+
+  if (mark != gtk_text_buffer_get_insert(buffer) || !self->tab->app->settings.guides || !self->tab->view ||
+      self->tab->view->loading)
+    return;
+  cursor_pair(self, &now_open, &now_close);
+  if (now_open != open || now_close != close)
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 

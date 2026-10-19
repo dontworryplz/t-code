@@ -37,6 +37,3 @@ void channel_send(Channel *ch, const char *body);
 
 /* By the owner: drops its reference; no on_closed. */
 void channel_close(Channel *ch);
-
-/* The other side went (or sent garbage): stops the channel and tells the owner (on_closed). */
-void channel_peer_closed(Channel *ch);

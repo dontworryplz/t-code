@@ -51,12 +51,20 @@ typedef struct {
 
 /* The editor area holds two tab groups side by side; the second one only while split. */
 #define GROUPS 2
+#define DOCKS 12 /* 0..3: left stacked, 4..7: bottom side-by-side, 8..11: right stacked */
 
 struct App {
   GtkWindow *window;
-  GtkPaned *hpaned, *vpaned, *split;
-  GtkWidget *sidebar;      /* left: tabs for the file manager, Source Control and Search */
-  GtkStack *sidebar_stack; /* pages "files", "scm" and "search" */
+  GtkPaned *hpaned, *rpaned, *vpaned, *split;
+  GtkWidget *sidebar;           /* left vertical paned tree holding docks[0..3] */
+  GtkWidget *bottom_bar;        /* bottom horizontal paned tree holding docks[4..7] */
+  GtkWidget *right_sidebar;     /* right vertical paned tree holding docks[8..11] */
+  GtkPaned *dock_paneds[3][3];  /* the 3 paneds per side (left, bottom, right) */
+  GtkWidget *docks[DOCKS];      /* the 12 dock cards around the editor */
+  GtkStack *dock_stacks[DOCKS]; /* the stack of panels in each dock */
+  gboolean dock_collapsed[DOCKS];
+  int dock_saved_pos[DOCKS];
+  GtkStack *sidebar_stack; /* the dock stack currently holding t->scm */
   GtkWidget *scm;
   GtkStack *editor_area;
   GtkNotebook *groups[GROUPS];

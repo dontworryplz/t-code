@@ -75,6 +75,43 @@ static void test_big(void)
   g_string_free(old, TRUE);
 }
 
+/* The gaps as a string: "<line>:<count>" (below that line) or "^:<count>" (above line 0). */
+static char *gaps_of(const char *old, const char *new, gboolean old_side)
+{
+  GArray *gaps = line_diff_gaps(old, new, old_side);
+  GString *text = g_string_new(NULL);
+
+  for (guint i = 0; i < gaps->len; i++) {
+    DiffGap *gap = &g_array_index(gaps, DiffGap, i);
+    if (gap->above)
+      g_string_append_printf(text, "%s^:%d", text->len ? " " : "", gap->count);
+    else
+      g_string_append_printf(text, "%s%d:%d", text->len ? " " : "", gap->line, gap->count);
+  }
+  g_array_free(gaps, TRUE);
+  return g_string_free(text, FALSE);
+}
+
+static void check_gaps(const char *old, const char *new, const char *new_side, const char *old_side)
+{
+  char *a = gaps_of(old, new, FALSE), *b = gaps_of(old, new, TRUE);
+
+  g_assert_cmpstr(a, ==, new_side);
+  g_assert_cmpstr(b, ==, old_side);
+  g_free(b);
+  g_free(a);
+}
+
+/* Side by side, the side with fewer lines in a stretch gets the difference as a gap. */
+static void test_gaps(void)
+{
+  check_gaps("a\nb\nc\n", "a\nc", "0:1", "");       /* b deleted: a gap under a on the new side */
+  check_gaps("a\nc\n", "a\nb1\nb2\nc", "", "0:2");  /* two added: a gap under a on the old side */
+  check_gaps("x\ny\na\n", "a", "^:2", "");          /* deleted at the start: above line 0 */
+  check_gaps("a\nb\nc\n", "a\nB\nc", "", "");       /* modified: same size, no gap */
+  check_gaps("a\nb\n", "a\nB1\nB2\nB3", "", "1:2"); /* one for three: two rows */
+}
+
 int main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
@@ -84,5 +121,6 @@ int main(int argc, char **argv)
   g_test_add_func("/linediff/deleted", test_deleted);
   g_test_add_func("/linediff/hunks", test_hunks);
   g_test_add_func("/linediff/big", test_big);
+  g_test_add_func("/linediff/gaps", test_gaps);
   return g_test_run();
 }

@@ -105,56 +105,64 @@ static void remove_colors(Tab *tab)
   g_ptr_array_free(tags, TRUE);
 }
 
-/* The color for a token type (an index into the server's legend) and its modifiers, or NULL. */
-static const char *color_of(Tab *tab, gint64 type, gint64 modifiers)
+/* The color for a token type name, or NULL. */
+static const char *color_of(const char *type)
 {
-  char *path = g_strdup_printf("semanticTokensProvider.legend.tokenTypes.%" G_GINT64_FORMAT, type);
-  JsonNode *name = lsp_capability(tab, path);
-  JsonNode *legend = lsp_capability(tab, "semanticTokensProvider.legend.tokenModifiers");
-  const char *type_name = name ? json_node_get_string(name) : NULL, *color = NULL;
-
-  g_free(path);
-  for (size_t i = 0; type_name && i < G_N_ELEMENTS(token_colors) && !color; i++)
-    if (strcmp(token_colors[i].type, type_name) == 0)
-      color = token_colors[i].color;
-  /* readonly: a const variable or field. */
-  for (guint bit = 0;
-       color && legend && JSON_NODE_HOLDS_ARRAY(legend) && bit < json_array_get_length(json_node_get_array(legend));
-       bit++)
-    if ((modifiers >> bit & 1) &&
-        g_strcmp0(json_array_get_string_element(json_node_get_array(legend), bit), "readonly") == 0 &&
-        (strcmp(type_name, "variable") == 0 || strcmp(type_name, "property") == 0))
-      color = CONSTANT_COLOR;
-  return color;
+  for (size_t i = 0; type && i < G_N_ELEMENTS(token_colors); i++)
+    if (strcmp(token_colors[i].type, type) == 0)
+      return token_colors[i].color;
+  return NULL;
 }
 
 /* The tokens: five numbers each (line and start relative to the token before, length, type,
- * modifiers). */
+ * modifiers). Each type's tag is looked up once, from the server's legend. */
 static void apply(Tab *tab, JsonNode *result)
 {
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
   JsonNode *data = json_at(result, "data");
+  JsonNode *types = lsp_capability(tab, "semanticTokensProvider.legend.tokenTypes");
+  JsonNode *modifiers = lsp_capability(tab, "semanticTokensProvider.legend.tokenModifiers");
   JsonArray *numbers = data && JSON_NODE_HOLDS_ARRAY(data) ? json_node_get_array(data) : NULL;
   guint n = numbers ? json_array_get_length(numbers) : 0;
-  gint64 line = 0, start = 0;
+  guint n_types = types && JSON_NODE_HOLDS_ARRAY(types) ? json_array_get_length(json_node_get_array(types)) : 0;
+  GtkTextTag **tags = g_new0(GtkTextTag *, MAX(n_types, 1));
+  gboolean *variable = g_new0(gboolean, MAX(n_types, 1)); /* readonly ones are constants */
+  GtkTextTag *constant = token_tag(tab, CONSTANT_COLOR);
+  gint64 line = 0, start = 0, readonly = 0;
+
+  for (guint k = 0; k < n_types; k++) {
+    const char *type = json_array_get_string_element(json_node_get_array(types), k);
+    const char *color = color_of(type);
+    tags[k] = color ? token_tag(tab, color) : NULL;
+    variable[k] = g_strcmp0(type, "variable") == 0 || g_strcmp0(type, "property") == 0;
+  }
+  for (guint bit = 0; modifiers && JSON_NODE_HOLDS_ARRAY(modifiers) &&
+                      bit < json_array_get_length(json_node_get_array(modifiers)) && bit < 63;
+       bit++)
+    if (g_strcmp0(json_array_get_string_element(json_node_get_array(modifiers), bit), "readonly") == 0)
+      readonly = (gint64)1 << bit;
 
   remove_colors(tab);
   for (guint i = 0; i + 4 < n; i += 5) {
     gint64 delta_line = json_array_get_int_element(numbers, i);
     gint64 delta_start = json_array_get_int_element(numbers, i + 1);
     gint64 length = json_array_get_int_element(numbers, i + 2);
-    const char *color;
+    gint64 type = json_array_get_int_element(numbers, i + 3);
+    GtkTextTag *tag;
     GtkTextIter from, to;
     line += delta_line;
     start = delta_line ? delta_start : start + delta_start;
-    color = color_of(tab, json_array_get_int_element(numbers, i + 3), json_array_get_int_element(numbers, i + 4));
-    if (!color)
+    if (type < 0 || type >= n_types || !(tag = tags[type]))
       continue;
+    if (variable[type] && (json_array_get_int_element(numbers, i + 4) & readonly))
+      tag = constant;
     lsp_iter_at_position(tab, line, start, &from);
     lsp_iter_at_position(tab, line, start + length, &to);
-    gtk_text_buffer_apply_tag(buffer, token_tag(tab, color), &from, &to);
+    gtk_text_buffer_apply_tag(buffer, tag, &from, &to);
   }
   raise_tags(gtk_text_buffer_get_tag_table(buffer));
+  g_free(variable);
+  g_free(tags);
 }
 
 static void on_tokens(JsonNode *result, gpointer data)

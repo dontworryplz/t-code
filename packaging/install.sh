@@ -8,7 +8,7 @@
 # Run it again after pulling changes to update the installed copy.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 BIN="$PREFIX/bin/t-code"

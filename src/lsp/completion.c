@@ -342,6 +342,30 @@ static void display(GtkSourceCompletionProvider *provider G_GNUC_UNUSED, GtkSour
   }
 }
 
+/* A snippet GtkSourceView could not take, as plain text: "f(${1:int x}, $2)$0" -> "f(int x, )". */
+static char *snippet_text(const char *snippet)
+{
+  GString *text = g_string_new(NULL);
+
+  for (const char *p = snippet; *p; p++) {
+    if (*p == '\\' && p[1]) { /* an escaped "$", "}" or "\\" */
+      g_string_append_c(text, *++p);
+    } else if (*p == '$' && p[1] == '{') { /* ${n:default}: the default */
+      p += 2;
+      while (g_ascii_isdigit(*p))
+        p++;
+      if (*p != ':')
+        p--;
+    } else if (*p == '$' && g_ascii_isdigit(p[1])) { /* $n: nothing */
+      while (g_ascii_isdigit(p[1]))
+        p++;
+    } else if (*p != '}') {
+      g_string_append_c(text, *p);
+    }
+  }
+  return g_string_free(text, FALSE);
+}
+
 /* The proposal goes in for the word typed so far; a function's parameters as a snippet. Its extra
  * edits (an #include) go in too, and for a function the parameter hint opens. */
 static void activate(GtkSourceCompletionProvider *provider, GtkSourceCompletionContext *context,
@@ -371,10 +395,13 @@ static void activate(GtkSourceCompletionProvider *provider, GtkSourceCompletionC
   gtk_text_buffer_get_iter_at_mark(buffer, &begin, from);
   gtk_text_buffer_get_iter_at_mark(buffer, &end, to);
   gtk_text_buffer_delete(buffer, &begin, &end);
-  if (snippet)
+  if (snippet) {
     gtk_source_view_push_snippet(self->tab->source, snippet, &begin);
-  else
-    gtk_text_buffer_insert(buffer, &begin, p->text, -1);
+  } else {
+    char *text = p->snippet ? snippet_text(p->text) : g_strdup(p->text);
+    gtk_text_buffer_insert(buffer, &begin, text, -1);
+    g_free(text);
+  }
   gtk_text_buffer_end_user_action(buffer);
   gtk_text_buffer_delete_mark(buffer, from);
   gtk_text_buffer_delete_mark(buffer, to);
@@ -408,6 +435,10 @@ static void tcode_completion_finalize(GObject *object)
 {
   TcodeCompletion *self = TCODE_COMPLETION(object);
 
+  if (self->requery) { /* its answer goes to on_requery, which holds its own reference */
+    g_cancellable_cancel(self->requery);
+    g_object_unref(self->requery);
+  }
   g_ptr_array_unref(self->all);
   g_object_unref(self->shown);
   g_free(self->asked_word);

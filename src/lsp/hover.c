@@ -58,25 +58,18 @@ static GtkWidget *hover_label(const char *text, gboolean markup, const char *css
   return label;
 }
 
-/* The server's text: a MarkupContent ({"value": ...}), a string, or a list of them (old servers). */
+/* The server's text (clangd's MarkupContent: {"value": ...}), without the blank lines clangd's plain
+ * text has between every part. NULL when there is none. */
 static char *hover_text(JsonNode *result)
 {
-  JsonNode *contents = json_at(result, "contents");
-  const char *value = json_string_at(contents, "value");
+  static GRegex *blank_lines;
+  const char *value = json_string_at(result, "contents.value");
 
-  if (!value && contents && JSON_NODE_HOLDS_VALUE(contents))
-    value = json_node_get_string(contents);
-  if (!value)
-    value = json_string_at(contents, "0.value");
-  if (!value)
-    value = json_string_at(contents, "0");
   if (!value || !*value)
     return NULL;
-  /* clangd's plain text has a blank line between every part: one line break is enough here. */
-  GRegex *blank_lines = g_regex_new("\n\\s*\n", 0, 0, NULL);
-  char *text = g_regex_replace_literal(blank_lines, value, -1, 0, "\n", 0, NULL);
-  g_regex_unref(blank_lines);
-  return g_strstrip(text);
+  if (!blank_lines)
+    blank_lines = g_regex_new("\n\\s*\n", G_REGEX_OPTIMIZE, 0, NULL);
+  return g_strstrip(g_regex_replace_literal(blank_lines, value, -1, 0, "\n", 0, NULL));
 }
 
 /* Fills the popover with the problems and the server's text; with neither, nothing shows. */

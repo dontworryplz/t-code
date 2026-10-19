@@ -17,7 +17,8 @@ static gboolean branch_busy;  /* a git status runs */
 static gboolean branch_again; /* asked for again while it ran: run once more when it is done */
 static guint branch_soon_id;  /* refresh_branch()'s timeout */
 static GFileMonitor *git_monitor;
-static guint last_status; /* hash of git status's output */
+static guint last_status;      /* hash of git status's output */
+static char *head, *head_root; /* the commit HEAD was at, and in which project */
 static gboolean poll_branch(gpointer data);
 
 /* The output (porcelain v2, -z) also fills the Source Control panel (scm.c). */
@@ -30,7 +31,7 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
                 g_subprocess_get_exit_status(G_SUBPROCESS(source)) == 0;
   gsize size = 0;
   const char *bytes = out ? g_bytes_get_data(out, &size) : NULL;
-  char *branch = NULL;
+  char *branch = NULL, *oid = NULL;
   gboolean dirty = FALSE;
   /* Started before another project opened: that project's status, not this one's. */
   gboolean stale = g_strcmp0(g_object_get_data(source, "root"), t->root) != 0;
@@ -52,6 +53,8 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
       gsize len = (nul ? nul : end) - p;
       if (len > 14 && strncmp(p, "# branch.head ", 14) == 0)
         branch = g_strndup(p + 14, len - 14);
+      else if (len > 13 && strncmp(p, "# branch.oid ", 13) == 0)
+        oid = g_strndup(p + 13, len - 13);
       else if (len && *p != '#')
         dirty = TRUE;
       p += len + 1;
@@ -66,6 +69,16 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
   last_status = hash;
   if (!t->closing)
     status_show_branch(t, branch, dirty);
+  /* A new commit (also on a branch, where .git/HEAD itself stays the same) or a checkout: the diff
+   * gutters compare with the new HEAD. Staging does not move it, and asks nothing. */
+  if (oid && head && g_strcmp0(head_root, t->root) == 0 && strcmp(oid, head) != 0 && !t->closing)
+    diff_gutter_head_moved(t);
+  if (ok) {
+    g_free(head);
+    head = g_steal_pointer(&oid);
+    g_set_str(&head_root, t->root);
+  }
+  g_free(oid);
   g_free(branch);
   if (out)
     g_bytes_unref(out);
@@ -124,10 +137,8 @@ static void on_git_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file, GFi
                            GFileMonitorEvent event G_GNUC_UNUSED, App *t)
 {
   /* git writes HEAD.lock and index.lock, then renames them into place (other is the new name). */
-  if (is_git_state(file) || is_git_state(other)) {
+  if (is_git_state(file) || is_git_state(other))
     refresh_branch(t);
-    diff_gutter_head_moved(t); /* the editors' gutters compare with the new HEAD */
-  }
 }
 
 void watch_git(App *t)

@@ -20,12 +20,20 @@ struct DiffGutter {
   Tab *tab;
   GtkWidget *renderer;
   BaseKind kind;
-  char *value;   /* the commit, or the file */
-  char *base;    /* its text; NULL: no marks (not in git, a new file) */
-  GArray *marks; /* guint8 LineMark per line, NULL before the first */
+  char *value;           /* the commit, or the file */
+  char *base;            /* its text; NULL: no marks (not in git, a new file) */
+  GArray *marks;         /* guint8 LineMark per line, NULL before the first */
+  Tab *partner;          /* the other tab in a side-by-side comparison, or NULL */
+  gboolean is_old_side;  /* TRUE for the right-hand (older) tab in a comparison */
+  GArray *gaps;          /* DiffGap per hunk gap when partner != NULL */
+  GPtrArray *gap_tags;   /* GtkTextTag* created for the current gaps */
+  int line_height;       /* single-line pixel height used for the current gaps */
+  gboolean base_pending; /* git show waits for the tab to be shown */
   guint update_id;
   Loading *loading; /* the git show in flight */
 };
+
+static void sync_pair_gaps(DiffGutter *g);
 
 /* A git show; dropped when gutter is NULL (the editor went, or another base was asked for). */
 struct Loading {
@@ -57,7 +65,7 @@ static void snapshot_line(GtkSourceGutterRenderer *renderer, GtkSnapshot *snapsh
 
   if (!g || !g->marks || line >= g->marks->len || !(mark = g_array_index(g->marks, guint8, line)))
     return;
-  gtk_source_gutter_lines_get_line_extent(lines, line, GTK_SOURCE_GUTTER_RENDERER_ALIGNMENT_MODE_CELL, &y, &height);
+  gtk_source_gutter_lines_get_line_extent(lines, line, GTK_SOURCE_GUTTER_RENDERER_ALIGNMENT_MODE_FIRST, &y, &height);
   if (mark == LINE_DELETED_ABOVE) { /* a small triangle at the line's top */
     GskPathBuilder *builder = gsk_path_builder_new();
     GskPath *path;
@@ -69,8 +77,8 @@ static void snapshot_line(GtkSourceGutterRenderer *renderer, GtkSnapshot *snapsh
     gtk_snapshot_append_fill(snapshot, path, GSK_FILL_RULE_WINDING, &deleted);
     gsk_path_unref(path);
   } else {
-    gtk_snapshot_append_color(snapshot, mark == LINE_ADDED ? &added : &modified,
-                              &GRAPHENE_RECT_INIT(0, y, MIN(width, 3), height));
+    const GdkRGBA *color = (mark == LINE_ADDED) ? (g->partner && g->is_old_side ? &deleted : &added) : &modified;
+    gtk_snapshot_append_color(snapshot, color, &GRAPHENE_RECT_INIT(0, y, MIN(width, 3), height));
   }
 }
 
@@ -100,6 +108,8 @@ static gboolean update_marks_now(gpointer data)
     g->marks = line_diff(g->base, text);
     g_free(text);
   }
+  if (g->partner)
+    sync_pair_gaps(g);
   gtk_widget_queue_draw(g->renderer);
   return G_SOURCE_REMOVE;
 }
@@ -178,6 +188,15 @@ static void load_base(DiffGutter *g)
   g_free(dir);
 }
 
+/* Reads the base again, now or (git show, for a tab not shown: a restored session would start one
+ * git per tab) once the tab is shown. */
+static void load_base_when_shown(DiffGutter *g)
+{
+  g->base_pending = (g->kind == BASE_HEAD || g->kind == BASE_REV) && !gtk_widget_get_mapped(GTK_WIDGET(g->tab->source));
+  if (!g->base_pending)
+    load_base(g);
+}
+
 static void set_kind(Tab *tab, BaseKind kind, const char *value)
 {
   DiffGutter *g = tab->view->diff;
@@ -186,7 +205,7 @@ static void set_kind(Tab *tab, BaseKind kind, const char *value)
   g_free(g->value);
   g->value = g_strdup(value);
   if (!tab->view->loading)
-    load_base(g);
+    load_base_when_shown(g);
 }
 
 void diff_gutter_follow_head(Tab *tab)
@@ -204,9 +223,144 @@ void diff_gutter_compare_file(Tab *tab, const char *path)
   set_kind(tab, path ? BASE_FILE : BASE_NONE, path);
 }
 
+/* Takes the gap rows out of the buffer (the tags that make them). The view is not touched: it
+ * may be gone already (the tab closing). */
+static void remove_gap_tags(DiffGutter *g)
+{
+  if (g->gap_tags) {
+    GtkTextTagTable *table = gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(g->tab->buffer));
+    for (guint i = 0; i < g->gap_tags->len; i++)
+      gtk_text_tag_table_remove(table, g_ptr_array_index(g->gap_tags, i));
+    g_ptr_array_set_size(g->gap_tags, 0);
+  }
+  g_clear_pointer(&g->gaps, g_array_unref);
+}
+
+/* The same, and the view draws again. */
+static void clear_side_gaps(DiffGutter *g)
+{
+  remove_gap_tags(g);
+  gtk_widget_queue_draw(GTK_WIDGET(g->tab->source));
+}
+
+/* One line's height, from the font: a line's own extent would include the gap rows. */
+static int measure_line_height(Tab *tab)
+{
+  PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(tab->source), "Mg");
+  int height = 0;
+
+  pango_layout_get_pixel_size(layout, NULL, &height);
+  g_object_unref(layout);
+  return MAX(height, 1);
+}
+
+static void apply_side_gaps(DiffGutter *g, GArray *gaps, int line_h)
+{
+  GtkTextBuffer *buf = GTK_TEXT_BUFFER(g->tab->buffer);
+
+  if (!g->gap_tags)
+    g->gap_tags = g_ptr_array_new();
+  g->gaps = gaps;
+  g->line_height = line_h;
+  for (guint i = 0; i < gaps->len; i++) {
+    DiffGap *gap = &g_array_index(gaps, DiffGap, i);
+    GtkTextTag *tag = gtk_text_buffer_create_tag(buf, NULL, gap->above ? "pixels-above-lines" : "pixels-below-lines",
+                                                 gap->count * line_h, NULL);
+    GtkTextIter start, end;
+    gtk_text_buffer_get_iter_at_line(buf, &start, gap->line);
+    end = start;
+    if (!gtk_text_iter_ends_line(&end))
+      gtk_text_iter_forward_to_line_end(&end);
+    else
+      gtk_text_iter_forward_char(&end);
+    gtk_text_buffer_apply_tag(buf, tag, &start, &end);
+    g_ptr_array_add(g->gap_tags, tag);
+  }
+  gtk_widget_queue_draw(GTK_WIDGET(g->tab->source));
+}
+
+static void sync_pair_gaps(DiffGutter *g)
+{
+  if (!g || !g->partner)
+    return;
+  Tab *new_tab = g->is_old_side ? g->partner : g->tab;
+  Tab *old_tab = g->is_old_side ? g->tab : g->partner;
+  if (!new_tab->view || !old_tab->view || new_tab->view->loading || old_tab->view->loading)
+    return;
+  DiffGutter *ng = new_tab->view->diff, *og = old_tab->view->diff;
+  GtkTextIter s1, e1, s2, e2;
+
+  clear_side_gaps(ng);
+  clear_side_gaps(og);
+  int line_h = measure_line_height(new_tab);
+  gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(new_tab->buffer), &s1, &e1);
+  gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(old_tab->buffer), &s2, &e2);
+  char *new_text = gtk_text_buffer_get_text(GTK_TEXT_BUFFER(new_tab->buffer), &s1, &e1, TRUE);
+  char *old_text = gtk_text_buffer_get_text(GTK_TEXT_BUFFER(old_tab->buffer), &s2, &e2, TRUE);
+
+  apply_side_gaps(ng, line_diff_gaps(old_text, new_text, FALSE), line_h);
+  apply_side_gaps(og, line_diff_gaps(old_text, new_text, TRUE), line_h);
+  g_free(new_text);
+  g_free(old_text);
+}
+
+void diff_gutter_pair(Tab *new_tab, Tab *old_tab)
+{
+  if (new_tab && new_tab->view && new_tab->view->diff) {
+    DiffGutter *ng = new_tab->view->diff;
+    if (ng->partner && ng->partner != old_tab && ng->partner->view && ng->partner->view->diff) {
+      clear_side_gaps(ng->partner->view->diff);
+      ng->partner->view->diff->partner = NULL;
+    }
+    if (!old_tab) {
+      clear_side_gaps(ng);
+      ng->partner = NULL;
+      return;
+    }
+  }
+  if (!new_tab || !old_tab || !new_tab->view || !old_tab->view)
+    return;
+  DiffGutter *ng = new_tab->view->diff, *og = old_tab->view->diff;
+  ng->partner = old_tab;
+  ng->is_old_side = FALSE;
+  og->partner = new_tab;
+  og->is_old_side = TRUE;
+  sync_pair_gaps(ng);
+}
+
+gboolean diff_gutter_line_gaps(Tab *tab, int line, int *above_px, int *below_px)
+{
+  *above_px = *below_px = 0;
+  if (!tab || !tab->view || !tab->view->diff || !tab->view->diff->partner || !tab->view->diff->gaps)
+    return FALSE;
+  DiffGutter *g = tab->view->diff;
+  for (guint i = 0; i < g->gaps->len; i++) {
+    DiffGap *gap = &g_array_index(g->gaps, DiffGap, i);
+    if (gap->line == line) {
+      if (gap->above)
+        *above_px += gap->count * g->line_height;
+      else
+        *below_px += gap->count * g->line_height;
+    }
+  }
+  return !g->is_old_side;
+}
+
+static void on_source_mapped(GtkWidget *widget G_GNUC_UNUSED, DiffGutter *g)
+{
+  if (g->base_pending) {
+    g->base_pending = FALSE;
+    load_base(g);
+  }
+  if (g->partner)
+    sync_pair_gaps(g);
+}
+
 void diff_gutter_loaded(Tab *tab)
 {
-  load_base(tab->view->diff);
+  load_base_when_shown(tab->view->diff);
+  if (tab->view->diff->partner)
+    sync_pair_gaps(tab->view->diff);
 }
 
 void diff_gutter_head_moved(App *t)
@@ -216,7 +370,7 @@ void diff_gutter_head_moved(App *t)
   for (int i = 0; i < n; i++) {
     Tab *tab = tab_nth(t, i);
     if (tab->kind == TAB_EDITOR && tab->view->diff->kind == BASE_HEAD && !tab->view->loading)
-      load_base(tab->view->diff);
+      load_base_when_shown(tab->view->diff);
   }
 }
 
@@ -232,6 +386,7 @@ void diff_gutter_attach(Tab *tab)
   /* Right of the line numbers (-30) and the marks (-20). */
   gtk_source_gutter_insert(gutter, GTK_SOURCE_GUTTER_RENDERER(g->renderer), -10);
   g_signal_connect(tab->buffer, "changed", G_CALLBACK(on_text_changed), g);
+  g_signal_connect(tab->source, "map", G_CALLBACK(on_source_mapped), g);
   tab->view->diff = g;
 }
 
@@ -239,6 +394,14 @@ void diff_gutter_free(DiffGutter *g)
 {
   if (!g)
     return;
+  if (g->partner && g->partner->view && g->partner->view->diff) { /* the other side stays: no gaps there */
+    clear_side_gaps(g->partner->view->diff);
+    g->partner->view->diff->partner = NULL;
+  }
+  remove_gap_tags(g);
+  if (g->gap_tags)
+    g_ptr_array_free(g->gap_tags, TRUE);
+  /* The view's "map" handler went with the view, which is gone (the page goes first). */
   g_signal_handlers_disconnect_by_data(g->tab->buffer, g);
   /* The page went first: the renderer lives on with our reference, and must not draw for us. */
   TCODE_DIFF_RENDERER(g->renderer)->gutter = NULL;

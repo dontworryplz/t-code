@@ -12,6 +12,7 @@
 #include "git/gitstatus.h"
 #include "lsp/client.h"
 #include "lsp/completion.h"
+#include "lsp/diagnostics.h"
 #include "project/session.h"
 #include "window/statusbar.h"
 
@@ -197,7 +198,6 @@ static void start_save(Tab *tab, GArray *waiters)
   SaveJob *job;
   GtkTextIter start, end;
   GFile *file;
-  char *text;
 
   if (v->saving || v->loading) {
     g_array_append_vals(v->next_waiters, waiters->data, waiters->len);
@@ -206,16 +206,12 @@ static void start_save(Tab *tab, GArray *waiters)
     return;
   }
   gtk_text_buffer_get_bounds(buffer, &start, &end);
-  text = gtk_text_buffer_get_text(buffer, &start, &end, TRUE);
   job = g_new0(SaveJob, 1);
   job->tab = tab;
   job->cancel = g_object_ref(v->cancel);
   job->waiters = waiters;
   job->changes = v->changes;
-  /* The loader took the file's last newline off (the buffer's implicit trailing newline). */
-  job->text =
-      gtk_source_buffer_get_implicit_trailing_newline(tab->buffer) ? g_strconcat(text, "\n", NULL) : g_strdup(text);
-  g_free(text);
+  job->text = gtk_text_buffer_get_text(buffer, &start, &end, TRUE); /* the file exactly (see editorview.c) */
   v->saving = TRUE;
   file = g_file_new_for_path(tab->path);
   /* Not cancelled when the tab goes: a save that started finishes. */
@@ -342,6 +338,12 @@ static void on_loaded(GObject *source, GAsyncResult *result, gpointer data)
       lsp_open(tab);
     else
       v->lsp_pending = TRUE; /* a hidden tab: once it is shown */
+    if (v->save_again) {     /* asked for while it loaded: the buffer is what the file holds now */
+      GArray *waiting = v->next_waiters;
+      v->save_again = FALSE;
+      v->next_waiters = g_array_new(FALSE, FALSE, sizeof(SaveWaiter));
+      call_waiters(waiting, TRUE);
+    }
     g_free(text);
   }
   g_clear_error(&error);
@@ -365,6 +367,12 @@ static void load(Tab *tab, int line, int column)
   v->goto_line = line;
   v->goto_column = column;
   v->loading = TRUE;
+  /* The loader replaces the whole text: the old problems' marks would end up around all of it. The
+   * server sends the new ones once it has the file again. */
+  diagnostics_clear(tab);
+  tab->errors = tab->warnings = 0;
+  editor_view_show_problems(tab);
+  update_status(tab->app);
   gtk_text_view_set_editable(GTK_TEXT_VIEW(tab->source), FALSE); /* nothing typed is lost meanwhile */
   gtk_source_file_loader_load_async(loader, G_PRIORITY_DEFAULT, v->cancel, NULL, NULL, NULL, on_loaded, job);
   g_object_unref(file);

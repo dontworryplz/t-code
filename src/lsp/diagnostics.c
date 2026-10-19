@@ -104,8 +104,8 @@ void diagnostics_show(Tab *tab, JsonNode *list)
     lsp_iter_at(tab, json_at(node, "range.end"), &end);
     widen(&start, &end);
     d->start = gtk_text_buffer_create_mark(buffer, NULL, &start, TRUE);
-    d->end = gtk_text_buffer_create_mark(buffer, NULL, &end, FALSE);
-    if (d->severity != SEVERITY_HINT) /* VS Code draws hints as faint dots: none here */
+    d->end = gtk_text_buffer_create_mark(buffer, NULL, &end, TRUE); /* text typed right after is not in it */
+    if (d->severity != SEVERITY_HINT)                               /* VS Code draws hints as faint dots: none here */
       gtk_text_buffer_apply_tag(buffer, tag_for(tab, d->severity), &start, &end);
     tab->errors += d->severity == SEVERITY_ERROR;
     tab->warnings += d->severity == SEVERITY_WARNING;

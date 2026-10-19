@@ -1,5 +1,5 @@
 /*
- * Language server messages over a pair of streams (see lspchannel.h): "Content-Length: <n>\r\n\r\n"
+ * Language server messages over a pair of streams (see channel.h): "Content-Length: <n>\r\n\r\n"
  * then n bytes of JSON, read and written asynchronously.
  */
 #include "lsp/channel.h"
@@ -15,12 +15,8 @@ static void channel_unref(Channel *ch)
   if (--ch->refs > 0)
     return;
   g_queue_clear_full(&ch->writes, (GDestroyNotify)g_bytes_unref);
-  if (G_IS_IO_STREAM(ch->keep)) {
-    g_io_stream_close(G_IO_STREAM(ch->keep), NULL, NULL);
-  } else {
-    g_output_stream_close(ch->out, NULL, NULL);
-    g_input_stream_close(ch->in, NULL, NULL);
-  }
+  g_output_stream_close(ch->out, NULL, NULL); /* the server reads EOF, and exits */
+  g_input_stream_close(ch->in, NULL, NULL);
   g_object_unref(ch->keep);
   g_object_unref(ch->cancel);
   g_byte_array_unref(ch->buf);
@@ -36,7 +32,8 @@ void channel_close(Channel *ch)
   channel_unref(ch);
 }
 
-void channel_peer_closed(Channel *ch)
+/* The other side went (or sent garbage): stops the channel and tells the owner (on_closed). */
+static void channel_peer_closed(Channel *ch)
 {
   if (ch->closed)
     return;

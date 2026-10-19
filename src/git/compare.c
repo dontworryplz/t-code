@@ -119,6 +119,50 @@ static void close_comparisons(App *t, const char *path, const char *keep)
   }
 }
 
+static void on_vscroll(GtkAdjustment *src, GtkScrollable *dst)
+{
+  GtkAdjustment *target = gtk_scrollable_get_vadjustment(dst);
+  double val = gtk_adjustment_get_value(src);
+  double diff = target ? gtk_adjustment_get_value(target) - val : 0.0;
+
+  if (target && (diff > 0.5 || diff < -0.5))
+    gtk_adjustment_set_value(target, val);
+}
+
+static void on_hscroll(GtkAdjustment *src, GtkScrollable *dst)
+{
+  GtkAdjustment *target = gtk_scrollable_get_hadjustment(dst);
+  double val = gtk_adjustment_get_value(src);
+  double diff = target ? gtk_adjustment_get_value(target) - val : 0.0;
+
+  if (target && (diff > 0.5 || diff < -0.5))
+    gtk_adjustment_set_value(target, val);
+}
+
+/* Keeps two side-by-side comparison tabs scrolling together vertically and horizontally. */
+static void sync_scroll(Tab *a, Tab *b)
+{
+  if (!a || !b || !a->source || !b->source)
+    return;
+  GtkAdjustment *va = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(a->source));
+  GtkAdjustment *vb = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(b->source));
+  GtkAdjustment *ha = gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(a->source));
+  GtkAdjustment *hb = gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(b->source));
+
+  if (va && vb) {
+    g_signal_handlers_disconnect_by_func(va, on_vscroll, b->source);
+    g_signal_handlers_disconnect_by_func(vb, on_vscroll, a->source);
+    g_signal_connect_object(va, "value-changed", G_CALLBACK(on_vscroll), b->source, 0);
+    g_signal_connect_object(vb, "value-changed", G_CALLBACK(on_vscroll), a->source, 0);
+  }
+  if (ha && hb) {
+    g_signal_handlers_disconnect_by_func(ha, on_hscroll, b->source);
+    g_signal_handlers_disconnect_by_func(hb, on_hscroll, a->source);
+    g_signal_connect_object(ha, "value-changed", G_CALLBACK(on_hscroll), b->source, 0);
+    g_signal_connect_object(hb, "value-changed", G_CALLBACK(on_hscroll), a->source, 0);
+  }
+}
+
 /* The working file on the left, its gutter compared with the commit base_rev (by name; it follows
  * new commits when that is HEAD) or else with old_path; on the right old_path read-only ("name @
  * label"), its gutter compared with the working file. */
@@ -160,6 +204,8 @@ static void compare_working(App *t, const char *path, const char *old_path, cons
   else
     diff_gutter_compare_file(work, old_path);
   diff_gutter_compare_file(old, path);
+  diff_gutter_pair(work, old);
+  sync_scroll(work, old);
   select_tab(old);
   select_tab(work);
   g_free(name);
@@ -290,6 +336,10 @@ void compare_revisions(App *t, const char *old_rev, const char *old_rel, const c
       left = open_version(t, new_path, new_label, old_path, working, 0);
     if (old_path)
       right = open_version(t, old_path, old_label, new_path, working, new_path ? 1 : 0);
+    if (left && right) {
+      diff_gutter_pair(left, right);
+      sync_scroll(left, right);
+    }
     if (right)
       select_tab(right);
     if (left)
@@ -316,8 +366,10 @@ void forget_comparison(Tab *old_version)
   }
   Tab *work = find_tab(t, TAB_EDITOR, old_version->compare_with);
 
-  if (work)
+  if (work) {
+    diff_gutter_pair(work, NULL);
     diff_gutter_follow_head(work);
+  }
 }
 
 /* Closes the old versions of the current file (their editors are read-only, so nothing is lost). */
@@ -339,8 +391,10 @@ void stop_comparing(App *t)
   }
   if (!closed) {
     Tab *work = find_tab(t, TAB_EDITOR, working);
-    if (work)
+    if (work) {
+      diff_gutter_pair(work, NULL);
       diff_gutter_follow_head(work);
+    }
   }
   g_free(working);
 }

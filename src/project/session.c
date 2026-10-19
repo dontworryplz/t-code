@@ -136,20 +136,65 @@ void session_save_settings(App *t)
 
 void session_apply_window(App *t)
 {
+  static const char *names[] = { "files", "scm", "search", "shell" };
+  static const int defaults[] = { 0, 0, 0, 4 };
   GKeyFile *kf = load();
   GError *error = NULL;
   double scale = g_key_file_get_double(kf, "window", "font-scale", &error);
+  int layout = get_int(kf, "window", "dock-layout", 0);
+  char **order = g_key_file_get_string_list(kf, "window", "panel-order", NULL, NULL);
 
   gtk_window_set_default_size(t->window, get_int(kf, "window", "width", 1400), get_int(kf, "window", "height", 900));
   if (get_bool(kf, "window", "maximized", FALSE))
     gtk_window_maximize(t->window);
-  gtk_paned_set_position(t->hpaned, get_int(kf, "window", "files-width", 280));
-  gtk_paned_set_position(t->vpaned, get_int(kf, "window", "editor-height", 620));
-  gtk_widget_set_visible(t->sidebar, get_bool(kf, "window", "files-visible", TRUE));
-  gtk_widget_set_visible(GTK_WIDGET(t->shell), get_bool(kf, "window", "shell-visible", TRUE));
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; (pass == 0) ? (order && order[i]) : (i < 4); i++) {
+      const char *nm = (pass == 0) ? order[i] : names[i];
+      if (pass == 1 && order) {
+        gboolean seen = FALSE;
+        for (int j = 0; order[j]; j++)
+          if (strcmp(order[j], nm) == 0)
+            seen = TRUE;
+        if (seen)
+          continue;
+      }
+      int def = 0;
+      for (int j = 0; j < 4; j++)
+        if (strcmp(names[j], nm) == 0)
+          def = defaults[j];
+      char key[32];
+      g_snprintf(key, sizeof(key), "dock-%s", nm);
+      int d = get_int(kf, "window", key, def);
+      if (layout != DOCKS) {
+        if (d == 2)
+          d = 4;
+        else if (d == 3)
+          d = 8;
+        else if (d == 4)
+          d = 9;
+      }
+      if (d >= 0 && d < DOCKS)
+        move_panel(t, nm, d);
+    }
+  }
+  g_strfreev(order);
+  gtk_paned_set_position(t->hpaned, MAX(get_int(kf, "window", "files-width", 280), 80));
+  gtk_paned_set_position(t->rpaned, CLAMP(get_int(kf, "window", "right-position", 840), 200, 1600));
+  gtk_paned_set_position(t->vpaned, CLAMP(get_int(kf, "window", "editor-height", 620), 120, 1200));
+  gtk_paned_set_position(GTK_PANED(t->sidebar), MAX(get_int(kf, "window", "sidebar-split", 400), 80));
+  gtk_paned_set_position(GTK_PANED(t->right_sidebar), MAX(get_int(kf, "window", "right-split", 400), 80));
+  if (gtk_widget_get_visible(t->sidebar))
+    gtk_widget_set_visible(t->sidebar, get_bool(kf, "window", "files-visible", TRUE));
+  if (gtk_widget_get_visible(t->right_sidebar))
+    gtk_widget_set_visible(t->right_sidebar, get_bool(kf, "window", "right-visible", TRUE));
+  if (gtk_widget_get_visible(t->bottom_bar))
+    gtk_widget_set_visible(t->bottom_bar, get_bool(kf, "window", "shell-visible", TRUE));
   char *page = g_key_file_get_string(kf, "window", "sidebar-page", NULL);
-  if (g_strcmp0(page, "scm") == 0 || g_strcmp0(page, "search") == 0)
-    gtk_stack_set_visible_child_name(t->sidebar_stack, page);
+  if (page && *page) {
+    int d = panel_dock(t, page);
+    if (d >= 0)
+      gtk_stack_set_visible_child_name(t->dock_stacks[d], page);
+  }
   g_free(page);
   if (!error && scale > 0)
     set_font_scale(t, scale);
@@ -214,22 +259,59 @@ gboolean session_restore_tabs(App *t)
 
 void session_save(App *t)
 {
+  static const char *names[] = { "files", "scm", "search", "shell" };
   GKeyFile *kf = load();
   char *group = project_group(t);
   gboolean maximized = gtk_window_is_maximized(t->window);
+  char *order[4];
+  int n_order = 0;
 
   if (!maximized) {
     g_key_file_set_integer(kf, "window", "width", gtk_widget_get_width(GTK_WIDGET(t->window)));
     g_key_file_set_integer(kf, "window", "height", gtk_widget_get_height(GTK_WIDGET(t->window)));
   }
   g_key_file_set_boolean(kf, "window", "maximized", maximized);
-  g_key_file_set_integer(kf, "window", "files-width", gtk_paned_get_position(t->hpaned));
-  g_key_file_set_integer(kf, "window", "editor-height", gtk_paned_get_position(t->vpaned));
+  g_key_file_set_integer(kf, "window", "dock-layout", DOCKS);
+  for (int i = 0; i < 4; i++) {
+    char key[32];
+    g_snprintf(key, sizeof(key), "dock-%s", names[i]);
+    g_key_file_set_integer(kf, "window", key, panel_dock(t, names[i]));
+  }
+  for (int d = 0; d < DOCKS; d++) {
+    GtkSelectionModel *pages = gtk_stack_get_pages(t->dock_stacks[d]);
+    guint n_items = g_list_model_get_n_items(G_LIST_MODEL(pages));
+    for (guint i = 0; i < n_items; i++) {
+      GtkStackPage *item = g_list_model_get_item(G_LIST_MODEL(pages), i);
+      if (item && gtk_stack_page_get_name(item) && n_order < 4)
+        order[n_order++] = g_strdup(gtk_stack_page_get_name(item));
+      if (item)
+        g_object_unref(item);
+    }
+    g_object_unref(pages);
+  }
+  g_key_file_set_string_list(kf, "window", "panel-order", (const char *const *)order, n_order);
+  for (int i = 0; i < n_order; i++)
+    g_free(order[i]);
+  if (gtk_widget_get_visible(t->sidebar) && gtk_paned_get_position(t->hpaned) >= 48)
+    g_key_file_set_integer(kf, "window", "files-width", gtk_paned_get_position(t->hpaned));
+  if (gtk_widget_get_visible(t->right_sidebar) && gtk_widget_get_width(t->right_sidebar) >= 48)
+    g_key_file_set_integer(kf, "window", "right-position", gtk_paned_get_position(t->rpaned));
+  if (gtk_widget_get_visible(t->bottom_bar) && gtk_widget_get_height(t->bottom_bar) >= 48)
+    g_key_file_set_integer(kf, "window", "editor-height", gtk_paned_get_position(t->vpaned));
+  if (gtk_widget_get_visible(t->docks[0]) && gtk_widget_get_visible(t->docks[1]))
+    g_key_file_set_integer(kf, "window", "sidebar-split", gtk_paned_get_position(GTK_PANED(t->sidebar)));
+  if (gtk_widget_get_visible(t->docks[8]) && gtk_widget_get_visible(t->docks[9]))
+    g_key_file_set_integer(kf, "window", "right-split", gtk_paned_get_position(GTK_PANED(t->right_sidebar)));
   if (gtk_widget_get_visible(GTK_WIDGET(t->groups[1])))
     g_key_file_set_integer(kf, "window", "split-position", gtk_paned_get_position(t->split));
   g_key_file_set_boolean(kf, "window", "files-visible", gtk_widget_get_visible(t->sidebar));
-  g_key_file_set_boolean(kf, "window", "shell-visible", gtk_widget_get_visible(GTK_WIDGET(t->shell)));
-  g_key_file_set_string(kf, "window", "sidebar-page", gtk_stack_get_visible_child_name(t->sidebar_stack));
+  g_key_file_set_boolean(kf, "window", "right-visible", gtk_widget_get_visible(t->right_sidebar));
+  g_key_file_set_boolean(kf, "window", "shell-visible", gtk_widget_get_visible(t->bottom_bar));
+  const char *vis = gtk_stack_get_visible_child_name(t->dock_stacks[0]);
+  if (!vis)
+    vis = gtk_stack_get_visible_child_name(t->sidebar_stack);
+  if (vis)
+    g_key_file_set_string(kf, "window", "sidebar-page", vis);
   g_key_file_set_double(kf, "window", "font-scale", t->font_scale);
 
   g_key_file_set_string(kf, group, "root", t->root);

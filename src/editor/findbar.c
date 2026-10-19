@@ -231,12 +231,19 @@ static GtkWidget *bar_button(GtkWidget *box, gboolean toggle, const char *icon, 
   return button;
 }
 
+/* Another option: the match is looked for again from the selection (Aa can make "FOO" no match). */
+static void on_option(GtkToggleButton *button G_GNUC_UNUSED, FindBar *f)
+{
+  search(f, TRUE, FALSE);
+}
+
 /* A toggle that sets a boolean property of the search settings. */
 static void option(FindBar *f, GtkWidget *box, const char *label, const char *tip, const char *property)
 {
   GtkWidget *button = bar_button(box, TRUE, NULL, label, tip);
 
   g_object_bind_property(button, "active", f->settings, property, G_BINDING_DEFAULT);
+  g_signal_connect_after(button, "toggled", G_CALLBACK(on_option), f); /* after the binding set it */
 }
 
 static FindBar *findbar_new(Tab *tab)
@@ -328,8 +335,9 @@ void findbar_show(Tab *tab, gboolean replace)
   if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end) &&
       gtk_text_iter_get_line(&start) == gtk_text_iter_get_line(&end)) {
     char *selected = gtk_text_buffer_get_text(buffer, &start, &end, TRUE);
-    if (strlen(selected) <= MAX_SEED) {
-      /* The match is the selection itself: no jump to the next one. */
+    /* The match is the selection itself: no jump to the next one. When it is what is looked for
+     * already (a match the bar selected), it stays selected: "1 of 3", and Replace takes it. */
+    if (strlen(selected) <= MAX_SEED && strcmp(selected, gtk_editable_get_text(GTK_EDITABLE(f->find))) != 0) {
       gtk_text_buffer_place_cursor(buffer, &start);
       gtk_editable_set_text(GTK_EDITABLE(f->find), selected);
     }

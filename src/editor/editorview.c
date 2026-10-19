@@ -189,6 +189,9 @@ void editor_view_init(Tab *tab, gboolean readonly)
   gtk_source_buffer_set_style_scheme(
       buffer, gtk_source_style_scheme_manager_get_scheme(gtk_source_style_scheme_manager_get_default(), SCHEME));
   gtk_source_buffer_set_highlight_matching_brackets(buffer, TRUE);
+  /* The buffer holds the file exactly, its last line break too (shown as an empty last line, like VS
+   * Code): what is saved, what clangd gets and what the diff gutter compares are the same text. */
+  gtk_source_buffer_set_implicit_trailing_newline(buffer, FALSE);
   view = guides_view_new(tab, buffer); /* our reference to the buffer stays the tab's */
 
   tab->view = v;

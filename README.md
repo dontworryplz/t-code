@@ -120,7 +120,7 @@ While they build, the packages also run the tests that need no display.
 ### From the source, into ~/.local
 
 ```sh
-./install.sh
+packaging/install.sh
 ```
 
 This builds t-code and installs it under `~/.local`: the `t-code` command, the file manager in
@@ -130,7 +130,7 @@ with its own icon (`desktop/io.github.tcode.svg`, installed to `~/.local/share/i
 To remove everything it installed:
 
 ```sh
-./uninstall.sh
+packaging/uninstall.sh
 ```
 
 `make install` installs system-wide instead (`PREFIX=/usr/local` by default, `DESTDIR` for
@@ -333,10 +333,9 @@ tests/               make test: editing and the find bar, the language server cl
                      and About; make test-asan: the ones without GTK under ASan
 tools/               measuring memory and CPU: the running process tree, a headless t-code, clangd
 desktop/             app menu entry template and the app icon
-packaging/           build.sh, test.sh: Fedora (fedora/t-code.spec), Arch (arch/PKGBUILD), Debian
-                     (debian/debian/) and Void Linux (void/) packages, built into packaging/packages/
-                     (not in git)
-install.sh, uninstall.sh
+packaging/           install.sh, uninstall.sh, build.sh, test.sh: Fedora (fedora/t-code.spec), Arch
+                     (arch/PKGBUILD), Debian (debian/debian/) and Void Linux (void/) packages, built
+                     into packaging/packages/ (not in git)
 .clang-format        the code's style (2 spaces); clangd formats with it
 LICENSE
 Makefile             VERSION, make install; also writes build/compile_commands.json, so clangd

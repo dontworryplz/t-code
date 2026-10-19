@@ -21,6 +21,8 @@ struct SignatureHelp {
   Asking *asking; /* the request whose answer counts */
   GCancellable *cancel;
   guint again_id;
+  guint trigger_id; /* a "(" or "," typed: asked once the typing is done */
+  char trigger;
   gboolean retrigger; /* it shows: the next request says so */
 };
 
@@ -244,16 +246,30 @@ static void follow(SignatureHelp *h)
     h->again_id = g_timeout_add(AGAIN_MS, ask_again, h);
 }
 
-/* After the buffer took the text: "(" and "," (also "()" typed with its closer) open the hint. */
+static gboolean ask_for_trigger(gpointer data)
+{
+  SignatureHelp *h = data;
+
+  h->trigger_id = 0;
+  ask(h, h->trigger);
+  return G_SOURCE_REMOVE;
+}
+
+/* After the buffer took the text: "(" and "," (also "()" typed with its closer) open the hint. Not
+ * at once: "()" goes in before the cursor is put between the two, and asked from after the ")" the
+ * server would see the cursor outside the call. */
 static void on_inserted(GtkTextBuffer *buffer G_GNUC_UNUSED, const GtkTextIter *where G_GNUC_UNUSED, const char *text,
                         int len, SignatureHelp *h)
 {
   if (h->tab->view->loading)
     return;
-  if (len >= 1 && len <= 2 && (text[0] == '(' || text[0] == ','))
-    ask(h, text[0]);
-  else
+  if (len >= 1 && len <= 2 && (text[0] == '(' || text[0] == ',')) {
+    h->trigger = text[0];
+    if (!h->trigger_id)
+      h->trigger_id = g_idle_add(ask_for_trigger, h);
+  } else {
     follow(h);
+  }
 }
 
 static void on_deleted(GtkTextBuffer *buffer G_GNUC_UNUSED, const GtkTextIter *start G_GNUC_UNUSED,
@@ -338,6 +354,8 @@ void signature_free(SignatureHelp *h)
   g_signal_handlers_disconnect_by_data(h->tab->buffer, h);
   if (h->again_id)
     g_source_remove(h->again_id);
+  if (h->trigger_id)
+    g_source_remove(h->trigger_id);
   if (h->asking)
     h->asking->help = NULL; /* its answer is dropped */
   if (h->cancel) {
