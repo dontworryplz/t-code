@@ -3,6 +3,7 @@
  * --version), and quitting cleanly on SIGTERM / SIGINT. The window itself is built by
  * build_window() (window/window.c); see app.h for how the source folders divide the work.
  */
+#define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 #include "app.h"
 
 #include "editor/editor.h"

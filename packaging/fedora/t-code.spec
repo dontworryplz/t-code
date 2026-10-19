@@ -1,5 +1,5 @@
 Name:           t-code
-Version:        0.1.1
+Version:        0.2
 Release:        1%{?dist}
 Summary:        Lightweight C/C++ IDE: file manager, editor tabs with clangd and a shell
 License:        MIT
@@ -57,6 +57,17 @@ build/test-linediff
 %{_datadir}/icons/hicolor/scalable/apps/io.github.tcode.svg
 
 %changelog
+* Mon Oct 19 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.2-1
+- Editor tabs are GtkSourceView 5 views instead of micro terminals, with an
+  in-process clangd client: problems underlined, completion, parameter hints,
+  hover, go to definition, references, rename, formatting, semantic colors
+- Find and replace bar, closing brackets and quotes, line commands, indent
+  guides, a minimap marking problems, git's changes in the gutter
+- Side-by-side comparisons stay aligned and scroll together
+- Files, Source Control, Search and the shell can be moved between 12 docks
+- Native Markdown preview (md4c in a text view): no WebKit
+- Less memory: one clangd with at most five open documents, freed heap
+  returned to the system, no process per editor
 * Sat Oct 17 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.1.1-1
 - Much less memory and CPU: editors start when their tab is first shown, hidden
   editors stay idle, clangd runs with two malloc arenas, the Markdown preview's

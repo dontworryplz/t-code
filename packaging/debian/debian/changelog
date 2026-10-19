@@ -1,3 +1,19 @@
+t-code (0.2-1) unstable; urgency=medium
+
+  * Editor tabs are GtkSourceView 5 views instead of micro terminals, with an
+    in-process clangd client: problems underlined, completion, parameter
+    hints, hover, go to definition, references, rename, formatting, semantic
+    colors.
+  * Find and replace bar, closing brackets and quotes, line commands, indent
+    guides, a minimap marking problems, git's changes in the gutter.
+  * Side-by-side comparisons stay aligned and scroll together.
+  * Files, Source Control, Search and the shell can be moved between 12 docks.
+  * Native Markdown preview (md4c in a text view): no WebKit.
+  * Less memory: one clangd with at most five open documents, freed heap
+    returned to the system, no process per editor.
+
+ -- suacayipkisi <ufukdenizcaglayan@gmail.com>  Mon, 19 Oct 2026 12:00:00 +0300
+
 t-code (0.1.1-1) unstable; urgency=medium
 
   * Much less memory and CPU: editors start when their tab is first shown,

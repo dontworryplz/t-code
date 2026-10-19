@@ -2,10 +2,10 @@
 
 A light C/C++ IDE for Linux in one GTK4 window, with VS Code's Dark Modern look.
 
-> **`main` has moved from micro to GtkSourceView.** The editor tabs are no longer terminals running
+> **Since 0.2 the editor is GtkSourceView.** The editor tabs are no longer terminals running
 > [micro](https://micro-editor.github.io): they are [GtkSourceView 5](https://gitlab.gnome.org/GNOME/gtksourceview)
 > views inside the window, with clangd's errors underlined in red, completion and parameter hints
-> while typing, and no process per tab. The released micro-based t-code (0.1.1) lives on in the
+> while typing, and no process per tab. The micro-based t-code (0.1.1) lives on in the
 > [`micro-main`](../../tree/micro-main) branch; [`docs/gtksourceview-plan.md`](docs/gtksourceview-plan.md)
 > tells how the move went.
 
@@ -65,22 +65,21 @@ sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-dev
 
 ### With a package (Fedora, Arch Linux, Debian, Void Linux)
 
-The released packages are the micro-based t-code 0.1.1 (the `micro-main` branch); build them from
-`main` (below) for this one. t-code 0.1.1 has packages for Fedora 44, Arch Linux, Debian 13 (trixie) and Void Linux (glibc and
+t-code 0.2 has packages for Fedora 44, Arch Linux, Debian 13 (trixie) and Void Linux (glibc and
 musl), x86_64. Install the one for your distribution; the package manager pulls in what it needs
 (clangd, git and the Cascadia Code font among them):
 
 ```sh
-sudo dnf install ./t-code-0.1.1-1.fc44.x86_64.rpm        # Fedora
-sudo pacman -U t-code-0.1.1-1-x86_64.pkg.tar.zst         # Arch Linux
-sudo apt install ./t-code_0.1.1-1_amd64.deb              # Debian
+sudo dnf install ./t-code-0.2-1.fc44.x86_64.rpm          # Fedora
+sudo pacman -U t-code-0.2-1-x86_64.pkg.tar.zst           # Arch Linux
+sudo apt install ./t-code_0.2-1_amd64.deb                # Debian
 ```
 
 On Void Linux, xbps installs from a repository, so the downloaded package is indexed first (in
 the folder it is in; use the `x86_64-musl` file on musl):
 
 ```sh
-xbps-rindex -a t-code-0.1.1_1.x86_64.xbps
+xbps-rindex -a t-code-0.2_1.x86_64.xbps
 sudo xbps-install --repository="$PWD" t-code
 ```
 
@@ -91,7 +90,7 @@ Then start `t-code` from the app menu, or `t-code [folder]` in a terminal. To re
 your package manager (`sudo dnf remove t-code`, `sudo pacman -R t-code`, `sudo apt remove t-code`,
 `sudo xbps-remove t-code`).
 
-A package built from `main` puts `t-code` in `/usr/bin`, the file manager in `/usr/libexec/t-code/`
+A package puts `t-code` in `/usr/bin`, the file manager in `/usr/libexec/t-code/`
 (`/usr/lib/t-code/` on Arch), the editor's colors in `/usr/share/t-code/styles/`, and the app menu
 entry and icon.
 
@@ -271,7 +270,7 @@ Measured on Fedora 44 (x86_64) with `tools/headless.sh` (t-code run invisibly, t
 turn, against the micro-based 0.1.1 run the same way. Memory is PSS: pages shared between processes
 are split between them, so the rows add up.
 
-| all 25 tabs shown | 0.1.1 (micro) | `main` (GtkSourceView) |
+| all 25 tabs shown | 0.1.1 (micro) | 0.2 (GtkSourceView) |
 |---|---:|---:|
 | editors | 25 micro processes, 412 MB | in the window |
 | t-code window | 57 MB | 83 MB |
