@@ -104,6 +104,15 @@ static void type_text(Tab *tab, const char *text)
     type_key(tab, gdk_unicode_to_keyval((guchar)*p));
 }
 
+/* The selected text; the caller frees it. */
+static char *selection_of(Tab *tab)
+{
+  GtkTextIter start, end;
+
+  gtk_text_buffer_get_selection_bounds(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+  return gtk_text_buffer_get_text(GTK_TEXT_BUFFER(tab->buffer), &start, &end, TRUE);
+}
+
 /* Comments ----------------------------------------------------------------------------------- */
 
 static void test_comment_lines(void)
@@ -298,6 +307,31 @@ static void test_no_pair_in_comment(void)
   cursor_at(tab, 0, 4);
   type_text(tab, "(");
   assert_text(tab, "// a(\n");
+  free_tab(tab);
+}
+
+/* Snippets ----------------------------------------------------------------------------------- */
+
+/* A completed function's snippet: its first parameter selected and typed over. Tab then moves to
+ * the next one only with enable-snippets on (GtkSourceView's key handler checks it even for pushed
+ * snippets); the key itself cannot be fed here, the handler wants a real GdkEvent. */
+static void test_snippet_tab(void)
+{
+  Tab *tab = new_tab("");
+  GtkSourceSnippet *snippet = gtk_source_snippet_new_parsed("f(${1:int a}, ${2:int b})$0", NULL);
+  GtkTextIter start;
+  char *selected;
+
+  g_assert_true(gtk_source_view_get_enable_snippets(tab->source));
+  gtk_text_buffer_get_start_iter(GTK_TEXT_BUFFER(tab->buffer), &start);
+  gtk_source_view_push_snippet(tab->source, snippet, &start);
+  selected = selection_of(tab);
+  g_assert_cmpstr(selected, ==, "int a");
+  g_free(selected);
+  type_text(tab, "x");
+  assert_text(tab, "f(x, int b)");
+  g_assert_cmpint(gtk_source_snippet_get_focus_position(snippet), ==, 1); /* still in the snippet */
+  g_object_unref(snippet);
   free_tab(tab);
 }
 
@@ -598,6 +632,7 @@ int main(int argc, char **argv)
   g_test_add_func("/editing/enter-between-braces", test_enter_between_braces);
   g_test_add_func("/editing/outdent-brace", test_outdent_brace);
   g_test_add_func("/editing/no-pair-in-comment", test_no_pair_in_comment);
+  g_test_add_func("/editing/snippet-tab", test_snippet_tab);
   g_test_add_func("/find/next-previous", test_find);
   g_test_add_func("/find/replace", test_replace);
   g_test_add_func("/find/selection", test_find_selection);

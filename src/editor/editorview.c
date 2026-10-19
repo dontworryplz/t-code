@@ -328,6 +328,9 @@ void editor_view_init(Tab *tab, gboolean readonly)
   gtk_source_view_set_highlight_current_line(view, TRUE);
   gtk_source_view_set_auto_indent(view, TRUE);
   gtk_source_view_set_indent_on_tab(view, TRUE);
+  /* Tab / Shift+Tab move between a completed function's parameters: GtkSourceView only does
+   * that for pushed snippets with this on (it has no snippet files of its own to expand). */
+  gtk_source_view_set_enable_snippets(view, TRUE);
   gtk_source_view_set_smart_backspace(view, TRUE);
   gtk_source_view_set_smart_home_end(view, GTK_SOURCE_SMART_HOME_END_BEFORE);
 
