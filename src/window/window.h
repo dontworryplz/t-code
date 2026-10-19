@@ -2,7 +2,7 @@
  * The main window and its layout:
  *
  *   +-------------+-------------------------------+
- *   |             | [main.c x] [util.c x]         |  editor tabs, one terminal (micro) each;
+ *   |             | [main.c x] [util.c x]         |  editor tabs (GtkSourceView);
  *   |    files    |                               |  split into two groups side by side
  *   | (t-code-fm) +-------------------------------+
  *   |             | shell                         |

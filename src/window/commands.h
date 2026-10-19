@@ -15,8 +15,8 @@ void command_palette(App *t);
 
 /* A command and its shortcut, for the Keybinds window. */
 typedef struct {
-    const char *name;
-    const char *keys; /* as shown; NULL when there is no shortcut */
+  const char *name;
+  const char *keys; /* as shown; NULL when there is no shortcut */
 } KeyHelp;
 
 /* The window's commands; *n is set to how many. */

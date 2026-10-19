@@ -1,522 +1,630 @@
-/* Tests for the shared language servers in src/ipc/lsp.c (included with its channels and JSON helpers,
- * to reach their static state): editors
- * connect to its socket like t-code-lsp does, and this program itself, started with --fake-server,
- * is the language server. It logs every message it gets to a file, so the tests can see what reached
- * the server. Besides the routing, they check that nothing piles up over many editors coming and
- * going: no requests, documents or clients left behind, and (with glibc, without ASan) no growth of
- * the heap. make test-asan runs this under AddressSanitizer, whose leak check covers the rest. */
-#define IDLE_SECONDS 1
-#include "ipc/lsp.c"
-#include "ipc/lspchannel.c"
-#include "ipc/lspjson.c"
-
-#include <errno.h>
-#include <fcntl.h>
-#include <glib/gstdio.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#if defined(__GLIBC__) && !defined(__SANITIZE_ADDRESS__)
+/*
+ * Tests for the language server client (src/lsp/client.c) with real editors. The server is this
+ * program run with --fake-server: it keeps its own copy of each file, applying every change it is
+ * sent, and answers each change with one diagnostic whose message is the whole text as it has it
+ * (at the first "X" in it), so the tests see whether the editor and the server agree.
+ */
 #include <malloc.h>
-#define HEAP_CHECK 1
-#endif
+#include <stdio.h>
+#include <stdlib.h>
 
-static char *tmp, *self;
+#define IDLE_SECONDS 1
+#define FLUSH_MS 2
+#define SERVER_ARGV "/proc/self/exe", "--fake-server",
 
-/* The fake server ---------------------------------------------------------------------------- */
+#include "editor_page.h"
 
-static void fake_send(const char *format, ...)
+/* The fake server -------------------------------------------------------------------------- */
+
+static gboolean fake_utf16;
+static GHashTable *fake_docs; /* uri -> GString */
+
+/* One message from stdin, or NULL at EOF. */
+static char *fake_read(void)
 {
-    va_list args;
-    char *body;
+  char line[256];
+  long length = -1;
 
-    va_start(args, format);
-    body = g_strdup_vprintf(format, args);
-    va_end(args);
-    printf("Content-Length: %zu\r\n\r\n%s", strlen(body), body);
-    fflush(stdout);
-    g_free(body);
+  while (fgets(line, sizeof line, stdin)) {
+    if (g_ascii_strncasecmp(line, "Content-Length:", 15) == 0)
+      length = strtol(line + 15, NULL, 10);
+    else if (strcmp(line, "\r\n") == 0 && length >= 0) {
+      char *body = g_malloc0(length + 1);
+      if (fread(body, 1, length, stdin) != (size_t)length) {
+        g_free(body);
+        return NULL;
+      }
+      return body;
+    }
+  }
+  return NULL;
 }
 
-/* Answers every request with its method name ("initialize": empty capabilities), publishes
- * diagnostics for every opened document, asks for its configuration once initialized, and logs
- * "<method or answer> <uri or ->" per message. */
-static int fake_server(const char *log_path)
+static void fake_send(const char *body)
 {
-    FILE *log = fopen(log_path, "a");
-    char header[256];
-    long size = -1;
+  printf("Content-Length: %zu\r\n\r\n%s", strlen(body), body);
+  fflush(stdout);
+}
 
-    if (!log)
-        return 1;
-    setvbuf(log, NULL, _IOLBF, 0);
-    while (fgets(header, sizeof header, stdin)) {
-        if (g_ascii_strncasecmp(header, "Content-Length:", 15) == 0) {
-            size = strtol(header + 15, NULL, 10);
-            continue;
-        }
-        if (strcmp(header, "\r\n") != 0 || size < 0)
-            continue;
-        char *body = g_malloc(size + 1);
-        if (fread(body, 1, size, stdin) != (size_t)size) {
-            g_free(body);
-            break;
-        }
-        body[size] = '\0';
-        size = -1;
-        char *method = json_lookup_string(body, "method");
-        char *uri = json_lookup_string(body, "params.textDocument.uri");
-        Span id = json_lookup(body, "id");
-        fprintf(log, "%s %s\n", method ? method : "answer", uri ? uri : "-");
-        if (method && id.start) {
-            char *server_id = json_text(id);
-            if (strcmp(method, "initialize") == 0)
-                fake_send("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"capabilities\":{}}}", server_id);
-            else
-                fake_send("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":\"%s\"}", server_id, method);
-            g_free(server_id);
-        } else if (method && strcmp(method, "initialized") == 0) {
-            fake_send("{\"jsonrpc\":\"2.0\",\"id\":\"config\",\"method\":\"workspace/configuration\","
-                      "\"params\":{\"items\":[{}]}}");
-        } else if (method && uri && strcmp(method, "textDocument/didOpen") == 0) {
-            char *quoted = json_quote(uri);
-            fake_send("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\","
-                      "\"params\":{\"uri\":%s,\"diagnostics\":[]}}", quoted);
-            g_free(quoted);
-        }
-        g_free(uri);
-        g_free(method);
-        g_free(body);
+/* The byte offset of an LSP position in text. */
+static gsize fake_offset(const char *text, JsonNode *position)
+{
+  gint64 line = json_int_at(position, "line", 0), character = json_int_at(position, "character", 0);
+  const char *p = text;
+
+  for (; line > 0 && *p; p++)
+    if (*p == '\n')
+      line--;
+  if (!fake_utf16)
+    return (p - text) + character;
+  for (gint64 units = 0; units < character && *p && *p != '\n'; p = g_utf8_next_char(p))
+    units += g_utf8_get_char(p) >= 0x10000 ? 2 : 1;
+  return p - text;
+}
+
+/* The LSP position of a byte offset in text. */
+static void fake_position(const char *text, gsize offset, int *line, int *character)
+{
+  const char *start = text;
+
+  *line = 0;
+  for (const char *p = text; p < text + offset; p++)
+    if (*p == '\n') {
+      (*line)++;
+      start = p + 1;
     }
-    fprintf(log, "eof -\n");
-    fclose(log);
-    return 0;
+  if (!fake_utf16) {
+    *character = (int)(text + offset - start);
+    return;
+  }
+  *character = 0;
+  for (const char *p = start; p < text + offset; p = g_utf8_next_char(p))
+    *character += g_utf8_get_char(p) >= 0x10000 ? 2 : 1;
+}
+
+/* The diagnostic that tells the test what the server has. */
+static void fake_publish(const char *uri, GString *text)
+{
+  char *quoted_uri = json_quote(uri), *quoted_text = json_quote(text->str), *body;
+  const char *x = strchr(text->str, 'X');
+  int line = 0, character = 0;
+
+  if (x)
+    fake_position(text->str, x - text->str, &line, &character);
+  body = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":"
+                         "{\"uri\":%s,\"diagnostics\":[{\"range\":{\"start\":{\"line\":%d,\"character\":%d},"
+                         "\"end\":{\"line\":%d,\"character\":%d}},\"severity\":1,\"message\":%s}]}}",
+                         quoted_uri, line, character, line, character + (x ? 1 : 0), quoted_text);
+  fake_send(body);
+  g_free(body);
+  g_free(quoted_text);
+  g_free(quoted_uri);
+}
+
+static void fake_text_free(gpointer text)
+{
+  g_string_free(text, TRUE);
+}
+
+static int fake_server(void)
+{
+  char *body;
+
+  fake_utf16 = g_strcmp0(g_getenv("FAKE_ENCODING"), "utf-16") == 0;
+  fake_docs = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, fake_text_free);
+  while ((body = fake_read())) {
+    JsonParser *parser = json_parser_new();
+    JsonNode *message;
+    const char *method, *uri;
+    if (!json_parser_load_from_data(parser, body, -1, NULL)) {
+      g_object_unref(parser);
+      g_free(body);
+      continue;
+    }
+    message = json_parser_get_root(parser);
+    method = json_string_at(message, "method");
+    uri = json_string_at(message, "params.textDocument.uri");
+    if (g_strcmp0(method, "initialize") == 0) {
+      char *reply = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":{\"capabilities\":"
+                                    "{\"positionEncoding\":\"%s\",\"hoverProvider\":true}}}",
+                                    json_int_at(message, "id", 0), fake_utf16 ? "utf-16" : "utf-8");
+      fake_send(reply);
+      g_free(reply);
+    } else if (g_strcmp0(method, "textDocument/didOpen") == 0) {
+      GString *text = g_string_new(json_string_at(message, "params.textDocument.text"));
+      g_hash_table_insert(fake_docs, g_strdup(uri), text);
+      fake_publish(uri, text);
+    } else if (g_strcmp0(method, "textDocument/didChange") == 0) {
+      GString *text = g_hash_table_lookup(fake_docs, uri);
+      JsonArray *changes = json_node_get_array(json_at(message, "params.contentChanges"));
+      for (guint i = 0; text && i < json_array_get_length(changes); i++) {
+        JsonNode *change = json_array_get_element(changes, i);
+        const char *inserted = json_string_at(change, "text");
+        if (!json_at(change, "range")) {
+          g_string_assign(text, inserted);
+          continue;
+        }
+        gsize start = fake_offset(text->str, json_at(change, "range.start"));
+        gsize end = fake_offset(text->str, json_at(change, "range.end"));
+        g_string_erase(text, start, end - start);
+        g_string_insert(text, start, inserted);
+      }
+      if (text && strstr(text->str, "CRASH"))
+        exit(1);
+      if (text)
+        fake_publish(uri, text);
+    } else if (g_strcmp0(method, "textDocument/didClose") == 0) {
+      g_hash_table_remove(fake_docs, uri);
+    } else if (g_strcmp0(method, "textDocument/hover") == 0) {
+      char *reply =
+          g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":{\"contents\":"
+                          "{\"kind\":\"plaintext\",\"value\":\"hover at %" G_GINT64_FORMAT ":%" G_GINT64_FORMAT "\"}}}",
+                          json_int_at(message, "id", 0), json_int_at(message, "params.position.line", 0),
+                          json_int_at(message, "params.position.character", 0));
+      fake_send(reply);
+      g_free(reply);
+    }
+    g_object_unref(parser);
+    g_free(body);
+  }
+  return 0;
 }
 
 /* Editors ------------------------------------------------------------------------------------ */
 
-typedef struct {
-    int fd;
-    GByteArray *in;
-} Editor;
+static App app;
 
-/* Runs the main loop (ipc/lsp.c's side) until done() or ms have passed. */
-static gboolean spin(gboolean (*done)(gpointer), gpointer data, int ms)
+static Tab *new_tab(const char *path, const char *text)
 {
-    gint64 end = g_get_monotonic_time() + ms * 1000;
+  Tab *tab = g_new0(Tab, 1);
 
-    while (!(done && done(data))) {
-        if (g_get_monotonic_time() > end)
-            return FALSE;
-        if (!g_main_context_iteration(NULL, FALSE))
-            g_usleep(1000);
-    }
-    return TRUE;
+  tab->app = &app;
+  tab->kind = TAB_EDITOR;
+  tab->path = g_strdup(path);
+  tab->page = g_object_ref_sink(editor_page());
+  editor_view_init(tab, FALSE);
+  gtk_source_buffer_set_language(
+      tab->buffer, gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(), "c"));
+  gtk_text_buffer_set_text(GTK_TEXT_BUFFER(tab->buffer), text, -1);
+  return tab;
 }
 
-/* The key of the server for log: "<folder>\t<server command>". */
-static char *server_key(const char *log)
+static void free_tab(Tab *tab)
 {
-    return g_strdup_printf("%s\t%s\t--fake-server\t%s", tmp, self, log);
+  editor_view_free(tab->view);
+  g_object_unref(tab->page);
+  g_free(tab->path);
+  g_free(tab);
 }
 
-static Server *server_for(const char *log)
+static char *text_of(Tab *tab)
 {
-    char *key = server_key(log);
-    Server *s = g_hash_table_lookup(servers, key);
+  GtkTextIter start, end;
 
-    g_free(key);
-    return s;
+  gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+  return gtk_text_buffer_get_text(GTK_TEXT_BUFFER(tab->buffer), &start, &end, TRUE);
 }
 
-static Editor *editor_connect(const char *log)
+/* What the server last said it has: the message of the one diagnostic. */
+static const char *server_text(Tab *tab)
 {
-    Editor *e = g_new0(Editor, 1);
-    struct sockaddr_un address = { .sun_family = AF_UNIX };
-    char *line = server_key(log);
+  GPtrArray *list = tab->view->diagnostics;
 
-    e->fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    g_strlcpy(address.sun_path, socket_path, sizeof address.sun_path);
-    g_assert_cmpint(connect(e->fd, (struct sockaddr *)&address, sizeof address), ==, 0);
-    g_assert_true(write(e->fd, line, strlen(line)) == (ssize_t)strlen(line) && write(e->fd, "\n", 1) == 1);
-    fcntl(e->fd, F_SETFL, O_NONBLOCK);
-    e->in = g_byte_array_new();
-    g_free(line);
-    return e;
+  return list && list->len == 1 ? ((Diagnostic *)g_ptr_array_index(list, 0))->message : NULL;
 }
 
-static void editor_send(Editor *e, const char *format, ...)
+/* Runs the main loop until the server has the editor's text (or 5 seconds pass). */
+static gboolean server_agrees(Tab *tab)
 {
-    va_list args;
-    char *body, *message;
+  gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+  gboolean same = FALSE;
 
-    va_start(args, format);
-    body = g_strdup_vprintf(format, args);
-    va_end(args);
-    message = g_strdup_printf("Content-Length: %zu\r\n\r\n%s", strlen(body), body);
-    for (gsize done = 0, len = strlen(message); done < len;) {
-        ssize_t n = write(e->fd, message + done, len - done);
-        if (n > 0)
-            done += n;
-        else if (n < 0 && errno == EAGAIN)
-            spin(NULL, NULL, 1);
-        else
-            g_error("write: %s", g_strerror(errno));
-    }
-    g_free(message);
-    g_free(body);
-}
-
-/* The next whole message from the server's side, or NULL when none comes within ms. */
-static gboolean editor_has_message(gpointer data)
-{
-    Editor *e = data;
-    char chunk[4096];
-    ssize_t n;
-
-    while ((n = read(e->fd, chunk, sizeof chunk)) > 0)
-        g_byte_array_append(e->in, (const guint8 *)chunk, n);
-    if (e->in->len == 0)
-        return FALSE;
-    const char *data_start = (const char *)e->in->data, *end = g_strstr_len(data_start, e->in->len, "\r\n\r\n");
-    if (!end)
-        return FALSE;
-    long size = content_length(data_start, end - data_start);
-    return e->in->len >= (gsize)(end - data_start + 4 + size);
-}
-
-static char *editor_receive(Editor *e, int ms)
-{
-    if (!spin(editor_has_message, e, ms))
-        return NULL;
-    const char *data = (const char *)e->in->data, *end = g_strstr_len(data, e->in->len, "\r\n\r\n");
-    gsize head = end - data + 4;
-    long size = content_length(data, end - data);
-    char *body = g_strndup(data + head, size);
-    g_byte_array_remove_range(e->in, 0, head + size);
-    return body;
-}
-
-/* The next message must answer id with result. */
-static void expect_answer(Editor *e, const char *id, const char *result)
-{
-    char *body = editor_receive(e, 3000);
-
-    g_assert_nonnull(body);
-    Span got_id = json_lookup(body, "id"), got = json_lookup(body, "result");
-    g_assert_nonnull(got_id.start);
-    g_assert_nonnull(got.start);
-    char *id_text = json_text(got_id), *result_text = json_text(got);
-    g_assert_cmpstr(id_text, ==, id);
-    g_assert_cmpstr(result_text, ==, result);
-    g_free(result_text);
-    g_free(id_text);
-    g_free(body);
-}
-
-static void expect_diagnostics(Editor *e, const char *uri)
-{
-    char *body = editor_receive(e, 3000), *got;
-
-    g_assert_nonnull(body);
-    got = json_lookup_string(body, "params.uri");
-    g_assert_cmpstr(got, ==, uri);
-    g_free(got);
-    g_free(body);
-}
-
-static void expect_nothing(Editor *e)
-{
-    char *body = editor_receive(e, 150);
-
-    if (body)
-        g_error("unexpected message: %s", body);
-}
-
-static void editor_open(Editor *e, const char *uri)
-{
-    editor_send(e, "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":"
-                   "{\"uri\":\"%s\",\"languageId\":\"c\",\"version\":1,\"text\":\"\"}}}", uri);
-}
-
-static void editor_initialize(Editor *e, const char *id)
-{
-    editor_send(e, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"method\":\"initialize\",\"params\":{\"processId\":1}}", id);
-    expect_answer(e, id, "{\"capabilities\":{}}");
-    editor_send(e, "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}");
-}
-
-typedef struct {
-    Server *server;
-    guint clients;
-} ClientCount;
-
-static gboolean has_clients(gpointer data)
-{
-    ClientCount *c = data;
-
-    return c->server->clients->len == c->clients;
-}
-
-/* Disconnects, and waits until lsp.c has let the editor go. */
-static void editor_close(Editor *e, const char *log)
-{
-    ClientCount count = { server_for(log), 0 };
-
-    g_assert_nonnull(count.server);
-    count.clients = count.server->clients->len - 1;
-    close(e->fd);
-    g_byte_array_unref(e->in);
-    g_free(e);
-    g_assert_true(spin(has_clients, &count, 3000));
-}
-
-/* The server's log ---------------------------------------------------------------------------- */
-
-static int log_count(const char *log, const char *line)
-{
-    char *text = NULL, **lines;
-    int n = 0;
-
-    if (!g_file_get_contents(log, &text, NULL, NULL))
-        return 0;
-    lines = g_strsplit(text, "\n", -1);
-    for (int i = 0; lines[i]; i++)
-        n += strcmp(lines[i], line) == 0;
-    g_strfreev(lines);
+  while (!same && g_get_monotonic_time() < deadline) {
+    char *text = text_of(tab);
+    same = g_strcmp0(server_text(tab), text) == 0;
     g_free(text);
-    return n;
+    if (!same)
+      g_main_context_iteration(NULL, TRUE);
+  }
+  return same;
+}
+
+static void run_for(int ms)
+{
+  gint64 until = g_get_monotonic_time() + ms * 1000;
+
+  while (g_get_monotonic_time() < until)
+    g_main_context_iteration(NULL, FALSE);
+}
+
+static GtkTextIter iter_at(Tab *tab, int line, int offset)
+{
+  GtkTextIter iter;
+
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &iter, line, offset);
+  return iter;
+}
+
+/* Edits of every kind, checked against the server's copy after each burst. */
+static void edit_and_compare(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/sync.c", "int a;\nçağrı X(\"🙂\");\n");
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+  GtkTextIter start, end;
+  char *at;
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  /* The diagnostic is on the "X", after characters of two bytes each. */
+  start = iter_at(tab, 1, 6);
+  at = diagnostics_at(tab, &start, FALSE);
+  g_assert_nonnull(at);
+  g_free(at);
+
+  start = iter_at(tab, 1, 0);
+  gtk_text_buffer_insert(buffer, &start, "ünlü ", -1); /* typing */
+  start = iter_at(tab, 1, 15);
+  gtk_text_buffer_insert(buffer, &start, "🙂🙂", -1); /* after an emoji */
+  g_assert_true(server_agrees(tab));
+
+  start = iter_at(tab, 0, 0);
+  end = iter_at(tab, 1, 3);
+  gtk_text_buffer_delete(buffer, &start, &end); /* across lines */
+  start = iter_at(tab, 0, 0);
+  gtk_text_buffer_insert(buffer, &start, "a\nb\nc\n", -1); /* new lines */
+  g_assert_true(server_agrees(tab));
+
+  gtk_text_buffer_set_text(buffer, "all new X\n", -1); /* everything replaced */
+  g_assert_true(server_agrees(tab));
+  lsp_close(tab);
+  free_tab(tab);
+}
+
+static void test_sync_utf8(void)
+{
+  lsp_stop(&app);
+  g_setenv("FAKE_ENCODING", "utf-8", TRUE);
+  edit_and_compare();
+  g_assert_false(app.lsp->utf16);
+}
+
+static void test_sync_utf16(void)
+{
+  lsp_stop(&app);
+  g_setenv("FAKE_ENCODING", "utf-16", TRUE);
+  edit_and_compare();
+  g_assert_true(app.lsp->utf16);
+  lsp_stop(&app);
+  g_setenv("FAKE_ENCODING", "utf-8", TRUE);
+}
+
+/* A file loaded again (changed on disk) goes whole. */
+static void test_reload(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/reload.c", "old\n");
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  tab->view->loading = TRUE; /* what the loader inserts is not sent change by change */
+  gtk_text_buffer_set_text(GTK_TEXT_BUFFER(tab->buffer), "new text\n", -1);
+  tab->view->loading = FALSE;
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  free_tab(tab);
 }
 
 typedef struct {
-    const char *log, *line;
-    int count;
-} LogWait;
+  gboolean called;
+  char *value;
+} Answer;
 
-static gboolean log_has(gpointer data)
+static void on_answer(JsonNode *result, gpointer data)
 {
-    LogWait *w = data;
+  Answer *answer = data;
 
-    return log_count(w->log, w->line) >= w->count;
+  answer->called = TRUE;
+  answer->value = g_strdup(result ? json_string_at(result, "contents.value") : NULL);
 }
 
-static void wait_log(const char *log, const char *line, int count)
+static void test_hover(void)
 {
-    LogWait w = { log, line, count };
+  Tab *tab = new_tab("/tmp/t-code-test/hover.c", "int a;\nint bb;\n");
+  Answer answer = { 0 };
+  GtkTextIter iter;
+  char *position, *params;
 
-    if (!spin(log_has, &w, 3000))
-        g_error("%s: \"%s\" %d times, not %d", log, line, log_count(log, line), count);
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  iter = iter_at(tab, 1, 5);
+  position = lsp_position_params(tab, &iter);
+  params = g_strdup_printf("{%s}", position);
+  lsp_request(tab, "textDocument/hover", params, NULL, on_answer, &answer);
+  while (!answer.called)
+    g_main_context_iteration(NULL, TRUE);
+  g_assert_cmpstr(answer.value, ==, "hover at 1:5");
+  g_free(answer.value);
+  g_free(params);
+  g_free(position);
+  free_tab(tab);
 }
 
-static char *new_log(const char *name)
+/* A cancelled request gets NULL, and its late answer goes nowhere. */
+static void test_cancel(void)
 {
-    return g_build_filename(tmp, name, NULL);
+  Tab *tab = new_tab("/tmp/t-code-test/cancel.c", "x\n");
+  GCancellable *cancel = g_cancellable_new();
+  Answer answer = { 0 };
+  char *position;
+  GtkTextIter iter;
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  iter = iter_at(tab, 0, 0);
+  position = lsp_position_params(tab, &iter);
+  char *params = g_strdup_printf("{%s}", position);
+  lsp_request(tab, "textDocument/hover", params, cancel, on_answer, &answer);
+  g_cancellable_cancel(cancel);
+  while (!answer.called)
+    g_main_context_iteration(NULL, TRUE);
+  g_assert_null(answer.value);
+  run_for(200); /* the server's answer comes, and is dropped */
+  g_assert_cmpuint(g_hash_table_size(app.lsp->pending), ==, 0);
+  g_object_unref(cancel);
+  g_free(params);
+  g_free(position);
+  free_tab(tab);
 }
 
-/* Tests -------------------------------------------------------------------------------------- */
-
-/* Two editors share one server: it is initialized once, and each editor's requests (both use
- * id 1) come back to it with its own id. */
-static void test_shared(void)
+/* An editor that goes takes its waiting requests with it: they get NULL at once. */
+static void test_close_waiting(void)
 {
-    char *log = new_log("shared.log");
-    Editor *a = editor_connect(log), *b = editor_connect(log);
+  Tab *tab = new_tab("/tmp/t-code-test/close.c", "x\n");
+  Answer answer = { 0 };
+  GtkTextIter iter;
+  char *position, *params;
 
-    editor_initialize(a, "0");
-    editor_initialize(b, "0");
-    wait_log(log, "answer -", 1); /* t-code answered the server's configuration request */
-    g_assert_cmpint(log_count(log, "initialize -"), ==, 1);
-    g_assert_cmpint(log_count(log, "initialized -"), ==, 1);
-    g_assert_cmpuint(g_hash_table_size(servers), ==, 1);
-
-    editor_send(a, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"textDocument/hover\",\"params\":{}}");
-    editor_send(b, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"textDocument/definition\",\"params\":{}}");
-    expect_answer(a, "1", "\"textDocument/hover\"");
-    expect_answer(b, "1", "\"textDocument/definition\"");
-    expect_nothing(a);
-    expect_nothing(b);
-    g_assert_cmpuint(g_hash_table_size(server_for(log)->requests), ==, 0);
-
-    editor_close(a, log);
-    editor_close(b, log);
-    g_free(log);
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  iter = iter_at(tab, 0, 0);
+  position = lsp_position_params(tab, &iter);
+  params = g_strdup_printf("{%s}", position);
+  lsp_request(tab, "textDocument/hover", params, NULL, on_answer, &answer);
+  free_tab(tab);
+  g_assert_true(answer.called);
+  g_assert_null(answer.value);
+  run_for(200);
+  g_free(params);
+  g_free(position);
 }
 
-/* Diagnostics go only to the editors that opened the file. */
-static void test_diagnostics(void)
-{
-    char *log = new_log("diagnostics.log");
-    Editor *a = editor_connect(log), *b = editor_connect(log);
-
-    editor_initialize(a, "0");
-    editor_initialize(b, "0");
-    editor_open(a, "file:///a.c");
-    expect_diagnostics(a, "file:///a.c");
-    editor_open(b, "file:///b.c");
-    expect_diagnostics(b, "file:///b.c");
-    expect_nothing(a);
-    expect_nothing(b);
-    editor_close(a, log);
-    editor_close(b, log);
-    g_free(log);
-}
-
-/* A document is closed in the server when the last editor that opened it goes. */
-static void test_close_on_disconnect(void)
-{
-    char *log = new_log("close.log");
-    Editor *a = editor_connect(log), *b = editor_connect(log);
-
-    editor_initialize(a, "0");
-    editor_initialize(b, "0");
-    editor_open(a, "file:///x.c");
-    expect_diagnostics(a, "file:///x.c");
-    editor_open(b, "file:///x.c");
-    wait_log(log, "textDocument/didOpen file:///x.c", 2);
-    expect_diagnostics(b, "file:///x.c");
-
-    editor_close(a, log);
-    spin(NULL, NULL, 100);
-    g_assert_cmpint(log_count(log, "textDocument/didClose file:///x.c"), ==, 0);
-    editor_close(b, log);
-    wait_log(log, "textDocument/didClose file:///x.c", 1);
-    g_assert_cmpuint(g_hash_table_size(server_for(log)->open), ==, 0);
-    g_free(log);
-}
-
-/* An editor that goes while its request is out: the late answer is dropped, nothing kept. */
-static void test_answer_after_close(void)
-{
-    char *log = new_log("late.log");
-    Editor *a = editor_connect(log), *b = editor_connect(log);
-
-    editor_initialize(a, "0");
-    editor_initialize(b, "0");
-    editor_send(a, "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/hover\",\"params\":{}}");
-    editor_close(a, log);
-    wait_log(log, "textDocument/hover -", 1);
-    spin(NULL, NULL, 100);
-    expect_nothing(b);
-    g_assert_cmpuint(g_hash_table_size(server_for(log)->requests), ==, 0);
-    editor_close(b, log);
-    g_free(log);
-}
-
-static gboolean server_gone(gpointer data)
-{
-    return server_for(data) == NULL;
-}
-
-/* A server without editors stops after IDLE_SECONDS; its process sees EOF and exits. */
+/* Without editors the server stops (after IDLE_SECONDS, 1 here); the next one starts it again. */
 static void test_idle_stop(void)
 {
-    char *log = new_log("idle.log");
-    Editor *a = editor_connect(log);
+  Tab *tab = new_tab("/tmp/t-code-test/idle.c", "x\n");
 
-    editor_initialize(a, "0");
-    editor_close(a, log);
-    g_assert_nonnull(server_for(log));
-    g_assert_true(spin(server_gone, log, IDLE_SECONDS * 1000 + 2000));
-    wait_log(log, "eof -", 1);
-    g_free(log);
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  free_tab(tab);
+  g_assert_nonnull(app.lsp->ch);
+  /* A timeout in seconds fires up to a second late (GLib rounds them to whole seconds). */
+  for (gint64 until = g_get_monotonic_time() + 3 * G_USEC_PER_SEC; app.lsp->ch && g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_null(app.lsp->ch);
+
+  tab = new_tab("/tmp/t-code-test/idle.c", "y\n");
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  free_tab(tab);
 }
 
-/* A malformed header closes only that editor's connection. */
-static void test_bad_header(void)
+/* A server that crashes starts again, and gets the files again. */
+static void test_crash(void)
 {
-    char *log = new_log("bad.log");
-    Editor *a = editor_connect(log), *b = editor_connect(log);
-    ClientCount one = { NULL, 1 };
+  Tab *tab = new_tab("/tmp/t-code-test/crash.c", "x\n");
+  GtkTextIter start;
 
-    editor_initialize(a, "0");
-    editor_initialize(b, "0");
-    g_assert_true(write(a->fd, "Content-Type: x\r\n\r\n{}", 22) == 22);
-    one.server = server_for(log);
-    g_assert_true(spin(has_clients, &one, 3000));
-    editor_send(b, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{}}");
-    expect_answer(b, "2", "\"textDocument/hover\"");
-    close(a->fd);
-    g_byte_array_unref(a->in);
-    g_free(a);
-    editor_close(b, log);
-    g_free(log);
+  lsp_stop(&app);
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  start = iter_at(tab, 0, 0);
+  gtk_text_buffer_insert(GTK_TEXT_BUFFER(tab->buffer), &start, "CRASH ", -1);
+  run_for(500);
+  start = iter_at(tab, 0, 0);
+  GtkTextIter end = iter_at(tab, 0, 6);
+  gtk_text_buffer_delete(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+  g_assert_true(server_agrees(tab)); /* the restarted server has "x" */
+  g_assert_cmpint(app.lsp->crashes, ==, 1);
+  free_tab(tab);
 }
 
-/* One editor's whole life: connect, initialize, open a file, ask, go. */
-static void editor_life(const char *log, int i)
-{
-    Editor *e = editor_connect(log);
-    char *uri = g_strdup_printf("file:///churn/%d.c", i);
-
-    editor_initialize(e, "0");
-    editor_open(e, uri);
-    expect_diagnostics(e, uri);
-    editor_send(e, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"textDocument/hover\",\"params\":{}}");
-    expect_answer(e, "1", "\"textDocument/hover\"");
-    editor_close(e, log);
-    g_free(uri);
-}
-
-/* Hundreds of editors come and go (like tabs opened and closed for hours): nothing is left behind
- * in the server's tables, and the heap does not grow with the number of editors. */
+/* Opening and closing a file many times leaves nothing behind. */
 static void test_churn(void)
 {
-    char *log = new_log("churn.log");
-    Server *s;
+  Tab *tab = new_tab("/tmp/t-code-test/churn.c", "int x;\n");
+  size_t before;
 
-    for (int i = 0; i < 50; i++) /* warm up: GLib's own caches, the hash tables' sizes */
-        editor_life(log, i);
-#ifdef HEAP_CHECK
-    malloc_trim(0);
-    size_t before = mallinfo2().uordblks;
-#endif
-    for (int i = 50; i < 450; i++)
-        editor_life(log, i);
-    s = server_for(log);
-    g_assert_nonnull(s);
-    g_assert_cmpuint(s->clients->len, ==, 0);
-    g_assert_cmpuint(g_hash_table_size(s->requests), ==, 0);
-    g_assert_cmpuint(g_hash_table_size(s->open), ==, 0);
-    g_assert_cmpuint(s->init_waiting->len, ==, 0);
-    wait_log(log, "textDocument/didClose file:///churn/449.c", 1);
-#ifdef HEAP_CHECK
-    malloc_trim(0);
-    size_t after = mallinfo2().uordblks;
-    g_test_message("heap in use: %zu -> %zu bytes over 400 editors", before, after);
-    /* A leak of even 100 bytes per editor would be 40 KB. */
-    g_assert_cmpint((long)after - (long)before, <, 32 * 1024);
-#endif
-    g_free(log);
+  /* The buffer's undo history grows with every edit: that is not the client's. */
+  gtk_text_buffer_set_enable_undo(GTK_TEXT_BUFFER(tab->buffer), FALSE);
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  for (int round = 0; round < 2; round++) {
+    if (round == 1) {
+      malloc_trim(0);
+      before = mallinfo2().uordblks;
+    }
+    for (int i = 0; i < 200; i++) {
+      GtkTextIter start, end;
+      lsp_close(tab);
+      /* The last answer is not the one to wait for: each round waits for the server, or
+             * the messages not yet read would pile up and look like a leak. */
+      diagnostics_clear(tab);
+      lsp_open(tab);
+      g_assert_true(server_agrees(tab));
+      start = iter_at(tab, 0, 0);
+      gtk_text_buffer_insert(GTK_TEXT_BUFFER(tab->buffer), &start, "a", -1);
+      g_assert_true(server_agrees(tab));
+      start = iter_at(tab, 0, 0);
+      end = iter_at(tab, 0, 1);
+      gtk_text_buffer_delete(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+      g_assert_true(server_agrees(tab));
+    }
+  }
+  malloc_trim(0);
+  g_test_message("heap grew by %zd bytes", (ssize_t)(mallinfo2().uordblks - before));
+  g_assert_cmpint((gssize)(mallinfo2().uordblks - before), <, 8 * 1024); /* a leak of 130 bytes a round is 26 KB */
+  free_tab(tab);
+}
+
+/* Completion, hints and edits --------------------------------------------------------------- */
+
+static JsonNode *json_of(const char *json)
+{
+  JsonParser *parser = json_parser_new();
+  JsonNode *node;
+
+  g_assert_true(json_parser_load_from_data(parser, json, -1, NULL));
+  node = json_node_copy(json_parser_get_root(parser));
+  g_object_unref(parser);
+  return node;
+}
+
+/* clangd's items: the name without its "•", the parameters apart, the snippet; typing filters
+ * them, best match first. */
+static void test_completion_items(void)
+{
+  TcodeCompletion *provider = g_object_new(TCODE_TYPE_COMPLETION, NULL);
+  JsonNode *answer = json_of(
+      "{\"isIncomplete\":true,\"items\":["
+      "{\"label\":\" print_all(int n)\",\"labelDetails\":{\"detail\":\"(int n)\"},\"detail\":\"void\","
+      "\"kind\":3,\"sortText\":\"2\",\"filterText\":\"print_all\",\"insertTextFormat\":2,"
+      "\"textEdit\":{\"newText\":\"print_all(${1:int n})\",\"range\":{\"start\":{\"line\":0,\"character\":0},"
+      "\"end\":{\"line\":0,\"character\":2}}}},"
+      "{\"label\":\"•printf\",\"kind\":3,\"sortText\":\"1\",\"filterText\":\"printf\",\"insertText\":\"printf\","
+      "\"additionalTextEdits\":[{\"newText\":\"#include <stdio.h>\\n\",\"range\":{\"start\":{\"line\":0,"
+      "\"character\":0},\"end\":{\"line\":0,\"character\":0}}}]},"
+      "{\"label\":\"value\",\"kind\":6,\"sortText\":\"3\"}]}");
+  TcodeProposal *first;
+
+  take_answer(provider, answer, "pr");
+  g_assert_true(provider->incomplete);
+  g_assert_cmpuint(g_list_model_get_n_items(G_LIST_MODEL(provider->shown)), ==, 2); /* not "value" */
+  first = g_list_model_get_item(G_LIST_MODEL(provider->shown), 0);
+  g_assert_cmpstr(first->label, ==, "printf"); /* the "•" (an #include comes with it) is gone */
+  g_assert_nonnull(first->more);
+  g_object_unref(first);
+
+  refill(provider, "pra"); /* "print_all": p, r, then a */
+  g_assert_cmpuint(g_list_model_get_n_items(G_LIST_MODEL(provider->shown)), ==, 1);
+  first = g_list_model_get_item(G_LIST_MODEL(provider->shown), 0);
+  g_assert_cmpstr(first->label, ==, "print_all");
+  g_assert_cmpstr(first->params, ==, "(int n)");
+  g_assert_cmpstr(first->detail, ==, "void");
+  g_assert_true(first->snippet);
+  g_assert_cmpstr(first->text, ==, "print_all(${1:int n})");
+  g_assert_nonnull(first->edit_start);
+  g_object_unref(first);
+
+  refill(provider, "");
+  g_assert_cmpuint(g_list_model_get_n_items(G_LIST_MODEL(provider->shown)), ==, 3);
+  json_node_unref(answer);
+  g_object_unref(provider);
+}
+
+/* The argument being typed is bold; overloads are counted. */
+static void test_signature_markup(void)
+{
+  JsonNode *offsets =
+      json_of("{\"activeSignature\":1,\"activeParameter\":1,\"signatures\":["
+              "{\"label\":\"f(int a)\",\"parameters\":[{\"label\":[2,7]}]},"
+              "{\"label\":\"f(int a, char *b) -> int\",\"parameters\":[{\"label\":[2,7]},"
+              "{\"label\":[9,16]}],\"documentation\":{\"kind\":\"plaintext\",\"value\":\"Does f.\"}}]}");
+  JsonNode *names = json_of("{\"signatures\":[{\"label\":\"g(x, y)\",\"activeParameter\":0,"
+                            "\"parameters\":[{\"label\":\"x\"},{\"label\":\"y\"}]}]}");
+  JsonNode *none = json_of("{\"signatures\":[]}");
+  char *markup = hint_markup(offsets);
+
+  g_assert_nonnull(strstr(markup, "2/2"));
+  g_assert_nonnull(strstr(markup, "f(int a, <b><span foreground=\"#2aaaff\">char *b</span></b>) -&gt; int"));
+  g_assert_nonnull(strstr(markup, "Does f."));
+  g_free(markup);
+  markup = hint_markup(names);
+  g_assert_nonnull(strstr(markup, "g(<b><span foreground=\"#2aaaff\">x</span></b>, y)"));
+  g_free(markup);
+  g_assert_null(hint_markup(none));
+  json_node_unref(none);
+  json_node_unref(names);
+  json_node_unref(offsets);
+}
+
+/* Edits land where the server meant them, whatever the earlier ones did; two at one place keep
+ * their order. */
+static void test_edits(void)
+{
+  const char *edits_json = "[{\"range\":{\"start\":{\"line\":0,\"character\":4},\"end\":{\"line\":0,\"character\":5}},"
+                           "\"newText\":\"value\"},"
+                           "{\"range\":{\"start\":{\"line\":1,\"character\":0},\"end\":{\"line\":1,\"character\":0}},"
+                           "\"newText\":\"A\"},"
+                           "{\"range\":{\"start\":{\"line\":1,\"character\":0},\"end\":{\"line\":1,\"character\":0}},"
+                           "\"newText\":\"B\"},"
+                           "{\"range\":{\"start\":{\"line\":1,\"character\":7},\"end\":{\"line\":1,\"character\":8}},"
+                           "\"newText\":\"value\"}]";
+  JsonNode *edits = json_of(edits_json);
+  Tab *tab = new_tab("/tmp/t-code-test/edits.c", "int x;\nreturn x;\n");
+  char *text = edits_apply_text("int x;\nreturn x;\n", edits, FALSE), *buffer_text;
+
+  g_assert_cmpstr(text, ==, "int value;\nABreturn value;\n");
+  edits_apply(tab, edits);
+  buffer_text = text_of(tab);
+  g_assert_cmpstr(buffer_text, ==, text);
+  g_free(buffer_text);
+  g_free(text);
+  free_tab(tab);
+  json_node_unref(edits);
+}
+
+/* Positions after a non-ASCII character: bytes in UTF-8, units in UTF-16. */
+static void test_edits_encodings(void)
+{
+  JsonNode *utf8 = json_of("[{\"range\":{\"start\":{\"line\":0,\"character\":4},\"end\":{\"line\":0,"
+                           "\"character\":5}},\"newText\":\"Z\"}]");
+  JsonNode *utf16 = json_of("[{\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,"
+                            "\"character\":4}},\"newText\":\"Z\"}]");
+  char *a = edits_apply_text("ğüx y", utf8, FALSE), *b = edits_apply_text("🙂x y", utf16, TRUE);
+
+  g_assert_cmpstr(a, ==, "ğüZ y");
+  g_assert_cmpstr(b, ==, "🙂xZy");
+  g_free(b);
+  g_free(a);
+  json_node_unref(utf16);
+  json_node_unref(utf8);
 }
 
 int main(int argc, char **argv)
 {
-    int status;
-
-    if (argc == 3 && strcmp(argv[1], "--fake-server") == 0)
-        return fake_server(argv[2]);
-    g_test_init(&argc, &argv, NULL);
-    self = g_file_read_link("/proc/self/exe", NULL);
-    tmp = g_dir_make_tmp("t-code-lsp-XXXXXX", NULL);
-    g_setenv("XDG_RUNTIME_DIR", tmp, TRUE);
-    lsp_start(NULL);
-    g_assert_nonnull(socket_path);
-
-    g_test_add_func("/lsp/shared", test_shared);
-    g_test_add_func("/lsp/diagnostics", test_diagnostics);
-    g_test_add_func("/lsp/close-on-disconnect", test_close_on_disconnect);
-    g_test_add_func("/lsp/answer-after-close", test_answer_after_close);
-    g_test_add_func("/lsp/bad-header", test_bad_header);
-    g_test_add_func("/lsp/idle-stop", test_idle_stop);
-    g_test_add_func("/lsp/churn", test_churn);
-    status = g_test_run();
-
-    lsp_stop(); /* every server and connection freed: the leak check (make test-asan) sees the rest */
-    spin(NULL, NULL, 200); /* the cancelled reads and writes finish */
-    char *rm[] = { "rm", "-rf", tmp, NULL };
-    g_spawn_sync(NULL, rm, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, NULL, NULL);
-    g_free(tmp);
-    g_free(self);
-    return status;
+  if (argc > 1 && strcmp(argv[1], "--fake-server") == 0)
+    return fake_server();
+  g_test_init(&argc, &argv, NULL);
+  if (!gtk_init_check()) {
+    g_test_skip("no display");
+    return g_test_run();
+  }
+  gtk_source_init();
+  app.root = g_strdup("/tmp");
+  app.settings.tab_size = 4;
+  app.font_scale = 1.0;
+  app.styles_dir = g_canonicalize_filename("styles", NULL);
+  g_test_add_func("/lsp/sync-utf8", test_sync_utf8);
+  g_test_add_func("/lsp/sync-utf16", test_sync_utf16);
+  g_test_add_func("/lsp/reload", test_reload);
+  g_test_add_func("/lsp/hover", test_hover);
+  g_test_add_func("/lsp/cancel", test_cancel);
+  g_test_add_func("/lsp/close-waiting", test_close_waiting);
+  g_test_add_func("/lsp/idle-stop", test_idle_stop);
+  g_test_add_func("/lsp/crash", test_crash);
+  g_test_add_func("/lsp/churn", test_churn);
+  g_test_add_func("/lsp/completion-items", test_completion_items);
+  g_test_add_func("/lsp/signature-markup", test_signature_markup);
+  g_test_add_func("/lsp/edits", test_edits);
+  g_test_add_func("/lsp/edits-encodings", test_edits_encodings);
+  return g_test_run();
 }

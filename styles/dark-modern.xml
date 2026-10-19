@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VS Code's "Dark Modern" for GtkSourceView. The code colors come from VS Code's dark_plus theme;
+  comments, control flow and type keywords are italic, like the user's VS Code. clangd's semantic
+  colors (functions, types, macros by meaning) come on top of these from the language server.
+-->
+<style-scheme id="t-code-dark-modern" name="Dark Modern (t-code)" version="1.0">
+  <author>t-code</author>
+  <description>VS Code Dark Modern</description>
+
+  <color name="fg" value="#CCCCCC"/>
+  <color name="bg" value="#1F1F1F"/>
+  <color name="comment" value="#6A9955"/>
+  <color name="keyword" value="#569CD6"/>
+  <color name="control" value="#C586C0"/>
+  <color name="type" value="#4EC9B0"/>
+  <color name="function" value="#DCDCAA"/>
+  <color name="variable" value="#9CDCFE"/>
+  <color name="constant" value="#4FC1FF"/>
+  <color name="string" value="#CE9178"/>
+  <color name="number" value="#B5CEA8"/>
+  <color name="escape" value="#D7BA7D"/>
+  <color name="error" value="#F14C4C"/>
+  <color name="warning" value="#CCA700"/>
+  <color name="info" value="#3794FF"/>
+
+  <!-- The editor -->
+  <style name="text" foreground="fg" background="bg"/>
+  <style name="selection" background="#264F78"/>
+  <style name="selection-unfocused" background="#3A3D41"/>
+  <style name="cursor" foreground="#AEAFAD"/>
+  <style name="secondary-cursor" foreground="#6E7681"/>
+  <style name="current-line" background="#282828"/>
+  <style name="line-numbers" foreground="#6E7681" background="bg"/>
+  <style name="current-line-number" foreground="fg" background="bg"/>
+  <style name="bracket-match" background="#3A3D41"/>
+  <style name="bracket-mismatch" underline="error" underline-color="error"/>
+  <style name="search-match" background="#623315"/>
+  <style name="draw-spaces" foreground="#404040"/>
+  <style name="background-pattern" background="#181818"/>
+  <style name="right-margin" foreground="#2B2B2B" background="#2B2B2B"/>
+  <style name="map-overlay" background="#rgba(121,121,121,0.2)"/>
+  <style name="snippet-focus" background="#3A3D41"/>
+
+  <!-- Defaults, which every language maps to -->
+  <style name="def:comment" foreground="comment" italic="true"/>
+  <style name="def:shebang" foreground="comment" italic="true"/>
+  <style name="def:doc-comment-element" foreground="#569CD6" italic="true"/>
+  <style name="def:keyword" foreground="keyword"/>
+  <style name="def:statement" foreground="control" italic="true"/>
+  <style name="def:operator" foreground="#D4D4D4"/>
+  <style name="def:type" foreground="type"/>
+  <style name="def:function" foreground="function"/>
+  <style name="def:builtin" foreground="function"/>
+  <style name="def:identifier" foreground="variable"/>
+  <style name="def:preprocessor" foreground="control" italic="true"/>
+  <style name="def:constant" foreground="constant"/>
+  <style name="def:special-constant" foreground="keyword"/>
+  <style name="def:boolean" foreground="keyword"/>
+  <style name="def:number" foreground="number"/>
+  <style name="def:string" foreground="string"/>
+  <style name="def:character" foreground="string"/>
+  <style name="def:special-char" foreground="escape"/>
+  <style name="def:error" underline="error" underline-color="error"/>
+  <style name="def:warning" underline="error" underline-color="warning"/>
+  <style name="def:note" foreground="info" bold="true"/>
+  <style name="def:net-address" foreground="info" underline="single"/>
+  <style name="def:underlined" underline="single"/>
+
+  <!-- Markdown and other markup -->
+  <style name="def:heading" foreground="keyword" bold="true"/>
+  <style name="def:emphasis" italic="true"/>
+  <style name="def:strong-emphasis" bold="true"/>
+  <style name="def:inline-code" foreground="string"/>
+  <style name="def:preformatted-section" foreground="string"/>
+  <style name="def:link-text" foreground="info"/>
+  <style name="def:link-symbol" foreground="fg"/>
+  <style name="def:link-destination" foreground="info" underline="low"/>
+  <style name="def:list-marker" foreground="#6796E6"/>
+  <style name="def:thematic-break" foreground="#6E7681"/>
+  <style name="def:insertion" foreground="#2EA043"/>
+  <style name="def:deletion" foreground="#F85149" strikethrough="true"/>
+
+  <!-- C and C++ (c.lang, cpp.lang): if / return / for are control flow, int / static / struct are
+       type keywords, #include and the like preprocessor lines -->
+  <style name="c:keyword" foreground="control" italic="true"/>
+  <style name="c:type-keyword" foreground="keyword" italic="true"/>
+  <style name="c:type" foreground="keyword" italic="true"/>
+  <style name="c:storage-class" foreground="keyword" italic="true"/>
+  <style name="c:operator" foreground="keyword"/>
+  <style name="c:common-defines" foreground="keyword"/>
+  <style name="c:included-file" foreground="string"/>
+  <style name="c:printf" foreground="variable"/>
+  <style name="c:standard-stream" foreground="variable"/>
+  <style name="c:signal-name" foreground="keyword"/>
+  <style name="cpp:keyword" foreground="keyword" italic="true"/>
+
+  <!-- diff, git -->
+  <style name="diff:added-line" foreground="#2EA043"/>
+  <style name="diff:removed-line" foreground="#F85149"/>
+  <style name="diff:changed-line" foreground="#0078D4"/>
+  <style name="diff:location" foreground="keyword"/>
+  <style name="diff:diff-file" foreground="control"/>
+</style-scheme>

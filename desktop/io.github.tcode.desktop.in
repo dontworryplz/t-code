@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=t-code
-Comment=Three terminals in one window: files, editor tabs (micro + clangd) and a shell
+Comment=C/C++ IDE: file manager, editor tabs with clangd and a shell
 Exec=@BIN@ %F
 Icon=io.github.tcode
 Terminal=false

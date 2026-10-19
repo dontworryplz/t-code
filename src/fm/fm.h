@@ -32,48 +32,48 @@
 #define N_ELEMENTS(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
 typedef struct {
-    char *path;
-    const char *name; /* points into path */
-    int depth;
-    bool dir;
-    char git; /* 0, or a git state: M(odified) A(dded) U(ntracked) D(eleted) C(onflict) I(gnored) */
+  char *path;
+  const char *name; /* points into path */
+  int depth;
+  bool dir;
+  char git; /* 0, or a git state: M(odified) A(dded) U(ntracked) D(eleted) C(onflict) I(gnored) */
 } Row;
 
 typedef struct {
-    char *path; /* absolute; ignored folders end without the slash */
-    char state;
+  char *path; /* absolute; ignored folders end without the slash */
+  char state;
 } GitEntry;
 
 typedef struct {
-    char root[PATH_MAX];
-    Row *rows;
-    int nrows, cap;
-    char **expanded;
-    int nexpanded;
-    bool show_hidden;
-    bool focused;
-    bool follow; /* keep the selection on screen; off after scrolling with the wheel */
-    int sel, top;
-    int width, height;
-    char message[512];
-    bool message_is_error;
-    GitEntry *git;
-    int ngit;
-    char git_dir[PATH_MAX]; /* the repository's .git folder, "" outside a repository */
-    char clip[PATH_MAX];    /* cut or copied file, "" when none */
-    bool clip_cut;
-    int press_row;          /* left button down on this row, -1 when not */
-    int drop_row;           /* while dragging: the row under the pointer, -1 outside the rows */
-    bool dragging;
-    struct termios saved;
+  char root[PATH_MAX];
+  Row *rows;
+  int nrows, cap;
+  char **expanded;
+  int nexpanded;
+  bool show_hidden;
+  bool focused;
+  bool follow; /* keep the selection on screen; off after scrolling with the wheel */
+  int sel, top;
+  int width, height;
+  char message[512];
+  bool message_is_error;
+  GitEntry *git;
+  int ngit;
+  char git_dir[PATH_MAX]; /* the repository's .git folder, "" outside a repository */
+  char clip[PATH_MAX];    /* cut or copied file, "" when none */
+  bool clip_cut;
+  int press_row; /* left button down on this row, -1 when not */
+  int drop_row;  /* while dragging: the row under the pointer, -1 outside the rows */
+  bool dragging;
+  struct termios saved;
 } Fm;
 
 extern Fm fm;
 
 /* draw.c */
 typedef struct {
-    char *data;
-    size_t len, cap;
+  char *data;
+  size_t len, cap;
 } Buf;
 void buf_add(Buf *b, const char *s, size_t n);
 void buf_puts(Buf *b, const char *s);

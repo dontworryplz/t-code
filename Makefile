@@ -1,11 +1,10 @@
 VERSION := 0.1.1
-PKGS    := gtk4 vte-2.91-gtk4 gio-unix-2.0 webkitgtk-6.0 md4c-html
-# t-code: src/main.c and the feature folders (src/window, src/editor, ...); src/fm and src/lsp are
-# the two helper programs.
-APP_SRC := $(filter-out src/fm/% src/lsp/%,$(wildcard src/*.c src/*/*.c))
-APP_HDR := $(filter-out src/fm/% src/lsp/%,$(wildcard src/*.h src/*/*.h))
+PKGS    := gtk4 gtksourceview-5 json-glib-1.0 vte-2.91-gtk4 gio-unix-2.0 webkitgtk-6.0 md4c-html
+# t-code: src/main.c and the feature folders (src/window, src/editor, ...); src/fm is the file
+# manager, a program of its own.
+APP_SRC := $(filter-out src/fm/%,$(wildcard src/*.c src/*/*.c))
+APP_HDR := $(filter-out src/fm/%,$(wildcard src/*.h src/*/*.h))
 FM_SRC  := $(wildcard src/fm/*.c)
-LSP_SRC := $(wildcard src/lsp/*.c)
 TEST_SRC := $(wildcard tests/*.c)
 CFLAGS  ?= -O2 -g
 CFLAGS  += -Wall -Wextra -std=c23
@@ -17,7 +16,7 @@ LIBEXECDIR ?= $(PREFIX)/libexec
 DATADIR    ?= $(PREFIX)/share
 APP_CFLAGS := $(shell pkg-config --cflags $(PKGS)) -Isrc -Ibuild
 
-all: build/t-code build/t-code-fm build/t-code-lsp build/compile_commands.json
+all: build/t-code build/t-code-fm build/compile_commands.json
 
 build/t-code: $(APP_SRC) $(APP_HDR) build/license.h Makefile | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ $(APP_SRC) $(LDFLAGS) \
@@ -30,11 +29,8 @@ build/license.h: LICENSE | build
 build/t-code-fm: $(FM_SRC) src/fm/fm.h | build
 	$(CC) $(CFLAGS) -o $@ $(FM_SRC) $(LDFLAGS)
 
-build/t-code-lsp: $(LSP_SRC) | build
-	$(CC) $(CFLAGS) -o $@ $(LSP_SRC) $(LDFLAGS)
-
-# How each file is compiled, so clangd (in micro, VS Code, ...) finds the GTK, VTE and WebKit headers.
-build/compile_commands.json: Makefile $(APP_SRC) $(FM_SRC) $(LSP_SRC) $(TEST_SRC) | build
+# How each file is compiled, so clangd (in t-code, VS Code, ...) finds the GTK, VTE and WebKit headers.
+build/compile_commands.json: Makefile $(APP_SRC) $(FM_SRC) $(TEST_SRC) | build
 	@( printf '['; sep=; \
 	   for f in $(APP_SRC); do \
 	     printf '%s\n  {"directory": "%s", "file": "%s", "command": "cc %s -c %s"}' \
@@ -42,13 +38,13 @@ build/compile_commands.json: Makefile $(APP_SRC) $(FM_SRC) $(LSP_SRC) $(TEST_SRC
 	   for f in $(TEST_SRC); do \
 	     printf '%s\n  {"directory": "%s", "file": "%s", "command": "cc %s -c %s"}' \
 	       "$$sep" "$(CURDIR)" "$$f" "$(CFLAGS) $(APP_CFLAGS)" "$$f"; sep=,; done; \
-	   for f in $(FM_SRC) $(LSP_SRC); do \
+	   for f in $(FM_SRC); do \
 	     printf '%s\n  {"directory": "%s", "file": "%s", "command": "cc %s -c %s"}' \
 	       "$$sep" "$(CURDIR)" "$$f" "$(CFLAGS)" "$$f"; sep=,; done; \
 	   printf '\n]\n' ) > $@
 
-# Tests: searchmatch.c alone (GLib); the Search panel, the minimap, Source Control and About in a window
-# (they need a display for some or all of their tests).
+# Tests: searchmatch.c, editor/detect.c and git/linediff.c alone (GLib); the Search panel, editing, Source Control and
+# About in a window (they need a display for some or all of their tests).
 build/test-searchmatch: tests/test_searchmatch.c src/search/searchmatch.c src/search/searchmatch.h | build
 	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags gio-2.0) -o $@ tests/test_searchmatch.c src/search/searchmatch.c \
 	  $(shell pkg-config --libs gio-2.0)
@@ -57,28 +53,39 @@ build/test-search-panel: tests/test_search_panel.c src/search/search.c src/searc
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_search_panel.c src/search/search.c src/search/searchmatch.c \
 	  $(shell pkg-config --libs $(PKGS))
 
-# The editor page's files are included by the test, to reach their static functions.
-MINIMAP_SRC := src/editor/editorview.c src/editor/control.c src/editor/minimap.c src/editor/lexer.c src/editor/guides.c
-build/test-minimap: tests/test_minimap.c $(MINIMAP_SRC) $(APP_HDR) | build
-	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_minimap.c $(shell pkg-config --libs $(PKGS))
+build/test-linediff: tests/test_linediff.c src/git/linediff.c src/git/linediff.h | build
+	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags glib-2.0) -o $@ tests/test_linediff.c src/git/linediff.c \
+	  $(shell pkg-config --libs glib-2.0)
+
+build/test-detect: tests/test_detect.c src/editor/detect.c src/editor/detect.h | build
+	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags glib-2.0) -o $@ tests/test_detect.c src/editor/detect.c \
+	  $(shell pkg-config --libs glib-2.0)
+
+# The editor page's files (with the language server client) are included by the tests through
+# tests/editor_page.h, to reach their static functions. test-lsp runs itself with --fake-server as
+# the language server.
+PAGE_SRC := $(wildcard src/editor/editing.c src/editor/findbar.c src/editor/editorview.c src/editor/detect.c \
+              src/lsp/*.c) tests/editor_page.h
+build/test-editing: tests/test_editing.c $(PAGE_SRC) $(APP_HDR) | build
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_editing.c $(shell pkg-config --libs $(PKGS))
+
+build/test-lsp: tests/test_lsp.c $(PAGE_SRC) $(APP_HDR) | build
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_lsp.c $(shell pkg-config --libs $(PKGS))
 
 build/test-scm: tests/test_scm.c src/git/scm.c src/git/gitstatus.c $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_scm.c src/git/scm.c $(shell pkg-config --libs $(PKGS))
-
-# The shared language servers (src/ipc/lsp*.c), with the test program itself as the server.
-LSP_MUX_SRC := src/ipc/lsp.c src/ipc/lspchannel.c src/ipc/lspjson.c
-build/test-lsp: tests/test_lsp.c $(LSP_MUX_SRC) $(APP_HDR) | build
-	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_lsp.c $(LDFLAGS) $(shell pkg-config --libs gio-unix-2.0)
 
 build/test-about: tests/test_about.c src/dialogs/about.c $(APP_HDR) build/license.h | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_about.c \
 	  $(shell pkg-config --libs $(PKGS))
 
-test: build/test-searchmatch build/test-lsp build/test-search-panel build/test-minimap build/test-scm build/test-about
+test: build/test-searchmatch build/test-detect build/test-linediff build/test-lsp build/test-search-panel build/test-editing build/test-scm build/test-about
 	build/test-searchmatch
+	build/test-detect
+	build/test-linediff
 	build/test-lsp
 	build/test-search-panel
-	build/test-minimap
+	build/test-editing
 	build/test-scm
 	build/test-about
 
@@ -93,21 +100,19 @@ test-asan: | build
 	mkdir -p build/asan
 	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gio-2.0) -o build/asan/test-searchmatch \
 	  tests/test_searchmatch.c src/search/searchmatch.c $(shell pkg-config --libs gio-2.0)
-	$(CC) $(ASAN_FLAGS) $(APP_CFLAGS) -o build/asan/test-lsp tests/test_lsp.c \
-	  $(shell pkg-config --libs gio-unix-2.0)
+	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags glib-2.0) -o build/asan/test-detect \
+	  tests/test_detect.c src/editor/detect.c $(shell pkg-config --libs glib-2.0)
 	$(ASAN_ENV) build/asan/test-searchmatch
-	$(ASAN_ENV) build/asan/test-lsp
+	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags glib-2.0) -o build/asan/test-linediff \
+	  tests/test_linediff.c src/git/linediff.c $(shell pkg-config --libs glib-2.0)
+	$(ASAN_ENV) build/asan/test-detect
+	$(ASAN_ENV) build/asan/test-linediff
 
 # System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).
-MICRO_FILES := settings.json bindings.json colorschemes syntax plug bin
-
-install: build/t-code build/t-code-fm build/t-code-lsp
+install: build/t-code build/t-code-fm
 	install -Dm755 build/t-code $(DESTDIR)$(BINDIR)/t-code
 	install -Dm755 build/t-code-fm $(DESTDIR)$(LIBEXECDIR)/t-code/t-code-fm
-	install -Dm755 build/t-code-lsp $(DESTDIR)$(LIBEXECDIR)/t-code/t-code-lsp
-	install -d $(DESTDIR)$(DATADIR)/t-code/micro
-	cd micro && cp -R $(MICRO_FILES) $(DESTDIR)$(DATADIR)/t-code/micro/
-	chmod -R u=rwX,go=rX $(DESTDIR)$(DATADIR)/t-code
+	install -Dm644 styles/dark-modern.xml $(DESTDIR)$(DATADIR)/t-code/styles/dark-modern.xml
 	install -Dm644 desktop/io.github.tcode.svg \
 	  $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/io.github.tcode.svg
 	install -d $(DESTDIR)$(DATADIR)/applications

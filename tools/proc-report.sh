@@ -1,8 +1,8 @@
 #!/bin/bash
 # What a running t-code costs: its process tree grouped by program, with process and thread
 # counts, memory (PSS: shared pages split between the processes using them, so the column adds
-# up; RSS counts them in every process) and CPU over a few seconds, plus the checks that keep it
-# small (editors only for the tabs shown, clangd's malloc arenas).
+# up; RSS counts them in every process) and CPU over a few seconds, plus the check that keeps it
+# small (clangd's malloc arenas).
 #   tools/proc-report.sh [seconds] [t-code pid]     (default: 5 seconds, the oldest t-code)
 set -euo pipefail
 export LC_ALL=C
@@ -49,9 +49,6 @@ done
   END { printf "%-18s %22.1f %17.1f   (CPU: %% of one core over %ss)\n", "total", pss / 1024, cpu * 100 / hz / s, s }'
 
 echo
-editors=${count[micro]:-0}
-tabs=$(grep -c "t-code-$root-editor-" <(ls "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}") || true)
-echo "editors running: $editors, editor tabs: $tabs (hidden tabs never shown have no micro)"
 for p in $(pgrep -P "$root" -f '^clangd ' || true); do
   if tr '\0' '\n' < "/proc/$p/environ" | grep -q 'arena_max='; then
     echo "clangd $p: malloc arenas limited ($(tr '\0' '\n' < "/proc/$p/environ" | grep -o 'arena_max=[0-9]*'))"

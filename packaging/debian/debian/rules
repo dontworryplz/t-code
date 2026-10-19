@@ -6,7 +6,7 @@ include /usr/share/dpkg/pkg-info.mk
 	dh $@
 
 override_dh_auto_build:
-	dh_auto_build -- build/t-code build/t-code-fm build/t-code-lsp
+	dh_auto_build -- build/t-code build/t-code-fm
 
 override_dh_auto_install:
 	dh_auto_install -- PREFIX=/usr LIBEXECDIR=/usr/libexec
@@ -16,7 +16,8 @@ override_dh_auto_install:
 override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	build/t-code --version | grep -qx 't-code $(DEB_VERSION_UPSTREAM)'
-	$(MAKE) build/test-searchmatch build/test-lsp
+	$(MAKE) build/test-searchmatch build/test-detect build/test-linediff
 	build/test-searchmatch
-	build/test-lsp
+	build/test-detect
+	build/test-linediff
 endif

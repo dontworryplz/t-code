@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """How much memory clangd takes for this project with given flags or environment.
 
-Starts its own clangd (not t-code's), opens files of the project like micro's lsp plugin does,
+Starts its own clangd (not t-code's), opens files of the project like t-code does (src/lsp/client.c),
 waits until clangd is idle (background index done), optionally edits every file a few rounds,
 then prints its resident memory next to what clangd says it uses itself ($/memoryUsage). A big
-gap between the two is allocator overhead, not clangd's data (see set_malloc_arenas in src/ipc/lsp.c).
+gap between the two is allocator overhead, not clangd's data (see set_malloc_arenas in src/lsp/client.c).
 
-  tools/clangd-mem.py                               # 25 files, t-code's flags (micro/settings.json)
+  tools/clangd-mem.py                               # 25 files, t-code's flags (SERVER_ARGV in src/lsp/client.c)
   tools/clangd-mem.py --files 5 --churn 3
   tools/clangd-mem.py --env GLIBC_TUNABLES=glibc.malloc.arena_max=2
   tools/clangd-mem.py -- --background-index=false   # other clangd flags
@@ -14,6 +14,7 @@ gap between the two is allocator overhead, not clangd's data (see set_malloc_are
 import argparse
 import glob
 import json
+import re
 import os
 import subprocess
 import threading
@@ -23,9 +24,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def default_flags():
-    with open(os.path.join(ROOT, "micro", "settings.json")) as f:
-        servers = json.load(f)["lsp.server"]
-    return servers.split(",")[0].split("=", 1)[1].split()[1:]
+    """The flags t-code starts clangd with: SERVER_ARGV in src/lsp/client.c (MALLOC_TRIM is
+    --malloc-trim on glibc, and clang-tidy is off by default)."""
+    with open(os.path.join(ROOT, "src", "lsp", "client.c")) as f:
+        line = re.search(r"#define SERVER_ARGV (.*)", f.read()).group(1)
+    return re.findall(r'"([^"]*)"', line)[1:] + ["--malloc-trim", "--clang-tidy=false"]
 
 
 class Clangd:

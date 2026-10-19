@@ -1,7 +1,7 @@
 /*
  * Editor tabs, in two groups side by side (t->groups[0] and [1], each a GtkNotebook; the second
- * one is shown only while split). A tab is an editor (micro, see editor.h) or a Markdown preview
- * (preview.h). A file is never open in both groups at once: two micros would overwrite each
+ * one is shown only while split). A tab is an editor (editor.h) or a Markdown preview
+ * (preview.h). A file is never open in both groups at once: two editors would overwrite each
  * other's saves.
  */
 #pragma once
@@ -28,7 +28,7 @@ Tab *find_tab(App *t, TabKind kind, const char *path);
 /* The group a tab is in: 0 or 1. */
 int tab_group(Tab *tab);
 
-/* Whether an editor reports unsaved changes. */
+/* Whether an editor has unsaved changes. */
 gboolean any_unsaved(App *t);
 
 /* Adding, moving, closing -------------------------------------------------------------------- */
@@ -37,11 +37,11 @@ gboolean any_unsaved(App *t);
  * Tab is freed with the page. */
 Tab *add_tab(App *t, TabKind kind, GtkWidget *page, const char *path);
 
-/* Moves a tab (with its running editor) to the end of the other group. */
+/* Moves a tab (with its editor) to the end of the other group. */
 void move_tab(Tab *tab, int group);
 
-/* Takes the tab out of its group at once; an editor's micro is stopped. Closing an editor the
- * normal way goes through micro instead (quit_editor), which asks about unsaved changes. */
+/* Takes the tab out of its group at once, unsaved changes or not. Closing an editor the normal
+ * way goes through quit_editor(), which asks about unsaved changes. */
 void remove_tab(Tab *tab);
 
 /* Removes every tab without asking (a project switch, after asking). */

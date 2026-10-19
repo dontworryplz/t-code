@@ -1,0 +1,29 @@
+# t-code's C style: 2 spaces, functions' braces on their own line, 120 columns. clangd formats with
+# this (Format Document, Shift+Alt+F).
+BasedOnStyle: LLVM
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ContinuationIndentWidth: 4
+ColumnLimit: 120
+BreakBeforeBraces: Linux
+IndentCaseLabels: true
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: true
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignTrailingComments: true
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements
+SortIncludes: Never
+IncludeBlocks: Preserve
+ReflowComments: false
+Cpp11BracedListStyle: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+PenaltyReturnTypeOnItsOwnLine: 1000
+AlwaysBreakAfterReturnType: None
+BreakStringLiterals: false

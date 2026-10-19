@@ -1,81 +1,78 @@
 /*
- * An editor tab's page: [ terminal (indent guides drawn over it) | minimap | scrollbar ].
- * micro draws on the alternate screen, so the terminal has no scrollback of its own: micro
- * reports which lines it shows through the terminal title (editor.c) and t-code scrolls it
- * through the control pipe (control.c), which drives the scrollbar and the minimap.
- * The parts, each in its own file, share the EditorView below:
- *   editorview.c  the page, the saved copy of the file, scrolling and the scrollbar
- *   control.c     the named pipe to micro's plugin
- *   minimap.c     the minimap (lexer.c colors it) and clangd's problem lines on it
- *   guides.c      the indent guides
+ * An editor tab's page: [ GtkSourceView (scrolled) | GtkSourceMap minimap ], its look (the Dark
+ * Modern style scheme, the editor font) and the settings that shape it (tab size, word wrap, ...).
+ * Loading and saving the file are in editor.c, which keeps their state here too.
  */
 #pragma once
 
 #include "app.h"
 
-#define TERM_PADDING 1 /* the terminal's padding (editorview.c's CSS), around its cells */
+typedef void (*EditorSavedFunc)(gpointer data, gboolean ok);
+
+/* A save's caller, told when it is done. */
+typedef struct {
+  EditorSavedFunc func;
+  gpointer data;
+} SaveWaiter;
 
 /* The state of one editor's page; tab->view. */
+typedef struct FindBar FindBar;       /* editor/findbar.c */
+typedef struct DiffGutter DiffGutter; /* editor/diffgutter.c */
+
 struct EditorView {
-    Tab *tab;
-    GtkWidget *minimap;
-    GtkAdjustment *adjustment; /* the scrollbar's */
-    gboolean updating;  /* setting the adjustment from a report, not from the user */
-    gint64 scrolled_at; /* when t-code last scrolled the editor */
-    int control_fd;     /* the control pipe (control.c), -1 without one */
-    char *control_path;
-    GFileMonitor *monitor;
-    guint reload_id;
-    char *text;         /* the file, as last saved */
-    gsize size;
-    GArray *starts;     /* offset of each line in text */
-    GArray *in_comment; /* gboolean: the line starts inside a block comment */
-    gboolean c_like;    /* C/C++ source: colored; anything else is drawn plain */
-    char *problems;     /* as micro reported them: "e12,w30", or "-" */
-    GArray *problem_lines; /* Problem */
-    double grab;        /* while dragging the viewport: where in it the pointer is */
-    gboolean dragging;
-    GtkWidget *guides;  /* drawn over the terminal */
-    guint text_version; /* counts loads of text */
-    struct {
-        guint version;
-        int first, last, line;
-    } enclosing;        /* the last enclosing_line() (guides.c) */
+  Tab *tab;
+  GtkWidget *overlay;     /* the text, with the find bar over it */
+  GtkWidget *map;         /* the minimap */
+  GtkWidget *overview;    /* the problems strip: the whole file's errors and warnings */
+  GPtrArray *diagnostics; /* lsp/diagnostics.c */
+  FindBar *find;          /* made on the first Ctrl+F */
+  DiffGutter *diff;
+  struct SignatureHelp *signature; /* lsp/signature.c */
+  struct Semantic *semantic;       /* lsp/semantic.c */
+  char *closers;                   /* closing brackets and quotes typed for the user (editing.c), from the
+                            * cursor to closers_end: typing one steps over it, Backspace takes the pair */
+  GtkTextMark *closers_end;
+  GtkSourceFile *file;
+  GFileMonitor *monitor; /* the file changed on disk: reloaded when nothing is unsaved */
+  GCancellable *cancel;  /* cancelled when the tab goes, for loads and saves in flight */
+  gboolean readonly;
+  gboolean loading;
+  guint changes;               /* counts changes, to know whether a save wrote the latest text */
+  char *etag;                  /* the file on disk as last loaded or saved: other changes reload it */
+  gboolean saving, save_again; /* a save is in flight; another one is due after it */
+  gboolean save_failed;        /* told the user once; quiet until a save works again */
+  GArray *next_waiters;        /* SaveWaiter: for the save after the one in flight */
+  guint autosave_id, reload_id, scroll_id;
+  gboolean scroll_pending;    /* the cursor is scrolled to once the view is shown */
+  gboolean lsp_pending;       /* loaded while hidden: the language server gets it once shown */
+  int goto_line, goto_column; /* where the cursor goes once loaded (0: the start) */
+  gboolean own_indent;        /* the file's own indentation (detect indentation) overrides the settings */
+  gboolean own_tabs;
+  int own_width;
 };
 
-/* A line with clangd errors or warnings, marked on the minimap. */
-typedef struct {
-    int line; /* 0-based */
-    gboolean error;
-} Problem;
+/* An editor tab's page, empty until editor_view_init() fills it. */
+GtkWidget *editor_page(void);
 
-/* Building the page -------------------------------------------------------------------------- */
+/* Fills tab->page with a new buffer and its view: tab->source, tab->buffer and tab->view (empty
+ * until editor.c loads the file). */
+void editor_view_init(Tab *tab, gboolean readonly);
 
-/* Builds the editor's page around term: [ terminal | ], the rest is added by editor_view_init. */
-GtkWidget *editor_page(VteTerminal *term);
-
-/* Adds the indent guides, the minimap, the scrollbar and the control pipe to an editor tab (its
- * page from editor_page). Returns the pipe's path for TCODE_CONTROL, or NULL. */
-const char *editor_view_init(Tab *tab, int number);
-
-/* Frees a tab's view; closing the pipe ends the plugin's reader. NULL is fine. */
+/* Frees a tab's view: the file, its watch and timers. NULL is fine. */
 void editor_view_free(EditorView *view);
 
-/* Following micro ---------------------------------------------------------------------------- */
+/* Applies the settings (tab size, spaces, word wrap, minimap, code coloring) to an editor. */
+void editor_view_apply_settings(Tab *tab);
 
-/* Follows tab->path (the minimap's copy of the file and the watch on it): call again when it
- * changes. */
-void editor_view_set_path(Tab *tab);
+/* The editor font (t->settings.font at t->font_scale) for all editors. */
+void editor_view_set_font(App *t);
 
-/* Takes what micro reported (top, and tab->height, tab->lines) into the scrollbar and the minimap. */
-void editor_view_update(Tab *tab, int top);
+/* The problems strip draws the editor's diagnostics again. */
+void editor_view_show_problems(Tab *tab);
 
-/* Scrolls the editor so that line top (0-based) is at the top, from the minimap or the
- * scrollbar. */
-void editor_view_scroll(EditorView *v, int top);
+/* Brings the cursor into view: when it is outside, the view scrolls to have it in the middle
+ * (vertically; sideways only as far as needed), like VS Code's jumps. */
+void editor_view_reveal_cursor(Tab *tab);
 
-/* Shows or hides the minimap (the setting). */
-void editor_view_show_minimap(Tab *tab, gboolean show);
-
-/* Draws the minimap and the guides again (code coloring or the guides setting changed). */
-void editor_view_redraw(Tab *tab);
+/* The language for path, from its name and text (a .h with C++ in it is C++). NULL: plain text. */
+GtkSourceLanguage *editor_language(const char *path, const char *text);

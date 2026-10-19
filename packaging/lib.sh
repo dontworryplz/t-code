@@ -59,7 +59,7 @@ check_versions() {
 }
 
 # t-code-<version>.tar.gz from the working tree: tracked files plus new ones git does not ignore,
-# so uncommitted changes are packaged too, but never build/, micro's backups or packages/.
+# so uncommitted changes are packaged too, but never build/ or packages/.
 make_tarball() { # <dir>
   local name="t-code-$VERSION" list
   list="$(mktemp)"

@@ -17,6 +17,9 @@ void start_status_updates(App *t);
 /* Fills the bar again from the tabs: problems, what Build would build, the cursor position. */
 void update_status(App *t);
 
+/* Only the cursor position: it changes with every key, the rest of the bar does not. */
+void status_show_position(App *t);
+
 /* The branch label: "⎇ name", with "*" when the work tree has changes; branch NULL hides it
  * (not a repository). */
 void status_show_branch(App *t, const char *branch, gboolean dirty);

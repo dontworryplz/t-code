@@ -5,6 +5,8 @@ Maintainer: suacayipkisi <ufukdenizcaglayan@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                pkgconf,
                libgtk-4-dev,
+               libgtksourceview-5-dev,
+               libjson-glib-dev,
                libvte-2.91-gtk4-dev,
                libwebkitgtk-6.0-dev,
                libmd4c-dev,
@@ -18,15 +20,14 @@ Package: t-code
 Architecture: any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         micro,
          clangd,
          git,
          fonts-cascadia-code,
          hicolor-icon-theme
-Recommends: ripgrep,
-            wl-clipboard | xclip
+Recommends: ripgrep
 Description: terminal-centric C/C++ IDE
- t-code is a lightweight C/C++ IDE where every pane is a real terminal: a file
- manager (t-code-fm), editor tabs running micro with clangd, and a shell, in a
- GTK4 window with VS Code Dark Modern colors. It also has a Search panel, Source
- Control, git comparisons and Markdown previews.
+ t-code is a lightweight C/C++ IDE: a terminal file manager (t-code-fm),
+ GtkSourceView editor tabs sharing one clangd (errors underlined, completion,
+ parameter hints, go to definition) and a shell, in a GTK4 window with VS Code
+ Dark Modern colors. It also has a Search panel, Source Control, git comparisons
+ and Markdown previews.

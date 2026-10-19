@@ -15,7 +15,7 @@ VteTerminal *new_terminal(App *t);
  * window's text size. */
 void set_terminal_font(App *t, VteTerminal *term, const char *font);
 
-/* Gives every terminal the font the settings choose for it. */
+/* Gives every terminal and the editors the font the settings choose for them. */
 void apply_fonts(App *t);
 
 /* Runs argv in term, in the project root, with $TCODE_SOCKET and extra_env ("NAME=value", may be

@@ -11,17 +11,20 @@
 #include <glib/gstdio.h>
 
 /* What scm.c and gitstatus.c call elsewhere in t-code. */
+/* clang-format off */
 gboolean any_unsaved(App *t G_GNUC_UNUSED) { return FALSE; }
 void save_all(App *t, SavedFunc then, gpointer data) { then(t, data); }
 Tab *find_tab(App *t G_GNUC_UNUSED, TabKind kind G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) { return NULL; }
 void open_file(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
-void editor_command(Tab *tab G_GNUC_UNUSED, const char *command G_GNUC_UNUSED) {}
+void editor_reload(Tab *tab G_GNUC_UNUSED) {}
+void diff_gutter_head_moved(App *t G_GNUC_UNUSED) {}
 void quit_editor(Tab *tab G_GNUC_UNUSED) {}
 void compare_with_head(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void compare_with_index(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void compare_revisions(App *t G_GNUC_UNUSED, const char *old_rev G_GNUC_UNUSED, const char *old_rel G_GNUC_UNUSED,
                        const char *new_rev G_GNUC_UNUSED, const char *new_rel G_GNUC_UNUSED) {}
 void status_show_branch(App *t G_GNUC_UNUSED, const char *branch G_GNUC_UNUSED, gboolean dirty G_GNUC_UNUSED) {}
+/* clang-format on */
 
 static App app;
 static char *tmp, *with_commits, *no_git, *no_commits;
@@ -29,206 +32,208 @@ static int commits = 2; /* in with_commits */
 
 static void git(const char *dir, const char *const *args)
 {
-    GPtrArray *argv = g_ptr_array_new();
-    int status;
+  GPtrArray *argv = g_ptr_array_new();
+  int status;
 
-    g_ptr_array_add(argv, "git");
-    g_ptr_array_add(argv, "-C");
-    g_ptr_array_add(argv, (gpointer)dir);
-    for (int i = 0; args[i]; i++)
-        g_ptr_array_add(argv, (gpointer)args[i]);
-    g_ptr_array_add(argv, NULL);
-    g_assert_true(g_spawn_sync(NULL, (char **)argv->pdata, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL |
-                               G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, NULL, NULL, &status, NULL));
-    g_assert_true(g_spawn_check_wait_status(status, NULL));
-    g_ptr_array_free(argv, TRUE);
+  g_ptr_array_add(argv, "git");
+  g_ptr_array_add(argv, "-C");
+  g_ptr_array_add(argv, (gpointer)dir);
+  for (int i = 0; args[i]; i++)
+    g_ptr_array_add(argv, (gpointer)args[i]);
+  g_ptr_array_add(argv, NULL);
+  g_assert_true(g_spawn_sync(NULL, (char **)argv->pdata, NULL,
+                             G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL,
+                             NULL, NULL, &status, NULL));
+  g_assert_true(g_spawn_check_wait_status(status, NULL));
+  g_ptr_array_free(argv, TRUE);
 }
 
 static char *make_dir(const char *name, const char *file)
 {
-    char *dir = g_build_filename(tmp, name, NULL), *path = g_build_filename(dir, file, NULL);
+  char *dir = g_build_filename(tmp, name, NULL), *path = g_build_filename(dir, file, NULL);
 
-    g_mkdir_with_parents(dir, 0755);
-    g_assert_true(g_file_set_contents(path, "one\n", -1, NULL));
-    g_free(path);
-    return dir;
+  g_mkdir_with_parents(dir, 0755);
+  g_assert_true(g_file_set_contents(path, "one\n", -1, NULL));
+  g_free(path);
+  return dir;
 }
 
 static void runs_for(int ms)
 {
-    for (gint64 until = g_get_monotonic_time() + ms * 1000; g_get_monotonic_time() < until;)
-        g_main_context_iteration(NULL, FALSE);
+  for (gint64 until = g_get_monotonic_time() + ms * 1000; g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, FALSE);
 }
 
 /* The panel's lists, in order: Staged Changes, Changes, Commits. */
 static GtkListBox *list(int index)
 {
-    GtkWidget *found[3] = { NULL };
-    int n = 0;
-    GPtrArray *queue = g_ptr_array_new();
+  GtkWidget *found[3] = { NULL };
+  int n = 0;
+  GPtrArray *queue = g_ptr_array_new();
 
-    g_ptr_array_add(queue, app.scm);
-    for (guint i = 0; i < queue->len && n < 3; i++) {
-        GtkWidget *w = queue->pdata[i];
-        if (GTK_IS_LIST_BOX(w))
-            found[n++] = w;
-        else
-            for (GtkWidget *c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c))
-                g_ptr_array_add(queue, c);
-    }
-    g_ptr_array_free(queue, TRUE);
-    g_assert_cmpint(n, ==, 3);
-    return GTK_LIST_BOX(found[index]);
+  g_ptr_array_add(queue, app.scm);
+  for (guint i = 0; i < queue->len && n < 3; i++) {
+    GtkWidget *w = queue->pdata[i];
+    if (GTK_IS_LIST_BOX(w))
+      found[n++] = w;
+    else
+      for (GtkWidget *c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c))
+        g_ptr_array_add(queue, c);
+  }
+  g_ptr_array_free(queue, TRUE);
+  g_assert_cmpint(n, ==, 3);
+  return GTK_LIST_BOX(found[index]);
 }
 
 static int rows(int index)
 {
-    int n = 0;
+  int n = 0;
 
-    for (GtkWidget *w = gtk_widget_get_first_child(GTK_WIDGET(list(index))); w; w = gtk_widget_get_next_sibling(w))
-        n++;
-    return n;
+  for (GtkWidget *w = gtk_widget_get_first_child(GTK_WIDGET(list(index))); w; w = gtk_widget_get_next_sibling(w))
+    n++;
+  return n;
 }
 
 static const char *tab_title(void)
 {
-    return gtk_stack_page_get_title(gtk_stack_get_page(app.sidebar_stack, app.scm));
+  return gtk_stack_page_get_title(gtk_stack_get_page(app.sidebar_stack, app.scm));
 }
 
 /* Opens a project the way switch_project (project/project.c) does, then waits for git. */
 static void open_project_at(const char *root)
 {
-    g_free(app.root);
-    app.root = g_strdup(root);
-    scm_reset();
-    watch_git(&app); /* git_top, then git status in 300ms */
+  g_free(app.root);
+  app.root = g_strdup(root);
+  scm_reset();
+  watch_git(&app); /* git_top, then git status in 300ms */
 }
 
 static void wait_for(int index, int count)
 {
-    for (gint64 until = g_get_monotonic_time() + 5 * G_USEC_PER_SEC; rows(index) != count && g_get_monotonic_time() < until;)
-        g_main_context_iteration(NULL, FALSE);
-    g_assert_cmpint(rows(index), ==, count);
+  for (gint64 until = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+       rows(index) != count && g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_cmpint(rows(index), ==, count);
 }
 
 static void assert_empty(void)
 {
-    g_assert_cmpint(rows(0), ==, 0);
-    g_assert_cmpint(rows(1), ==, 0);
-    g_assert_cmpint(rows(2), ==, 0);
-    g_assert_cmpstr(tab_title(), ==, "SOURCE CONTROL");
+  g_assert_cmpint(rows(0), ==, 0);
+  g_assert_cmpint(rows(1), ==, 0);
+  g_assert_cmpint(rows(2), ==, 0);
+  g_assert_cmpstr(tab_title(), ==, "SOURCE CONTROL");
 }
 
 static void open_with_commits(void)
 {
-    open_project_at(with_commits);
-    wait_for(2, commits);
-    wait_for(1, 2); /* a.txt changed, b.txt new */
-    g_assert_cmpstr(tab_title(), ==, "SOURCE CONTROL  2");
+  open_project_at(with_commits);
+  wait_for(2, commits);
+  wait_for(1, 2); /* a.txt changed, b.txt new */
+  g_assert_cmpstr(tab_title(), ==, "SOURCE CONTROL  2");
 }
 
 static void test_repository(void)
 {
-    open_with_commits();
+  open_with_commits();
 }
 
 static void test_no_git(void)
 {
-    open_with_commits();
-    open_project_at(no_git);
-    assert_empty(); /* at once, before git answers */
-    g_assert_null(app.git_top);
-    runs_for(800);
-    assert_empty();
-    /* git status runs again every 10 seconds: still nothing. */
-    poll_branch(&app);
-    runs_for(300);
-    assert_empty();
+  open_with_commits();
+  open_project_at(no_git);
+  assert_empty(); /* at once, before git answers */
+  g_assert_null(app.git_top);
+  runs_for(800);
+  assert_empty();
+  /* git status runs again every 10 seconds: still nothing. */
+  poll_branch(&app);
+  runs_for(300);
+  assert_empty();
 }
 
 static void test_no_commits(void)
 {
-    open_with_commits();
-    open_project_at(no_commits);
-    g_assert_cmpint(rows(2), ==, 0);
-    wait_for(1, 1); /* c.txt, untracked */
-    runs_for(500);
-    g_assert_cmpint(rows(2), ==, 0);
-    g_assert_cmpstr(tab_title(), ==, "SOURCE CONTROL  1");
+  open_with_commits();
+  open_project_at(no_commits);
+  g_assert_cmpint(rows(2), ==, 0);
+  wait_for(1, 1); /* c.txt, untracked */
+  runs_for(500);
+  g_assert_cmpint(rows(2), ==, 0);
+  g_assert_cmpstr(tab_title(), ==, "SOURCE CONTROL  1");
 }
 
 /* A git log asked for in the last project answers after the switch: it is not shown. */
 static void test_late_log(void)
 {
-    open_with_commits();
-    /* A new commit: the next status lists the commits again. */
-    git(with_commits, (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
-                                        "-m", "third", NULL });
-    commits++;
-    poll_branch(&app);
-    for (gint64 until = g_get_monotonic_time() + 5 * G_USEC_PER_SEC; branch_busy && g_get_monotonic_time() < until;)
-        g_main_context_iteration(NULL, FALSE); /* status answered: git log runs now */
-    g_assert_cmpint(rows(2), ==, commits - 1);
-    open_project_at(no_git);
-    runs_for(800);
-    assert_empty();
+  open_with_commits();
+  /* A new commit: the next status lists the commits again. */
+  git(with_commits, (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                      "-m", "third", NULL });
+  commits++;
+  poll_branch(&app);
+  for (gint64 until = g_get_monotonic_time() + 5 * G_USEC_PER_SEC; branch_busy && g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, FALSE); /* status answered: git log runs now */
+  g_assert_cmpint(rows(2), ==, commits - 1);
+  open_project_at(no_git);
+  runs_for(800);
+  assert_empty();
 }
 
 /* A git status started in the last project answers after the switch: it is not shown. */
 static void test_late_status(void)
 {
-    open_with_commits();
-    poll_branch(&app); /* runs now */
-    g_assert_true(branch_busy);
-    open_project_at(no_git);
-    for (gint64 until = g_get_monotonic_time() + 5 * G_USEC_PER_SEC; branch_busy && g_get_monotonic_time() < until;)
-        g_main_context_iteration(NULL, FALSE);
-    assert_empty(); /* the old status came, before the new one */
-    runs_for(800);
-    assert_empty();
-    g_assert_false(branch_busy);
+  open_with_commits();
+  poll_branch(&app); /* runs now */
+  g_assert_true(branch_busy);
+  open_project_at(no_git);
+  for (gint64 until = g_get_monotonic_time() + 5 * G_USEC_PER_SEC; branch_busy && g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, FALSE);
+  assert_empty(); /* the old status came, before the new one */
+  runs_for(800);
+  assert_empty();
+  g_assert_false(branch_busy);
 }
 
 int main(int argc, char **argv)
 {
-    int status;
+  int status;
 
-    g_test_init(&argc, &argv, NULL);
-    if (!gtk_init_check()) {
-        g_test_skip("no display");
-        return g_test_run();
-    }
-    tmp = g_dir_make_tmp("t-code-scm-XXXXXX", NULL);
-    with_commits = make_dir("with-commits", "a.txt");
-    git(with_commits, (const char *[]){ "init", "-q", NULL });
-    git(with_commits, (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
-                                        "-m", "first", NULL });
-    git(with_commits, (const char *[]){ "add", "a.txt", NULL });
-    git(with_commits, (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "second",
-                                        NULL });
-    char *changed = g_build_filename(with_commits, "a.txt", NULL), *added = g_build_filename(with_commits, "b.txt", NULL);
-    g_file_set_contents(changed, "two\n", -1, NULL);
-    g_file_set_contents(added, "new\n", -1, NULL);
-    g_free(changed);
-    g_free(added);
-    no_git = make_dir("no-git", "x.txt");
-    no_commits = make_dir("no-commits", "c.txt");
-    git(no_commits, (const char *[]){ "init", "-q", NULL });
+  g_test_init(&argc, &argv, NULL);
+  if (!gtk_init_check()) {
+    g_test_skip("no display");
+    return g_test_run();
+  }
+  tmp = g_dir_make_tmp("t-code-scm-XXXXXX", NULL);
+  with_commits = make_dir("with-commits", "a.txt");
+  git(with_commits, (const char *[]){ "init", "-q", NULL });
+  git(with_commits, (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                      "-m", "first", NULL });
+  git(with_commits, (const char *[]){ "add", "a.txt", NULL });
+  git(with_commits,
+      (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "second", NULL });
+  char *changed = g_build_filename(with_commits, "a.txt", NULL), *added = g_build_filename(with_commits, "b.txt", NULL);
+  g_file_set_contents(changed, "two\n", -1, NULL);
+  g_file_set_contents(added, "new\n", -1, NULL);
+  g_free(changed);
+  g_free(added);
+  no_git = make_dir("no-git", "x.txt");
+  no_commits = make_dir("no-commits", "c.txt");
+  git(no_commits, (const char *[]){ "init", "-q", NULL });
 
-    app.root = g_strdup(tmp);
-    app.sidebar_stack = GTK_STACK(gtk_stack_new());
-    app.scm = scm_panel(&app);
-    gtk_stack_add_titled(app.sidebar_stack, app.scm, "scm", "SOURCE CONTROL");
+  app.root = g_strdup(tmp);
+  app.sidebar_stack = GTK_STACK(gtk_stack_new());
+  app.scm = scm_panel(&app);
+  gtk_stack_add_titled(app.sidebar_stack, app.scm, "scm", "SOURCE CONTROL");
 
-    g_test_add_func("/scm/repository", test_repository);
-    g_test_add_func("/scm/no-git", test_no_git);
-    g_test_add_func("/scm/no-commits", test_no_commits);
-    g_test_add_func("/scm/late-log", test_late_log);
-    g_test_add_func("/scm/late-status", test_late_status);
-    status = g_test_run();
+  g_test_add_func("/scm/repository", test_repository);
+  g_test_add_func("/scm/no-git", test_no_git);
+  g_test_add_func("/scm/no-commits", test_no_commits);
+  g_test_add_func("/scm/late-log", test_late_log);
+  g_test_add_func("/scm/late-status", test_late_status);
+  status = g_test_run();
 
-    app.closing = TRUE;
-    char *rm[] = { "rm", "-rf", tmp, NULL };
-    g_spawn_sync(NULL, rm, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, NULL, NULL);
-    return status;
+  app.closing = TRUE;
+  char *rm[] = { "rm", "-rf", tmp, NULL };
+  g_spawn_sync(NULL, rm, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, NULL, NULL);
+  return status;
 }

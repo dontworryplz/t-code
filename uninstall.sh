@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Removes everything install.sh put in place, including micro's state in ~/.local/share/t-code
-# (cursor positions and backups). Your own files and the repo are not touched.
+# Removes everything install.sh put in place. Your own files and the repo are not touched.
 set -euo pipefail
 
 PREFIX="${PREFIX:-$HOME/.local}"

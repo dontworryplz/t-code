@@ -1,250 +1,277 @@
 /*
- * An editor tab's page (see editorview.h): building it, the copy of the saved file that the
- * minimap draws and the guides fall back on, and scrolling: micro reports what it shows, and the
- * scrollbar and the minimap scroll it back through the control pipe.
+ * An editor tab's page (see editorview.h): the source view, the minimap next to it, the style
+ * scheme, the font and the settings.
  */
 #include "editor/editorview.h"
 
-#include "editor/control.h"
+#include "editor/detect.h"
+#include "editor/diffgutter.h"
+#include "editor/editing.h"
+#include "editor/findbar.h"
 #include "editor/guides.h"
-#include "editor/lexer.h"
-#include "editor/minimap.h"
+#include "lsp/client.h"
+#include "lsp/completion.h"
+#include "lsp/diagnostics.h"
+#include "lsp/hover.h"
+#include "lsp/navigate.h"
+#include "lsp/semantic.h"
+#include "lsp/signature.h"
+#include "window/terminal.h"
 
-#include <string.h>
-
-#define MAX_TEXT (4 << 20)   /* bigger files get no minimap */
-#define OWN_SCROLL_US 300000 /* reports this soon after our own scroll may predate it */
-
-/* The file ----------------------------------------------------------------------------------- */
-
-static void clear_text(EditorView *v)
-{
-    g_clear_pointer(&v->text, g_free);
-    v->size = 0;
-    g_array_set_size(v->starts, 0);
-    g_array_set_size(v->in_comment, 0);
-}
-
-/* Reads the saved file into v->text, with where each line starts and whether it starts inside a
- * block comment (so the minimap can color any line without lexing all lines before it). */
-static void load_text(EditorView *v)
-{
-    char *text = NULL;
-    gsize size = 0;
-    gboolean comment = FALSE;
-
-    clear_text(v);
-    v->text_version++;
-    if (!v->tab->path || !g_file_get_contents(v->tab->path, &text, &size, NULL) || size > MAX_TEXT) {
-        g_free(text);
-        gtk_widget_queue_draw(v->minimap);
-        return;
-    }
-    v->text = text;
-    v->size = size;
-    for (gsize start = 0; start <= size;) {
-        const char *newline = memchr(text + start, '\n', size - start);
-        gsize end = newline ? (gsize)(newline - text) : size;
-        g_array_append_val(v->starts, start);
-        g_array_append_val(v->in_comment, comment);
-        if (v->c_like)
-            comment = lex_line(text + start, end - start, comment, NULL, NULL);
-        if (!newline)
-            break;
-        start = end + 1;
-    }
-    gtk_widget_queue_draw(v->minimap);
-}
-
-/* on_file_changed()'s timeout. */
-static gboolean reload_now(gpointer data)
-{
-    EditorView *v = data;
-
-    v->reload_id = 0;
-    load_text(v);
-    return G_SOURCE_REMOVE;
-}
-
-/* The file was saved (by micro or anything else): read it again shortly, once for a burst. */
-static void on_file_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file G_GNUC_UNUSED,
-                            GFile *other G_GNUC_UNUSED, GFileMonitorEvent event G_GNUC_UNUSED, EditorView *v)
-{
-    if (!v->reload_id)
-        v->reload_id = g_timeout_add(200, reload_now, v);
-}
-
-/* The lexer knows C and C++ only: other files (Makefiles, scripts, Markdown) would get '#'
- * comments drawn as preprocessor lines and apostrophes as unclosed character literals. */
-static gboolean is_c_like(const char *path)
-{
-    static const char *const extensions[] = {
-        ".c", ".h", ".cc", ".cpp", ".cxx", ".c++", ".hh", ".hpp", ".hxx", ".h++", ".inl", ".ipp", ".tpp", NULL,
-    };
-    const char *dot = path ? strrchr(path, '.') : NULL;
-
-    for (int i = 0; dot && extensions[i]; i++)
-        if (g_ascii_strcasecmp(dot, extensions[i]) == 0)
-            return TRUE;
-    return FALSE;
-}
-
-void editor_view_set_path(Tab *tab)
-{
-    EditorView *v = tab->view;
-    GFile *file;
-
-    if (!v)
-        return;
-    v->c_like = is_c_like(tab->path);
-    if (v->monitor) {
-        g_file_monitor_cancel(v->monitor);
-        g_clear_object(&v->monitor);
-    }
-    file = g_file_new_for_path(tab->path);
-    v->monitor = g_file_monitor_file(file, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
-    if (v->monitor)
-        g_signal_connect(v->monitor, "changed", G_CALLBACK(on_file_changed), v);
-    g_object_unref(file);
-    load_text(v);
-}
-
-/* Scrolling ---------------------------------------------------------------------------------- */
-
-void editor_view_scroll(EditorView *v, int top)
-{
-    Tab *tab = v->tab;
-    int most = MAX(0, tab->lines - tab->height);
-    char *line;
-
-    top = CLAMP(top, 0, most);
-    if (top == tab->top)
-        return;
-    tab->top = top;
-    v->scrolled_at = g_get_monotonic_time();
-    line = g_strdup_printf("scroll %d", top);
-    editor_control(tab, line);
-    g_free(line);
-    v->updating = TRUE;
-    gtk_adjustment_set_value(v->adjustment, top);
-    v->updating = FALSE;
-    gtk_widget_queue_draw(v->minimap);
-}
-
-void editor_view_update(Tab *tab, int top)
-{
-    EditorView *v = tab->view;
-
-    if (!v)
-        return;
-    /* While t-code itself scrolls, reports from before that would pull the view back. */
-    if (g_get_monotonic_time() - v->scrolled_at > OWN_SCROLL_US)
-        tab->top = top;
-    v->updating = TRUE;
-    gtk_adjustment_configure(v->adjustment, tab->top, 0, MAX(MAX(tab->lines, tab->top + tab->height), 1),
-                             1, MAX(tab->height - 1, 1), MAX(tab->height, 1));
-    v->updating = FALSE;
-    gtk_widget_queue_draw(v->minimap);
-    gtk_widget_queue_draw(v->guides);
-}
-
-/* The user moved the scrollbar (not a report from micro moving it). */
-static void on_scrollbar(GtkAdjustment *adjustment, EditorView *v)
-{
-    if (!v->updating)
-        editor_view_scroll(v, (int)(gtk_adjustment_get_value(adjustment) + 0.5));
-}
-
-/* Setting up --------------------------------------------------------------------------------- */
+#define SCHEME "t-code-dark-modern" /* styles/dark-modern.xml */
 
 static const char *const css =
-    ".tcode-editor scrollbar { background: #1f1f1f; border: none; }"
-    ".tcode-editor scrollbar slider { min-width: 6px; margin: 2px; border-radius: 6px; background: rgba(121, 121, 121, .4); }"
+    ".tcode-editor scrollbar { background: none; border: none; }"
+    ".tcode-editor scrollbar slider { min-width: 6px; border-radius: 6px; background: rgba(121, 121, 121, .4); }"
     ".tcode-editor scrollbar slider:hover { background: rgba(100, 100, 100, .7); }"
-    ".tcode-editor .minimap { background: #1f1f1f; }"
-    ".tcode-editor vte-terminal { padding: 1px; }"; /* TERM_PADDING */
+    ".tcode-editor textview, .tcode-editor textview text { background: #1f1f1f; }"
+    ".tcode-editor textview border.left gutter { background: #1f1f1f; padding-right: 12px; }"
+    ".tcode-editor .tcode-minimap { border-left: 1px solid #2b2b2b; }"
+    ".tcode-editor .tcode-overview { border-left: 1px solid #2b2b2b; }";
 
-GtkWidget *editor_page(VteTerminal *term)
+#define OVERVIEW_WIDTH 8 /* pixels, like VS Code's overview ruler */
+
+static GtkCssProvider *font_provider; /* the editor font; editor_view_set_font() rewrites it */
+
+/* The first editor: the CSS all editors share, and where the style scheme is. */
+static void init_look(App *t)
 {
-    static gboolean styled;
-    GtkWidget *page = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0), *overlay;
+  GtkCssProvider *provider = gtk_css_provider_new();
+  GtkSourceStyleSchemeManager *schemes = gtk_source_style_scheme_manager_get_default();
 
-    if (!styled) { /* the first editor: the CSS and colors all editors share */
-        GtkCssProvider *provider = gtk_css_provider_new();
-        gtk_css_provider_load_from_string(provider, css);
-        gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
-                                                   GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        g_object_unref(provider);
-        minimap_init_colors();
-        guides_init_colors();
-        styled = TRUE;
+  gtk_css_provider_load_from_string(provider, css);
+  gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+                                             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref(provider);
+  font_provider = gtk_css_provider_new();
+  gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(font_provider),
+                                             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  editor_view_set_font(t);
+  if (t->styles_dir)
+    gtk_source_style_scheme_manager_prepend_search_path(schemes, t->styles_dir);
+}
+
+void editor_view_set_font(App *t)
+{
+  PangoFontDescription *desc = pango_font_description_from_string(t->settings.font ? t->settings.font : DEFAULT_FONT);
+  double size = pango_font_description_get_size(desc) / (double)PANGO_SCALE;
+  char points[G_ASCII_DTOSTR_BUF_SIZE], *rule;
+
+  if (!font_provider)
+    return;
+  if (size <= 0)
+    size = 11;
+  /* "11.5", also where the locale writes "11,5" (CSS would reject it) */
+  g_ascii_formatd(points, sizeof points, "%.1f", size * t->font_scale);
+  rule = g_strdup_printf(
+      ".tcode-editor textview.tcode-source { font-family: \"%s\"; font-size: %spt;"
+      " font-feature-settings: \"calt\" 0, \"liga\" 0; }", /* "->" stays two characters */
+      pango_font_description_get_family(desc) ? pango_font_description_get_family(desc) : "monospace", points);
+  gtk_css_provider_load_from_string(font_provider, rule);
+  g_free(rule);
+  pango_font_description_free(desc);
+}
+
+GtkSourceLanguage *editor_language(const char *path, const char *text)
+{
+  GtkSourceLanguageManager *languages = gtk_source_language_manager_get_default();
+  char *type = g_content_type_guess(path, NULL, 0, NULL);
+  GtkSourceLanguage *language = gtk_source_language_manager_guess_language(languages, path, type);
+
+  if (language && g_strcmp0(gtk_source_language_get_id(language), "chdr") == 0 && text && is_cxx_text(text, -1))
+    language = gtk_source_language_manager_get_language(languages, "cpphdr");
+  g_free(type);
+  return language;
+}
+
+void editor_view_reveal_cursor(Tab *tab)
+{
+  GtkTextView *view = GTK_TEXT_VIEW(tab->source);
+  GtkTextMark *insert = gtk_text_buffer_get_insert(GTK_TEXT_BUFFER(tab->buffer));
+  GtkAdjustment *vertical = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(view));
+  GdkRectangle visible, cursor;
+  GtkTextIter iter;
+
+  gtk_text_buffer_get_iter_at_mark(GTK_TEXT_BUFFER(tab->buffer), &iter, insert);
+  gtk_text_view_get_visible_rect(view, &visible);
+  gtk_text_view_get_iter_location(view, &iter, &cursor);
+  if (vertical && (cursor.y < visible.y || cursor.y + cursor.height > visible.y + visible.height))
+    gtk_adjustment_set_value(vertical, cursor.y + cursor.height / 2.0 - gtk_adjustment_get_page_size(vertical) / 2);
+  /* Far lines have estimated heights until laid out: this makes it exact. */
+  gtk_text_view_scroll_mark_onscreen(view, insert);
+}
+
+void editor_view_apply_settings(Tab *tab)
+{
+  App *t = tab->app;
+  EditorView *v = tab->view;
+  GtkSourceView *view = tab->source;
+  int width = v->own_indent ? v->own_width : t->settings.tab_size;
+  gboolean spaces = v->own_indent ? !v->own_tabs : t->settings.tabs_to_spaces;
+
+  gtk_source_view_set_tab_width(view, MAX(width, 1));
+  gtk_source_view_set_indent_width(view, -1); /* the tab width */
+  gtk_source_view_set_insert_spaces_instead_of_tabs(view, spaces);
+  gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), t->settings.word_wrap ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
+  gtk_source_buffer_set_highlight_syntax(tab->buffer, !t->plain);
+  gtk_widget_set_visible(v->map, t->settings.minimap);
+  if (lsp_has(tab))
+    semantic_update(tab);                  /* code coloring may have been turned off or on */
+  gtk_widget_queue_draw(GTK_WIDGET(view)); /* the indent guides, turned off or on */
+}
+
+/* The problems strip ------------------------------------------------------------------------- */
+
+/* A mark per line with problems, where that line is in the whole file; errors over warnings. */
+static void draw_overview(GtkDrawingArea *area G_GNUC_UNUSED, cairo_t *cr, int width, int height, gpointer data)
+{
+  Tab *tab = data;
+  GArray *lines[2] = { g_array_new(FALSE, FALSE, sizeof(int)), g_array_new(FALSE, FALSE, sizeof(int)) };
+  double total = MAX(gtk_text_buffer_get_line_count(GTK_TEXT_BUFFER(tab->buffer)), 1);
+  static const double rgb[2][3] = { { 0.80, 0.65, 0.0 }, { 0.95, 0.30, 0.30 } }; /* warning, error */
+
+  diagnostics_lines(tab, lines[1], lines[0]);
+  for (int k = 0; k < 2; k++) {
+    cairo_set_source_rgb(cr, rgb[k][0], rgb[k][1], rgb[k][2]);
+    for (guint i = 0; i < lines[k]->len; i++) {
+      double y = g_array_index(lines[k], int, i) / total * height;
+      cairo_rectangle(cr, 1, MIN(y, height - 3.0), width - 1, 3);
     }
-    gtk_widget_add_css_class(page, "tcode-editor");
-    gtk_widget_set_hexpand(GTK_WIDGET(term), TRUE);
-    overlay = gtk_overlay_new(); /* the guides go over the terminal */
-    gtk_widget_set_hexpand(overlay, TRUE);
-    gtk_overlay_set_child(GTK_OVERLAY(overlay), GTK_WIDGET(term));
-    gtk_box_append(GTK_BOX(page), overlay);
-    return page;
+    cairo_fill(cr);
+    g_array_free(lines[k], TRUE);
+  }
 }
 
-const char *editor_view_init(Tab *tab, int number)
+/* A click on the strip goes to that part of the file. */
+static void on_overview_click(GtkGestureClick *click, int n G_GNUC_UNUSED, double x G_GNUC_UNUSED, double y, Tab *tab)
 {
-    EditorView *v = g_new0(EditorView, 1);
-    GtkWidget *scrollbar;
+  GtkWidget *strip = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(click));
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+  int line = (int)(y / MAX(gtk_widget_get_height(strip), 1) * gtk_text_buffer_get_line_count(buffer));
+  GtkTextIter iter;
 
-    tab->view = v;
-    v->tab = tab;
-    v->starts = g_array_new(FALSE, FALSE, sizeof(gsize));
-    v->in_comment = g_array_new(FALSE, FALSE, sizeof(gboolean));
-    v->problem_lines = g_array_new(FALSE, FALSE, sizeof(Problem));
-
-    guides_attach(v, GTK_OVERLAY(gtk_widget_get_parent(GTK_WIDGET(tab->term))));
-
-    v->minimap = minimap_new(v);
-    gtk_widget_set_visible(v->minimap, tab->app->settings.minimap);
-    gtk_box_append(GTK_BOX(tab->page), v->minimap);
-
-    v->adjustment = gtk_adjustment_new(0, 0, 1, 1, 1, 1);
-    g_signal_connect(v->adjustment, "value-changed", G_CALLBACK(on_scrollbar), v);
-    scrollbar = gtk_scrollbar_new(GTK_ORIENTATION_VERTICAL, v->adjustment);
-    gtk_box_append(GTK_BOX(tab->page), scrollbar);
-
-    v->control_fd = control_open(number, &v->control_path);
-    editor_view_set_path(tab);
-    return v->control_path;
+  gtk_text_buffer_get_iter_at_line(buffer, &iter, line);
+  gtk_text_buffer_place_cursor(buffer, &iter);
+  editor_view_reveal_cursor(tab);
+  gtk_widget_grab_focus(GTK_WIDGET(tab->source));
 }
 
-void editor_view_show_minimap(Tab *tab, gboolean show)
+void editor_view_show_problems(Tab *tab)
 {
-    if (tab->view)
-        gtk_widget_set_visible(tab->view->minimap, show);
+  gtk_widget_queue_draw(tab->view->overview);
 }
 
-void editor_view_redraw(Tab *tab)
+/* The page ----------------------------------------------------------------------------------- */
+
+GtkWidget *editor_page(void)
 {
-    if (tab->view) {
-        gtk_widget_queue_draw(tab->view->minimap);
-        gtk_widget_queue_draw(tab->view->guides);
-    }
+  GtkWidget *page = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+  gtk_widget_add_css_class(page, "tcode-editor");
+  return page;
 }
 
-/* Closing the pipe ends the plugin's reader (cat). */
+void editor_view_init(Tab *tab, gboolean readonly)
+{
+  static gboolean styled;
+  App *t = tab->app;
+  EditorView *v = g_new0(EditorView, 1);
+  GtkWidget *page = tab->page;
+  GtkWidget *scrolled = gtk_scrolled_window_new();
+  GtkSourceBuffer *buffer;
+  GtkSourceView *view;
+
+  if (!styled) {
+    init_look(t);
+    styled = TRUE;
+  }
+  buffer = gtk_source_buffer_new(NULL);
+  gtk_source_buffer_set_style_scheme(
+      buffer, gtk_source_style_scheme_manager_get_scheme(gtk_source_style_scheme_manager_get_default(), SCHEME));
+  gtk_source_buffer_set_highlight_matching_brackets(buffer, TRUE);
+  view = guides_view_new(tab, buffer); /* our reference to the buffer stays the tab's */
+
+  tab->view = v;
+  tab->source = view;
+  tab->buffer = buffer;
+  v->tab = tab;
+  v->readonly = readonly;
+  v->file = gtk_source_file_new();
+  v->cancel = g_cancellable_new();
+  v->next_waiters = g_array_new(FALSE, FALSE, sizeof(SaveWaiter));
+  editing_attach(tab);
+  diff_gutter_attach(tab);
+  hover_attach(tab);
+  completion_attach(tab);
+  navigate_attach(tab);
+
+  gtk_widget_add_css_class(GTK_WIDGET(view), "tcode-source");
+  gtk_text_view_set_monospace(GTK_TEXT_VIEW(view), TRUE);
+  gtk_text_view_set_editable(GTK_TEXT_VIEW(view), !readonly);
+  gtk_text_view_set_left_margin(GTK_TEXT_VIEW(view), 4);
+  gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(view), 200); /* the last line can come up from the bottom */
+  gtk_source_view_set_show_line_numbers(view, TRUE);
+  gtk_source_view_set_highlight_current_line(view, TRUE);
+  gtk_source_view_set_auto_indent(view, TRUE);
+  gtk_source_view_set_indent_on_tab(view, TRUE);
+  gtk_source_view_set_smart_backspace(view, TRUE);
+  gtk_source_view_set_smart_home_end(view, GTK_SOURCE_SMART_HOME_END_BEFORE);
+
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), GTK_WIDGET(view));
+  v->overlay = gtk_overlay_new(); /* the find bar goes over the text */
+  gtk_overlay_set_child(GTK_OVERLAY(v->overlay), scrolled);
+  gtk_widget_set_hexpand(v->overlay, TRUE);
+  gtk_widget_set_vexpand(v->overlay, TRUE);
+  gtk_box_append(GTK_BOX(page), v->overlay);
+
+  v->map = gtk_source_map_new();
+  gtk_source_map_set_view(GTK_SOURCE_MAP(v->map), view);
+  gtk_widget_add_css_class(v->map, "tcode-minimap");
+  gtk_box_append(GTK_BOX(page), v->map);
+
+  GtkGesture *click = gtk_gesture_click_new();
+  v->overview = gtk_drawing_area_new();
+  gtk_widget_set_size_request(v->overview, OVERVIEW_WIDTH, -1);
+  gtk_widget_add_css_class(v->overview, "tcode-overview");
+  gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(v->overview), draw_overview, tab, NULL);
+  g_signal_connect(click, "pressed", G_CALLBACK(on_overview_click), tab);
+  gtk_widget_add_controller(v->overview, GTK_EVENT_CONTROLLER(click));
+  gtk_box_append(GTK_BOX(page), v->overview);
+  signature_attach(tab); /* in the overlay */
+  editor_view_apply_settings(tab);
+}
+
 void editor_view_free(EditorView *v)
 {
-    if (!v)
-        return;
-    control_close(v->control_fd, v->control_path);
-    if (v->monitor) {
-        g_file_monitor_cancel(v->monitor);
-        g_object_unref(v->monitor);
-    }
-    if (v->reload_id)
-        g_source_remove(v->reload_id);
-    g_free(v->text);
-    g_array_free(v->starts, TRUE);
-    g_array_free(v->in_comment, TRUE);
-    g_array_free(v->problem_lines, TRUE);
-    g_free(v->problems);
-    g_free(v);
+  if (!v)
+    return;
+  g_cancellable_cancel(v->cancel); /* loads and saves in flight drop their answer */
+  lsp_close(v->tab);
+  diagnostics_clear(v->tab);
+  signature_free(v->signature);
+  semantic_free(v->semantic);
+  findbar_free(v->find);
+  diff_gutter_free(v->diff);
+  g_free(v->closers);
+  for (guint i = 0; i < v->next_waiters->len; i++) {
+    SaveWaiter *w = &g_array_index(v->next_waiters, SaveWaiter, i);
+    w->func(w->data, FALSE);
+  }
+  g_array_free(v->next_waiters, TRUE);
+  if (v->monitor) {
+    g_file_monitor_cancel(v->monitor);
+    g_object_unref(v->monitor);
+  }
+  if (v->autosave_id)
+    g_source_remove(v->autosave_id);
+  if (v->reload_id)
+    g_source_remove(v->reload_id);
+  if (v->scroll_id)
+    g_source_remove(v->scroll_id);
+  g_signal_handlers_disconnect_by_data(v->tab->buffer, v->tab);
+  g_object_unref(v->tab->buffer); /* the page went first: the tab still holds it */
+  g_object_unref(v->cancel);
+  g_object_unref(v->file);
+  g_free(v->etag);
+  g_free(v);
 }

@@ -8,6 +8,3 @@
 
 /* Opens the window, or brings it to the front. */
 void show_settings(App *t);
-
-/* Adds micro's command line options that follow the settings (tab size, word wrap, ...) to argv. */
-void settings_editor_args(App *t, GPtrArray *argv);

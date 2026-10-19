@@ -5,7 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Installs the package, then what smoke-test.sh needs: a headless X server, a session bus,
-# python3 (to drive micro through a pty) and pgrep. Only this version's package ($VERSION, set in the
+# python3 (to talk to the socket) and pgrep. Only this version's package ($VERSION, set in the
 # container), when older ones are still in packaging/packages.
 declare -A INSTALL=(
   [fedora]='dnf -y install $(ls /out/t-code-$VERSION-[0-9]*.x86_64.rpm) xorg-x11-server-Xvfb dbus-daemon

@@ -2,32 +2,31 @@
 pkgname=t-code
 pkgver=0.1.1
 pkgrel=1
-pkgdesc='Terminal-centric C/C++ IDE: file manager, micro editor tabs and a shell'
+pkgdesc='Lightweight C/C++ IDE: file manager, editor tabs with clangd and a shell'
 arch=('x86_64')
 url='https://github.com/suacayipkisi/t-code'
 license=('MIT')
-depends=('glib2' 'gtk4' 'vte4' 'webkitgtk-6.0' 'md4c' 'micro' 'clang' 'git'
+depends=('glib2' 'gtk4' 'gtksourceview5' 'json-glib' 'vte4' 'webkitgtk-6.0' 'md4c' 'clang' 'git'
          'ttf-cascadia-code' 'hicolor-icon-theme')
 makedepends=('pkgconf')
-optdepends=('ripgrep: faster Search panel (falls back to grep)'
-            'wl-clipboard: clipboard on Wayland'
-            'xclip: clipboard on X11')
+optdepends=('ripgrep: faster Search panel (falls back to grep)')
 # packaging/build.sh makes this tarball from the working tree
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
   cd "$pkgname-$pkgver"
-  make build/t-code build/t-code-fm build/t-code-lsp
+  make build/t-code build/t-code-fm
 }
 
 check() {
   cd "$pkgname-$pkgver"
   build/t-code --version | grep -qx "t-code $pkgver"
   # The other tests open windows and need a display.
-  make build/test-searchmatch build/test-lsp
+  make build/test-searchmatch build/test-detect build/test-linediff
   build/test-searchmatch
-  build/test-lsp
+  build/test-detect
+  build/test-linediff
 }
 
 package() {

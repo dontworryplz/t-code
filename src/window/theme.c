@@ -60,20 +60,20 @@ static const char *const css =
 /* Before any window: GTK picks up the theme name when it styles the first one. */
 void load_theme(void)
 {
-    GtkCssProvider *provider = gtk_css_provider_new();
+  GtkCssProvider *provider = gtk_css_provider_new();
 
-    g_object_set(gtk_settings_get_default(), "gtk-theme-name", "Adwaita", "gtk-application-prefer-dark-theme",
-                 TRUE, NULL);
-    gtk_css_provider_load_from_string(provider, css);
-    /* Under the panels' own CSS, which uses GTK_STYLE_PROVIDER_PRIORITY_APPLICATION. */
-    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
-                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION - 1);
-    g_object_unref(provider);
+  g_object_set(gtk_settings_get_default(), "gtk-theme-name", "Adwaita", "gtk-application-prefer-dark-theme", TRUE,
+               NULL);
+  gtk_css_provider_load_from_string(provider, css);
+  /* Under the panels' own CSS, which uses GTK_STYLE_PROVIDER_PRIORITY_APPLICATION. */
+  gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+                                             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION - 1);
+  g_object_unref(provider);
 }
 
 /* A rounded panel: its children (terminals, the minimap, the scrollbar) are cut to its corners. */
 void make_card(GtkWidget *widget)
 {
-    gtk_widget_add_css_class(widget, "tcode-card");
-    gtk_widget_set_overflow(widget, GTK_OVERFLOW_HIDDEN);
+  gtk_widget_add_css_class(widget, "tcode-card");
+  gtk_widget_set_overflow(widget, GTK_OVERFLOW_HIDDEN);
 }

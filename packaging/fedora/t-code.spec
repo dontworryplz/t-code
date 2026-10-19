@@ -1,7 +1,7 @@
 Name:           t-code
 Version:        0.1.1
 Release:        1%{?dist}
-Summary:        Terminal-centric C/C++ IDE: file manager, micro editor tabs and a shell
+Summary:        Lightweight C/C++ IDE: file manager, editor tabs with clangd and a shell
 License:        MIT
 URL:            https://github.com/suacayipkisi/t-code
 Source0:        %{name}-%{version}.tar.gz
@@ -9,31 +9,32 @@ Source0:        %{name}-%{version}.tar.gz
 BuildRequires:  gcc
 BuildRequires:  make
 BuildRequires:  pkgconfig(gtk4)
+BuildRequires:  pkgconfig(gtksourceview-5)
+BuildRequires:  pkgconfig(json-glib-1.0)
 BuildRequires:  pkgconfig(vte-2.91-gtk4)
 BuildRequires:  pkgconfig(gio-unix-2.0)
 BuildRequires:  pkgconfig(webkitgtk-6.0)
 BuildRequires:  pkgconfig(md4c-html)
 BuildRequires:  desktop-file-utils
 
-Requires:       micro
 Requires:       clang-tools-extra
 Requires:       git-core
 Requires:       cascadia-code-fonts
 Requires:       hicolor-icon-theme
 Recommends:     ripgrep
-Recommends:     (wl-clipboard or xclip)
 
 %description
-t-code is a lightweight C/C++ IDE where every pane is a real terminal: a file
-manager (t-code-fm), editor tabs running micro with clangd, and a shell, in a
-GTK4 window with VS Code Dark Modern colors. It also has a Search panel, Source
-Control, git comparisons and Markdown previews.
+t-code is a lightweight C/C++ IDE: a terminal file manager (t-code-fm),
+GtkSourceView editor tabs sharing one clangd (errors underlined, completion,
+parameter hints, go to definition) and a shell, in a GTK4 window with VS Code
+Dark Modern colors. It also has a Search panel, Source Control, git comparisons
+and Markdown previews.
 
 %prep
 %autosetup
 
 %build
-%make_build build/t-code build/t-code-fm build/t-code-lsp
+%make_build build/t-code build/t-code-fm
 
 %install
 %make_install PREFIX=%{_prefix} BINDIR=%{_bindir} LIBEXECDIR=%{_libexecdir} DATADIR=%{_datadir}
@@ -42,9 +43,10 @@ Control, git comparisons and Markdown previews.
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.tcode.desktop
 %{buildroot}%{_bindir}/t-code --version | grep -qx 't-code %{version}'
 # The other tests open windows and need a display.
-%make_build build/test-searchmatch build/test-lsp
+%make_build build/test-searchmatch build/test-detect build/test-linediff
 build/test-searchmatch
-build/test-lsp
+build/test-detect
+build/test-linediff
 
 %files
 %license LICENSE

@@ -7,17 +7,17 @@
 #include <glib.h>
 
 typedef struct {
-    const char *text;
-    gboolean match_case, whole_word, regex;
-    const char *include, *exclude; /* comma separated globs, like VS Code's "files to include" */
+  const char *text;
+  gboolean match_case, whole_word, regex;
+  const char *include, *exclude; /* comma separated globs, like VS Code's "files to include" */
 } SearchQuery;
 
 typedef struct {
-    const char *path; /* as printed, relative to the folder searched ("./" removed) */
-    int line;         /* 1-based */
-    int column;       /* 1-based, in characters */
-    const char *text; /* the whole line */
-    int start, end;   /* byte offsets of the match in text; equal when it was not found there */
+  const char *path; /* as printed, relative to the folder searched ("./" removed) */
+  int line;         /* 1-based */
+  int column;       /* 1-based, in characters */
+  const char *text; /* the whole line */
+  int start, end;   /* byte offsets of the match in text; equal when it was not found there */
 } SearchHit;
 
 typedef void (*SearchHitFunc)(const SearchHit *hit, gpointer data);

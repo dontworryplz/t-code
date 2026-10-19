@@ -11,8 +11,8 @@ arch=$(xbps-uhelper arch)
 
 xbps-install -Syu xbps >/dev/null
 xbps-install -Syu >/dev/null
-xbps-install -y gcc make pkg-config gtk4-devel vte3-gtk4-devel libwebkitgtk60-devel \
-  libmd4c-devel desktop-file-utils >/dev/null
+xbps-install -y gcc make pkg-config gtk4-devel gtksourceview5-devel json-glib-devel vte3-gtk4-devel \
+  libwebkitgtk60-devel libmd4c-devel desktop-file-utils >/dev/null
 
 work=/tmp/build
 dest=/tmp/dest
@@ -24,9 +24,10 @@ cd "$work/t-code-$VERSION"
 export CFLAGS="-O2 -pipe -fstack-clash-protection -D_FORTIFY_SOURCE=2 -fstack-protector-strong"
 export LDFLAGS="-Wl,--as-needed -Wl,-z,relro -Wl,-z,now"
 make
-make build/test-searchmatch build/test-lsp
+make build/test-searchmatch build/test-detect build/test-linediff
 build/test-searchmatch
-build/test-lsp
+build/test-detect
+build/test-linediff
 test "$(build/t-code --version)" = "t-code $VERSION"
 
 make install DESTDIR="$dest" PREFIX=/usr LIBEXECDIR=/usr/libexec
@@ -38,9 +39,9 @@ strip --strip-unneeded "$dest/usr/bin/t-code" "$dest/usr/libexec/t-code/"*
 # monospace font (and any font can be picked in Settings).
 cd /out
 xbps-create -A "$arch" -n "t-code-${VERSION}_$revision" \
-  -s "Terminal-centric C/C++ IDE: file manager, micro editor tabs and a shell" \
+  -s "Lightweight C/C++ IDE: file manager, editor tabs with clangd and a shell" \
   -H "https://github.com/suacayipkisi/t-code" -l MIT \
   -m "suacayipkisi <ufukdenizcaglayan@gmail.com>" \
-  -D "glib>=0 gtk4>=0 vte3-gtk4>=0 libwebkitgtk60>=0 libmd4c>=0 libmd4c-html>=0 micro>=2.0.14_1 clang-tools-extra>=0 git>=0 hicolor-icon-theme>=0" \
+  -D "glib>=0 gtk4>=0 gtksourceview5>=0 json-glib>=0 vte3-gtk4>=0 libwebkitgtk60>=0 libmd4c>=0 libmd4c-html>=0 clang-tools-extra>=0 git>=0 hicolor-icon-theme>=0" \
   "$dest"
 [[ -z "${HOST_OWNER:-}" ]] || chown -R "$HOST_OWNER" /out
