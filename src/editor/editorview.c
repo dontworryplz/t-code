@@ -30,7 +30,24 @@ static const char *const css =
     ".tcode-editor textview, .tcode-editor textview text { background: #1f1f1f; }"
     ".tcode-editor textview border.left gutter { background: #1f1f1f; padding-right: 12px; }"
     ".tcode-editor .tcode-minimap { border-left: 1px solid #2b2b2b; }"
-    ".tcode-editor .tcode-overview { border-left: 1px solid #2b2b2b; }";
+    ".tcode-editor .tcode-overview { border-left: 1px solid #2b2b2b; }"
+    /* Completion: square and compact like VS Code's suggest widget, not GtkSourceView's rounded
+     * list of 28px rows. */
+    "GtkSourceAssistant.completion { border-radius: 0; background: #202020;"
+    "  box-shadow: 0 0 0 1px #454545, 0 2px 8px rgba(0, 0, 0, .36); outline: none; }"
+    "GtkSourceAssistant.completion.above-line { box-shadow: 0 0 0 1px #454545, 0 -2px 8px rgba(0, 0, 0, .36); }"
+    "GtkSourceAssistant.completion list, GtkSourceAssistant.completion list row,"
+    "GtkSourceAssistant.completion scrollbar.vertical, GtkSourceAssistant.completion box.details"
+    "  { border-radius: 0; }"
+    "GtkSourceAssistant.completion list row { min-height: 0; padding: 0; color: #cccccc; }"
+    "GtkSourceAssistant.completion list row:hover:not(:selected) { background: #2a2d2e; }"
+    "GtkSourceAssistant.completion list row:selected, GtkSourceAssistant.completion list row:selected:backdrop"
+    "  { background: #04395e; color: #ffffff; box-shadow: inset 0 0 0 1px #0078d4; }"
+    "GtkSourceAssistant.completion list row cell.icon { padding: 2px 4px 2px 6px; min-width: 14px; min-height: 14px;"
+    "  -gtk-icon-size: 14px; }"
+    "GtkSourceAssistant.completion list row cell.typed-text { min-height: 20px; margin: 0 4px; }"
+    "GtkSourceAssistant.completion list row cell.after { margin: 0 8px 0 24px; opacity: .6; }"
+    "GtkSourceAssistant.completion box.details { background: #252526; border-top: 1px solid #454545; }";
 
 #define OVERVIEW_WIDTH 8 /* pixels, like VS Code's overview ruler */
 

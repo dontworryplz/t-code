@@ -36,6 +36,21 @@ static const char *icon_for(gint64 kind)
   }
 }
 
+#define MAX_TEXT 60   /* characters of a name with its parameters in the list, like VS Code's */
+#define MAX_DETAIL 30 /* characters of the type on the right */
+
+/* text, at most max characters: longer ones end in "…" (a long signature would make the list as
+ * wide as the window). */
+static char *shorten(const char *text, glong max)
+{
+  const char *end;
+
+  if (!text || g_utf8_strlen(text, -1) <= max)
+    return g_strdup(text);
+  end = g_utf8_offset_to_pointer(text, max - 1);
+  return g_strdup_printf("%.*s…", (int)(end - text), text);
+}
+
 /* Proposals ---------------------------------------------------------------------------------- */
 
 struct _TcodeProposal {
@@ -327,16 +342,30 @@ static void display(GtkSourceCompletionProvider *provider G_GNUC_UNUSED, GtkSour
     case GTK_SOURCE_COMPLETION_COLUMN_ICON: gtk_source_completion_cell_set_icon_name(cell, icon_for(p->kind)); break;
     case GTK_SOURCE_COMPLETION_COLUMN_TYPED_TEXT: {
       char *word = gtk_source_completion_context_get_word(context);
-      char *text = g_strconcat(p->label, p->params, NULL);
-      PangoAttrList *highlight = gtk_source_completion_fuzzy_highlight(p->label, word);
-      gtk_source_completion_cell_set_text_with_attributes(cell, text, highlight);
-      if (highlight)
-        pango_attr_list_unref(highlight);
+      char *full = g_strconcat(p->label, p->params, NULL);
+      char *text = shorten(full, MAX_TEXT);
+      PangoAttrList *attrs = gtk_source_completion_fuzzy_highlight(p->label, word);
+      if (p->params && *p->params) { /* the parameters dimmed, as in VS Code */
+        PangoAttribute *dim = pango_attr_foreground_alpha_new(0.6 * G_MAXUINT16);
+        dim->start_index = strlen(p->label);
+        if (!attrs)
+          attrs = pango_attr_list_new();
+        pango_attr_list_insert(attrs, dim);
+      }
+      gtk_source_completion_cell_set_text_with_attributes(cell, text, attrs);
+      if (attrs)
+        pango_attr_list_unref(attrs);
       g_free(text);
+      g_free(full);
       g_free(word);
       break;
     }
-    case GTK_SOURCE_COMPLETION_COLUMN_AFTER: gtk_source_completion_cell_set_text(cell, p->detail); break;
+    case GTK_SOURCE_COMPLETION_COLUMN_AFTER: {
+      char *detail = shorten(p->detail, MAX_DETAIL);
+      gtk_source_completion_cell_set_text(cell, detail);
+      g_free(detail);
+      break;
+    }
     case GTK_SOURCE_COMPLETION_COLUMN_DETAILS: gtk_source_completion_cell_set_text(cell, p->docs); break;
     default: gtk_source_completion_cell_set_text(cell, NULL); break;
   }

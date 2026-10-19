@@ -599,6 +599,23 @@ static void test_completion_items(void)
   g_object_unref(provider);
 }
 
+/* Long signatures and types are cut, by characters, so the list stays narrow. */
+static void test_completion_shorten(void)
+{
+  char *text = shorten("g_application_add_main_option(GApplication *application)", 32);
+
+  g_assert_cmpstr(text, ==, "g_application_add_main_option(G…");
+  g_assert_cmpint(g_utf8_strlen(text, -1), ==, 32);
+  g_free(text);
+  text = shorten("const GActionEntry[1]", 30);
+  g_assert_cmpstr(text, ==, "const GActionEntry[1]");
+  g_free(text);
+  text = shorten("çöğüşı", 4);
+  g_assert_cmpstr(text, ==, "çöğ…");
+  g_free(text);
+  g_assert_null(shorten(NULL, 4));
+}
+
 /* The argument being typed is bold; overloads are counted. */
 static void test_signature_markup(void)
 {
@@ -775,6 +792,7 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/semantic-colors", test_semantic_colors);
   g_test_add_func("/lsp/problem-end", test_problem_end);
   g_test_add_func("/lsp/completion-items", test_completion_items);
+  g_test_add_func("/lsp/completion-shorten", test_completion_shorten);
   g_test_add_func("/lsp/signature-markup", test_signature_markup);
   g_test_add_func("/lsp/edits", test_edits);
   g_test_add_func("/lsp/edits-encodings", test_edits_encodings);
