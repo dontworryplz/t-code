@@ -143,6 +143,14 @@ AddressSanitizer, which also fails on memory leaks. `.clang-format` is the code'
 running t-code costs in memory and CPU (`tools/proc-report.sh`), or run it invisibly to measure a
 change (`tools/headless.sh`).
 
+## Contributing
+
+If you want to contribute, all contributions will be gladly accepted. Please open a pull request.
+
+## AI Usage in Project  
+
+Most of the structure and code written with using AI coding agent. Every single line of code is reviewed or currently under review. I did not spend enough time to write just myself because I just want an ide that uses not much ram as immediately as possible, vscode was using too much then I got angry and tada... BUT I will review every detail of this project and after than I will continue to add new features as I wish.
+
 ## Usage
 
 ```sh
