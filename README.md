@@ -13,7 +13,7 @@ A light C/C++ IDE for Linux in one GTK4 window, with VS Code's Dark Modern look.
 
 ![t-code editing its own source: the file manager on the left, a C file in the editor with indent guides and the minimap, the shell below, and the status bar](docs/screenshot.png)
 
-<sub>t-code 0.1.1 (micro-based) open on its own repository; the editor looks much the same now, with clangd's problems underlined.</sub>
+<sub>t-code 0.2 open on its own repository.</sub>
 
 Two small C programs:
 
