@@ -1,5 +1,5 @@
 VERSION := 0.1.1
-PKGS    := gtk4 gtksourceview-5 json-glib-1.0 vte-2.91-gtk4 gio-unix-2.0 webkitgtk-6.0 md4c-html
+PKGS    := gtk4 gtksourceview-5 json-glib-1.0 vte-2.91-gtk4 gio-unix-2.0 md4c
 # t-code: src/main.c and the feature folders (src/window, src/editor, ...); src/fm is the file
 # manager, a program of its own.
 APP_SRC := $(filter-out src/fm/%,$(wildcard src/*.c src/*/*.c))
@@ -29,7 +29,7 @@ build/license.h: LICENSE | build
 build/t-code-fm: $(FM_SRC) src/fm/fm.h | build
 	$(CC) $(CFLAGS) -o $@ $(FM_SRC) $(LDFLAGS)
 
-# How each file is compiled, so clangd (in t-code, VS Code, ...) finds the GTK, VTE and WebKit headers.
+# How each file is compiled, so clangd (in t-code, VS Code, ...) finds the GTK, VTE and md4c headers.
 build/compile_commands.json: Makefile $(APP_SRC) $(FM_SRC) $(TEST_SRC) | build
 	@( printf '['; sep=; \
 	   for f in $(APP_SRC); do \

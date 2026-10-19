@@ -19,5 +19,8 @@ char *diagnostics_at(Tab *tab, const GtkTextIter *iter, gboolean markup);
 /* The lines with errors (and with warnings), 0-based, for the minimap's marks. */
 void diagnostics_lines(Tab *tab, GArray *errors, GArray *warnings);
 
+/* Draws the wavy underlines for diagnostics on the view's text. */
+void diagnostics_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot);
+
 /* Forgets them all (the editor goes). */
 void diagnostics_clear(Tab *tab);

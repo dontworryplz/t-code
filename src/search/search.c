@@ -12,6 +12,9 @@
 #include "editor/editor.h"
 #include "search/searchmatch.h"
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 #include <string.h>
 
 #define MAX_HITS 2000   /* results shown; the search stops there */
@@ -79,6 +82,9 @@ static void run_free(Run *run)
   g_clear_pointer(&run->regex, g_regex_unref);
   g_free(run->root);
   g_free(run);
+#ifdef __GLIBC__
+  malloc_trim(0); /* glibc keeps what a search freed (its results can be large): give it back */
+#endif
 }
 
 /* Stops the search running; its pending read then ends with an error and frees it. */

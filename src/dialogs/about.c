@@ -7,7 +7,6 @@
 #include "dialogs/about.h"
 
 #include <string.h>
-#include <webkit/webkit.h>
 #ifdef __GLIBC__
 #include <gnu/libc-version.h>
 #endif
@@ -118,7 +117,6 @@ static char *libraries(App *t)
                          "  GTK            %u.%u.%u\n"
                          "  GtkSourceView  %u.%u.%u\n"
                          "  VTE            %u.%u.%u\n"
-                         "  WebKitGTK      %u.%u.%u\n"
                          "  GLib           %u.%u.%u\n"
 #ifdef __GLIBC__
                          "  glibc          %s\n",
@@ -129,7 +127,6 @@ static char *libraries(App *t)
                          gtk_get_major_version(), gtk_get_minor_version(), gtk_get_micro_version(),
                          gtk_source_get_major_version(), gtk_source_get_minor_version(), gtk_source_get_micro_version(),
                          vte_get_major_version(), vte_get_minor_version(), vte_get_micro_version(),
-                         webkit_get_major_version(), webkit_get_minor_version(), webkit_get_micro_version(),
                          glib_major_version, glib_minor_version, glib_micro_version,
 #ifdef __GLIBC__
                          gnu_get_libc_version()
@@ -149,7 +146,6 @@ void show_about(App *t)
     "GTK https://www.gtk.org",
     "GtkSourceView https://gitlab.gnome.org/GNOME/gtksourceview",
     "VTE https://gitlab.gnome.org/GNOME/vte",
-    "WebKitGTK https://webkitgtk.org",
     "md4c https://github.com/mity/md4c",
     "Cascadia Code https://github.com/microsoft/cascadia-code",
     NULL,

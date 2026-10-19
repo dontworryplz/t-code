@@ -120,6 +120,8 @@ static void on_view_mapped(GtkWidget *view G_GNUC_UNUSED, Tab *tab)
   if (tab->view->lsp_pending) {
     tab->view->lsp_pending = FALSE;
     lsp_open(tab);
+  } else {
+    lsp_touch(tab);
   }
   if (tab->view->scroll_pending && !tab->view->scroll_id)
     tab->view->scroll_id = g_idle_add(scroll_to_cursor, tab);

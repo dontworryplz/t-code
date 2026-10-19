@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define REFRESH_DELAY_MS 150 /* changes come in bursts (a save, a git commit): refresh once */
+#define REFRESH_DELAY_MS 250 /* changes come in bursts (a build, a save, a git commit): refresh once */
 
 Fm fm = { .show_hidden = true, .focused = true, .follow = true, .press_row = -1, .drop_row = -1 };
 volatile int resized;

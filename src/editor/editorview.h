@@ -76,3 +76,7 @@ void editor_view_reveal_cursor(Tab *tab);
 
 /* The language for path, from its name and text (a .h with C++ in it is C++). NULL: plain text. */
 GtkSourceLanguage *editor_language(const char *path, const char *text);
+
+/* The Dark Modern style scheme (styles/dark-modern.xml); the first call also sets up the CSS all
+ * editors share. Markdown previews color their code blocks with it too. */
+GtkSourceStyleScheme *editor_style_scheme(App *t);

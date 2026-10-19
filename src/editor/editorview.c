@@ -22,7 +22,10 @@
 
 static const char *const css =
     ".tcode-editor scrollbar { background: none; border: none; }"
-    ".tcode-editor scrollbar slider { min-width: 6px; border-radius: 6px; background: rgba(121, 121, 121, .4); }"
+    ".tcode-editor scrollbar slider { border-radius: 6px; background: rgba(121, 121, 121, .4); }"
+    ".tcode-editor scrollbar.vertical slider { min-width: 6px; min-height: 24px; }"
+    /* Long lines without word wrap: a bar as easy to see and grab as the vertical one. */
+    ".tcode-editor scrollbar.horizontal slider { min-height: 8px; min-width: 24px; }"
     ".tcode-editor scrollbar slider:hover { background: rgba(100, 100, 100, .7); }"
     ".tcode-editor textview, .tcode-editor textview text { background: #1f1f1f; }"
     ".tcode-editor textview border.left gutter { background: #1f1f1f; padding-right: 12px; }"
@@ -158,7 +161,93 @@ static void on_overview_click(GtkGestureClick *click, int n G_GNUC_UNUSED, doubl
 
 void editor_view_show_problems(Tab *tab)
 {
-  gtk_widget_queue_draw(tab->view->overview);
+  if (!tab || !tab->view)
+    return;
+  if (tab->view->overview)
+    gtk_widget_queue_draw(tab->view->overview);
+  if (tab->view->map)
+    gtk_widget_queue_draw(tab->view->map);
+  if (tab->source)
+    gtk_widget_queue_draw(GTK_WIDGET(tab->source));
+}
+
+/* The minimap -------------------------------------------------------------------------------- */
+
+#define TCODE_TYPE_MAP (tcode_map_get_type())
+G_DECLARE_FINAL_TYPE(TcodeMap, tcode_map, TCODE, MAP, GtkSourceMap)
+
+struct _TcodeMap {
+  GtkSourceMap parent;
+  Tab *tab;
+};
+
+G_DEFINE_FINAL_TYPE(TcodeMap, tcode_map, GTK_SOURCE_TYPE_MAP)
+
+static void tcode_map_snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapshot *snapshot)
+{
+  TcodeMap *self = TCODE_MAP(view);
+
+  GTK_TEXT_VIEW_CLASS(tcode_map_parent_class)->snapshot_layer(view, layer, snapshot);
+
+  if (layer == GTK_TEXT_VIEW_LAYER_ABOVE_TEXT && self->tab && self->tab->view && !self->tab->view->loading) {
+    Tab *tab = self->tab;
+    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+    GArray *lines[2] = { g_array_new(FALSE, FALSE, sizeof(int)), g_array_new(FALSE, FALSE, sizeof(int)) };
+    diagnostics_lines(tab, lines[1], lines[0]); /* lines[0] = warnings, lines[1] = errors */
+
+    int total_lines = gtk_text_buffer_get_line_count(buffer);
+    gboolean *seen = g_new0(gboolean, total_lines + 1);
+    float map_w = (float)gtk_widget_get_width(GTK_WIDGET(view));
+
+    static const GdkRGBA bg_rgba[2] = {
+      { 0.80f, 0.65f, 0.00f, 0.35f }, /* warning */
+      { 0.95f, 0.30f, 0.30f, 0.40f }  /* error */
+    };
+    static const GdkRGBA edge_rgba[2] = { { 0.80f, 0.65f, 0.00f, 1.0f }, { 0.95f, 0.30f, 0.30f, 1.0f } };
+
+    /* Draw errors first (k=1) then warnings (k=0), so error colors take precedence on the same line */
+    for (int k = 1; k >= 0; k--) {
+      for (guint i = 0; i < lines[k]->len; i++) {
+        int line_idx = g_array_index(lines[k], int, i);
+        if (line_idx < 0 || line_idx >= total_lines || seen[line_idx])
+          continue;
+        seen[line_idx] = TRUE;
+
+        GtkTextIter iter;
+        int y, h;
+        gtk_text_buffer_get_iter_at_line(buffer, &iter, line_idx);
+        gtk_text_view_get_line_yrange(view, &iter, &y, &h);
+        int draw_h = MAX(h, 2);
+
+        /* Highlight across the full minimap line */
+        graphene_rect_t row_rect = GRAPHENE_RECT_INIT(0.0f, (float)y, map_w, (float)draw_h);
+        gtk_snapshot_append_color(snapshot, &bg_rgba[k], &row_rect);
+
+        /* Solid indicator on the right edge */
+        graphene_rect_t edge_rect = GRAPHENE_RECT_INIT(map_w - 3.0f, (float)y, 3.0f, (float)draw_h);
+        gtk_snapshot_append_color(snapshot, &edge_rgba[k], &edge_rect);
+      }
+    }
+    g_array_free(lines[0], TRUE);
+    g_array_free(lines[1], TRUE);
+    g_free(seen);
+  }
+}
+
+static void tcode_map_class_init(TcodeMapClass *klass)
+{
+  GTK_TEXT_VIEW_CLASS(klass)->snapshot_layer = tcode_map_snapshot_layer;
+}
+
+static void tcode_map_init(TcodeMap *self G_GNUC_UNUSED)
+{
+}
+
+static GtkWidget *tcode_map_new(Tab *tab)
+{
+  TcodeMap *map = g_object_new(TCODE_TYPE_MAP, NULL);
+  map->tab = tab;
+  return GTK_WIDGET(map);
 }
 
 /* The page ----------------------------------------------------------------------------------- */
@@ -171,9 +260,19 @@ GtkWidget *editor_page(void)
   return page;
 }
 
-void editor_view_init(Tab *tab, gboolean readonly)
+GtkSourceStyleScheme *editor_style_scheme(App *t)
 {
   static gboolean styled;
+
+  if (!styled) {
+    init_look(t);
+    styled = TRUE;
+  }
+  return gtk_source_style_scheme_manager_get_scheme(gtk_source_style_scheme_manager_get_default(), SCHEME);
+}
+
+void editor_view_init(Tab *tab, gboolean readonly)
+{
   App *t = tab->app;
   EditorView *v = g_new0(EditorView, 1);
   GtkWidget *page = tab->page;
@@ -181,13 +280,8 @@ void editor_view_init(Tab *tab, gboolean readonly)
   GtkSourceBuffer *buffer;
   GtkSourceView *view;
 
-  if (!styled) {
-    init_look(t);
-    styled = TRUE;
-  }
   buffer = gtk_source_buffer_new(NULL);
-  gtk_source_buffer_set_style_scheme(
-      buffer, gtk_source_style_scheme_manager_get_scheme(gtk_source_style_scheme_manager_get_default(), SCHEME));
+  gtk_source_buffer_set_style_scheme(buffer, editor_style_scheme(t));
   gtk_source_buffer_set_highlight_matching_brackets(buffer, TRUE);
   /* The buffer holds the file exactly, its last line break too (shown as an empty last line, like VS
    * Code): what is saved, what clangd gets and what the diff gutter compares are the same text. */
@@ -227,7 +321,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   gtk_widget_set_vexpand(v->overlay, TRUE);
   gtk_box_append(GTK_BOX(page), v->overlay);
 
-  v->map = gtk_source_map_new();
+  v->map = tcode_map_new(tab);
   gtk_source_map_set_view(GTK_SOURCE_MAP(v->map), view);
   gtk_widget_add_css_class(v->map, "tcode-minimap");
   gtk_box_append(GTK_BOX(page), v->map);

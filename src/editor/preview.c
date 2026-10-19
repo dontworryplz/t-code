@@ -1,51 +1,93 @@
 /*
  * Markdown preview (Ctrl+Shift+V, or "Open Preview" in the file manager), styled like VS Code's.
- * md4c turns the file into HTML (GitHub flavor: tables, task lists, strikethrough, autolinks) and
- * WebKit shows it. The preview follows the file as it is saved, keeping its scroll position.
+ * md4c parses the file (GitHub flavor: tables, task lists, strikethrough, autolinks) and its blocks
+ * and spans become text with tags in one read-only GtkTextView: no browser engine, so a preview
+ * costs about what its text does. Code blocks are colored with GtkSourceView's language definitions
+ * and the editor's style scheme, local images are shown, links open (anchors scroll to their
+ * heading, Markdown files open as previews, other files in an editor, the rest in the browser).
+ * The preview follows the file as it is saved, keeping its scroll position.
  */
 #include "editor/preview.h"
 
 #include "editor/editor.h"
+#include "editor/editorview.h"
 #include "editor/tabs.h"
+#include "window/terminal.h"
 
-#include <md4c-html.h>
+#include <md4c.h>
+#include <stdlib.h>
 #include <string.h>
-#include <webkit/webkit.h>
+
+#define BODY_POINTS 12.0      /* the text at text size 1 */
+#define MARGIN 32             /* minimum pixels left and right of the text */
+#define MAX_CONTENT_WIDTH 840 /* maximum comfortable reading width */
+#define INDENT 24             /* pixels per list or quote level */
+#define MAX_LEVEL 8
+#define CELL_PAD 10 /* pixels left and right of a table cell's text (its CSS padding) */
+
+typedef struct {
+  int start, end;
+  char *url;
+} Link;
+
+typedef struct {
+  int start, end;
+} CodeSpan;
+
+/* A table: a grid of wrapping labels in the text, its columns sized to the view's width. */
+typedef struct {
+  GtkWidget *grid;
+  GArray *natural; /* int per column: its widest cell on one line, padding included */
+} PreviewTable;
 
 struct Preview {
   Tab *tab;
-  WebKitWebView *view;
+  GtkTextView *view;
+  GtkTextBuffer *buffer;
+  GArray *links;       /* Link, in the order of the text */
+  GArray *code_spans;  /* CodeSpan: inline code spans for pill background */
+  GHashTable *anchors; /* heading slug -> its offset */
+  GHashTable *colors;  /* a code coloring ("fg|weight|style") -> its tag, made once per preview */
+  GPtrArray *tables;   /* PreviewTable: the tables shown, sized to the view's width */
+  GPtrArray *pictures; /* the images shown, sized to the view's width */
+  int width;           /* the view's width the images were sized for */
+  double scale;        /* the window's text size */
+  gboolean over_link;
   GFileMonitor *monitor;
   guint reload_id;
-  gboolean loaded;
 };
 
-static const char *const css =
-    ":root { color-scheme: dark; }"
-    "html, body { background: #1f1f1f; color: #cccccc; }"
-    "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu',"
-    "  'Droid Sans', sans-serif; font-size: 14px; line-height: 1.6; max-width: 882px; margin: 0 auto;"
-    "  padding: 0 26px 32px; word-wrap: break-word; }"
-    "#content > :first-child { margin-top: 16px; }"
-    "h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.25; margin: 24px 0 16px; }"
-    "h1 { font-size: 2em; } h2 { font-size: 1.5em; } h3 { font-size: 1.25em; } h6 { color: #9d9d9d; }"
-    "h1, h2 { padding-bottom: .3em; border-bottom: 1px solid rgba(255, 255, 255, .18); }"
-    "p, ul, ol, blockquote, table, pre { margin: 0 0 16px; }"
-    "a { color: #4daafc; text-decoration: none; } a:hover { text-decoration: underline; }"
-    "code { font-family: 'Cascadia Code', monospace; font-size: .9em; color: #d0d0d0;"
-    "  background: #3c3c3c; padding: 1px 4px; border-radius: 4px; }"
-    "pre { background: #2b2b2b; padding: 16px; border-radius: 4px; overflow: auto; line-height: 1.45; }"
-    "pre code { background: none; padding: 0; color: #cccccc; }"
-    "blockquote { margin-left: 0; padding: 0 16px; border-left: 5px solid #616161;"
-    "  background: rgba(127, 127, 127, .1); }"
-    "blockquote > p { padding: 8px 0; margin: 0; }"
-    "table { border-collapse: collapse; }"
-    "th, td { border: 1px solid rgba(255, 255, 255, .18); padding: 5px 10px; }"
-    "th { text-align: left; font-weight: 600; }"
-    "hr { border: 0; height: 1px; background: rgba(255, 255, 255, .18); margin: 24px 0; }"
-    "img { max-width: 100%; }"
-    "li.task-list-item { list-style: none; } li.task-list-item input { margin: 0 .4em 0 -1.3em; }"
-    ".error { color: #f14c4c; }";
+/* One rendering: md4c's callbacks append to the end of the buffer. Tags are applied when a block or
+ * span ends, from where it started (starts) to the end. */
+typedef struct {
+  Preview *p;
+  char *dir;                /* the file's folder: relative links and images are in it */
+  GArray *starts;           /* int: where each open block and span started */
+  GArray *images;           /* gboolean: per open image, whether it is shown (then its alt text is not) */
+  GPtrArray *hrefs;         /* per open link, its target */
+  int level;                /* lists and quotes around the text */
+  int lists[MAX_LEVEL + 1]; /* per open list: the next number, or 0 for bullets */
+  gboolean tight[MAX_LEVEL + 1];
+  int nlists;
+  gboolean in_item_start; /* at the start of a list item before its first block/text */
+  gboolean in_item_p;     /* inside the first paragraph of a list item */
+  PreviewTable *table;    /* inside a table */
+  GString *markup;        /* inside a table cell: its text as Pango markup */
+  GPtrArray *closers;     /* per span open in a cell, the markup that ends it */
+  int row, cell;          /* the cell in the table */
+  MD_ALIGN align;         /* its column's alignment */
+  GString *code;          /* inside a code block: its text */
+  char *lang;
+  int hidden;          /* inside a shown image: its alt text is not added */
+  gboolean html_block; /* inside an HTML block: its lines flow like a paragraph's */
+} Render;
+
+static const char *const css = ".tcode-preview, .tcode-preview text { background: #1f1f1f; color: #cccccc; }"
+                               ".tcode-preview-table { border: 1px solid #3c3c3c; }"
+                               ".tcode-preview-table label { padding: 6px 10px; color: #cccccc; }"
+                               ".tcode-preview-table label.head { background: #2b2b2b; color: #ffffff; }"
+                               ".tcode-preview-table label.odd { background: #242424; }"
+                               ".tcode-preview-table label link { color: #4daafc; }";
 
 gboolean is_markdown(const char *path)
 {
@@ -58,79 +100,1159 @@ gboolean is_markdown(const char *path)
   return FALSE;
 }
 
-/* Rendering ---------------------------------------------------------------------------------- */
+/* Tags -------------------------------------------------------------------------------------- */
 
-static void append_html(const MD_CHAR *text, MD_SIZE size, void *out)
+/* The tags every rendering uses, made with the buffer. Later tags win where they set the same
+ * thing, so the order matters: the base first, deeper indents after shallower ones. */
+static void create_tags(GtkTextBuffer *b, const char *mono)
 {
-  g_string_append_len(out, text, size);
+  static const double heading_scale[] = { 1.85, 1.45, 1.25, 1.1, 1.0, 0.9 };
+  char name[16];
+
+  gtk_text_buffer_create_tag(b, "base", "foreground", "#cccccc", NULL);
+  gtk_text_buffer_create_tag(b, "indent0", "indent", 0, NULL);
+  for (int i = 1; i <= MAX_LEVEL; i++) {
+    g_snprintf(name, sizeof name, "indent%d", i);
+    gtk_text_buffer_create_tag(b, name, "left-margin", MARGIN + i * INDENT, "indent", 0, NULL);
+  }
+  for (int i = 1; i <= MAX_LEVEL; i++) {
+    g_snprintf(name, sizeof name, "li%d", i);
+    gtk_text_buffer_create_tag(b, name, "left-margin", MARGIN + i * INDENT, "indent", -INDENT, NULL);
+  }
+  gtk_text_buffer_create_tag(b, "tight", "pixels-below-lines", 3, NULL);
+  gtk_text_buffer_create_tag(b, "gap", "pixels-below-lines", 12, NULL);
+  gtk_text_buffer_create_tag(b, "spacer", "size-points", 4.0, NULL);
+  gtk_text_buffer_create_tag(b, "quote", "foreground", "#b4b4b4", "paragraph-background", "#252525", "style",
+                             PANGO_STYLE_ITALIC, NULL);
+  for (int i = 0; i < 6; i++) {
+    g_snprintf(name, sizeof name, "h%d", i + 1);
+    gtk_text_buffer_create_tag(b, name, "weight", PANGO_WEIGHT_BOLD, "scale", heading_scale[i], "pixels-above-lines",
+                               i < 2 ? 24 : 16, "pixels-below-lines", i < 2 ? 12 : 8, NULL);
+  }
+  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h1"), "foreground", "#ffffff", NULL);
+  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h2"), "foreground", "#ffffff", NULL);
+  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h3"), "foreground", "#f0f0f0", NULL);
+  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h4"), "foreground", "#e6edf3", NULL);
+  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h5"), "foreground", "#e0e0e0", NULL);
+  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h6"), "foreground", "#9d9d9d", NULL);
+  gtk_text_buffer_create_tag(b, "bold", "weight", PANGO_WEIGHT_BOLD, "foreground", "#ffffff", NULL);
+  gtk_text_buffer_create_tag(b, "italic", "style", PANGO_STYLE_ITALIC, NULL);
+  gtk_text_buffer_create_tag(b, "strike", "strikethrough", TRUE, NULL);
+  gtk_text_buffer_create_tag(b, "underline", "underline", PANGO_UNDERLINE_SINGLE, NULL);
+  gtk_text_buffer_create_tag(b, "code", "family", mono, "scale", 0.90, "foreground", "#ffffff", NULL);
+  gtk_text_buffer_create_tag(b, "pre", "family", mono, "scale", 0.92, "paragraph-background", "#181818", "wrap-mode",
+                             GTK_WRAP_NONE, NULL);
+  gtk_text_buffer_create_tag(b, "pre-top", "pixels-above-lines", 12, NULL);
+  gtk_text_buffer_create_tag(b, "pre-bottom", "pixels-below-lines", 12, NULL);
+  gtk_text_buffer_create_tag(b, "hr", "size-points", 1.0, "paragraph-background", "#474747", NULL);
+  gtk_text_buffer_create_tag(b, "dim", "foreground", "#9d9d9d", "style", PANGO_STYLE_ITALIC, NULL);
+  gtk_text_buffer_create_tag(b, "error", "foreground", "#f14c4c", NULL);
+  gtk_text_buffer_create_tag(b, "link", "foreground", "#4daafc", "underline", PANGO_UNDERLINE_SINGLE, NULL);
 }
 
-/* The file as HTML (GitHub flavor), or an error paragraph when it cannot be read. */
-static char *render_body(const char *path)
+/* Appending ---------------------------------------------------------------------------------- */
+
+static int end_offset(Render *r)
 {
+  return gtk_text_buffer_get_char_count(r->p->buffer);
+}
+
+static void append(Render *r, const char *text, gssize len)
+{
+  GtkTextIter end;
+
+  gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+  gtk_text_buffer_insert(r->p->buffer, &end, text, len);
+}
+
+/* Applies tag (a name, or a tag when name is NULL) from start to the end of the buffer. */
+static void tag_from(Render *r, const char *name, GtkTextTag *tag, int start)
+{
+  GtkTextIter from, end;
+
+  gtk_text_buffer_get_iter_at_offset(r->p->buffer, &from, start);
+  gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+  if (name)
+    gtk_text_buffer_apply_tag_by_name(r->p->buffer, name, &from, &end);
+  else
+    gtk_text_buffer_apply_tag(r->p->buffer, tag, &from, &end);
+}
+
+/* Applies name to the buffer's last line (paragraph spacing is a property of a whole line). */
+static void tag_last_line(Render *r, const char *name)
+{
+  GtkTextIter from, end;
+
+  gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+  from = end;
+  if (gtk_text_iter_backward_char(&from)) /* the last line break */
+    gtk_text_iter_set_line_offset(&from, 0);
+  gtk_text_buffer_apply_tag_by_name(r->p->buffer, name, &from, &end);
+}
+
+/* A block starts on a line of its own. */
+static void begin_block(Render *r)
+{
+  GtkTextIter end;
+
+  gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+  if (gtk_text_iter_backward_char(&end) && gtk_text_iter_get_char(&end) != '\n')
+    append(r, "\n", 1);
+}
+
+/* Ends the paragraph that started at start: a line break, its indent and the space after it. */
+static void end_paragraph(Render *r, int start, const char *gap)
+{
+  char name[16];
+
+  append(r, "\n", 1);
+  g_snprintf(name, sizeof name, "indent%d", MIN(r->level, MAX_LEVEL));
+  tag_from(r, name, NULL, start);
+  if (gap)
+    tag_last_line(r, gap);
+}
+
+static void push_start(Render *r)
+{
+  int start = end_offset(r);
+
+  g_array_append_val(r->starts, start);
+}
+
+static int pop_start(Render *r)
+{
+  int start = r->starts->len ? g_array_index(r->starts, int, r->starts->len - 1) : 0;
+
+  if (r->starts->len)
+    g_array_set_size(r->starts, r->starts->len - 1);
+  return start;
+}
+
+/* An HTML entity (&amp;, &#169;, &#xA9;), as the text it stands for; the caller frees it. */
+static char *decode_entity(const char *text, gsize size)
+{
+  static const char *const named[][2] = {
+    { "&amp;", "&" },       { "&lt;", "<" },     { "&gt;", ">" },   { "&quot;", "\"" }, { "&apos;", "'" },
+    { "&nbsp;", "\u00a0" }, { "&copy;", "©" },   { "&reg;", "®" },  { "&trade;", "™" }, { "&mdash;", "—" },
+    { "&ndash;", "–" },     { "&hellip;", "…" }, { "&rarr;", "→" }, { "&larr;", "←" },  { "&times;", "×" },
+    { "&middot;", "·" },    { "&bull;", "•" },
+  };
+  char utf8[8];
+
+  if (size > 3 && text[1] == '#') {
+    gboolean hex = text[2] == 'x' || text[2] == 'X';
+    gunichar c = (gunichar)strtoul(text + (hex ? 3 : 2), NULL, hex ? 16 : 10);
+    if (c && g_unichar_validate(c))
+      return g_strndup(utf8, g_unichar_to_utf8(c, utf8));
+  }
+  for (gsize i = 0; i < G_N_ELEMENTS(named); i++)
+    if (strlen(named[i][0]) == size && strncmp(text, named[i][0], size) == 0)
+      return g_strdup(named[i][1]);
+  return g_strndup(text, size);
+}
+
+static void append_entity(Render *r, const char *text, gsize size)
+{
+  char *decoded = decode_entity(text, size);
+
+  append(r, decoded, -1);
+  g_free(decoded);
+}
+
+/* Images ------------------------------------------------------------------------------------- */
+
+/* The local file a link or image points to (relative to the Markdown file), or NULL. */
+static char *local_path(Render *r, const char *target)
+{
+  char *path = NULL, *plain;
+  const char *cut;
+
+  if (g_str_has_prefix(target, "file://"))
+    return g_filename_from_uri(target, NULL, NULL);
+  if (g_uri_peek_scheme(target) || !*target || *target == '#')
+    return NULL;
+  cut = strpbrk(target, "#?");
+  plain = g_uri_unescape_segment(target, cut, NULL);
+  if (plain && *plain)
+    path = g_path_is_absolute(plain) && g_file_test(plain, G_FILE_TEST_EXISTS) ? g_strdup(plain)
+                                                                               : g_build_filename(r->dir, plain, NULL);
+  g_free(plain);
+  return path;
+}
+
+/* The width an image may have in a view this wide. */
+static int image_width(GtkWidget *picture, int max_width)
+{
+  int natural = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(picture), "t-code-width"));
+
+  return max_width > 0 ? MAX(MIN(natural, max_width), 16) : 16;
+}
+
+static void size_picture(GtkWidget *picture, int max_width)
+{
+  GdkPaintable *paintable = gtk_picture_get_paintable(GTK_PICTURE(picture));
+  int w = image_width(picture, max_width);
+  int pw = gdk_paintable_get_intrinsic_width(paintable), ph = gdk_paintable_get_intrinsic_height(paintable);
+
+  gtk_widget_set_size_request(picture, w, pw > 0 ? w * ph / pw : w);
+}
+
+/* The margin left and right of the text in a view this wide: the text is a centered column. */
+static int side_margin(Preview *p, int width)
+{
+  int max_w = (int)(MAX_CONTENT_WIDTH * p->scale);
+
+  return width > max_w + 2 * MARGIN ? (width - max_w) / 2 : MARGIN;
+}
+
+/* The width the text has: images and tables are sized to it. */
+static int content_width(Preview *p)
+{
+  int width = p->width > 0 ? p->width : gtk_widget_get_width(GTK_WIDGET(p->view));
+
+  return width > 0 ? width - 2 * side_margin(p, width) : (int)(MAX_CONTENT_WIDTH * p->scale);
+}
+
+static void size_table(PreviewTable *table, int width);
+
+/* Adjusts left and right margins to center content on wide displays and sizes images and tables. */
+static void update_layout(Preview *p, int width)
+{
+  if (width <= 0)
+    width = gtk_widget_get_width(GTK_WIDGET(p->view));
+  if (width <= 0)
+    return;
+  p->width = width;
+
+  int margin = side_margin(p, width);
+
+  gtk_text_view_set_left_margin(p->view, margin);
+  gtk_text_view_set_right_margin(p->view, margin);
+
+  GtkTextTagTable *table = gtk_text_buffer_get_tag_table(p->buffer);
+  for (int i = 1; i <= MAX_LEVEL; i++) {
+    char name[16];
+    g_snprintf(name, sizeof name, "indent%d", i);
+    GtkTextTag *tag = gtk_text_tag_table_lookup(table, name);
+    if (tag)
+      g_object_set(tag, "left-margin", margin + i * INDENT, NULL);
+
+    g_snprintf(name, sizeof name, "li%d", i);
+    tag = gtk_text_tag_table_lookup(table, name);
+    if (tag)
+      g_object_set(tag, "left-margin", margin + i * INDENT, NULL);
+  }
+
+  int content_w = width - 2 * margin;
+  for (guint i = 0; i < p->pictures->len; i++)
+    size_picture(g_ptr_array_index(p->pictures, i), content_w);
+  for (guint i = 0; i < p->tables->len; i++)
+    size_table(g_ptr_array_index(p->tables, i), content_w);
+}
+
+/* Shows the image at src (width: wanted width in pixels, 0 for its own); FALSE when it is not a
+ * local image that loads. */
+static gboolean append_image(Render *r, const char *src, int width)
+{
+  char *path = local_path(r, src);
+  GdkTexture *texture = path ? gdk_texture_new_from_filename(path, NULL) : NULL;
+
+  g_free(path);
+  if (!texture)
+    return FALSE;
+
+  GtkWidget *picture = gtk_picture_new_for_paintable(GDK_PAINTABLE(texture));
+  GtkTextIter end;
+  GtkTextChildAnchor *anchor;
+
+  g_object_set_data(G_OBJECT(picture), "t-code-width",
+                    GINT_TO_POINTER(width > 0 ? width : gdk_texture_get_width(texture)));
+  gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_CONTAIN);
+  size_picture(picture, content_width(r->p));
+  gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+  anchor = gtk_text_buffer_create_child_anchor(r->p->buffer, &end);
+  gtk_text_view_add_child_at_anchor(r->p->view, picture, anchor);
+  g_ptr_array_add(r->p->pictures, picture);
+  g_object_unref(texture);
+  return TRUE;
+}
+
+/* The view subclass that centers content and adapts on any size allocation */
+#define TCODE_TYPE_PREVIEW_VIEW (tcode_preview_view_get_type())
+G_DECLARE_FINAL_TYPE(TcodePreviewView, tcode_preview_view, TCODE, PREVIEW_VIEW, GtkTextView)
+
+struct _TcodePreviewView {
+  GtkTextView parent;
+  Preview *preview;
+};
+
+G_DEFINE_FINAL_TYPE(TcodePreviewView, tcode_preview_view, GTK_TYPE_TEXT_VIEW)
+
+static void tcode_preview_view_size_allocate(GtkWidget *widget, int width, int height, int baseline)
+{
+  TcodePreviewView *self = TCODE_PREVIEW_VIEW(widget);
+
+  GTK_WIDGET_CLASS(tcode_preview_view_parent_class)->size_allocate(widget, width, height, baseline);
+
+  if (self->preview && width > 0 && width != self->preview->width) {
+    update_layout(self->preview, width);
+  }
+}
+
+static void tcode_preview_view_snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapshot *snapshot)
+{
+  TcodePreviewView *self = TCODE_PREVIEW_VIEW(view);
+
+  if (layer == GTK_TEXT_VIEW_LAYER_BELOW_TEXT && self->preview && self->preview->code_spans) {
+    Preview *p = self->preview;
+    GtkTextBuffer *buffer = p->buffer;
+    GdkRectangle visible;
+    gtk_text_view_get_visible_rect(view, &visible);
+
+    GtkTextIter line_iter;
+    gtk_text_view_get_line_at_y(view, &line_iter, visible.y, NULL);
+    int first_line = gtk_text_iter_get_line(&line_iter);
+    gtk_text_view_get_line_at_y(view, &line_iter, visible.y + visible.height, NULL);
+    int last_line = gtk_text_iter_get_line(&line_iter);
+
+    static const GdkRGBA bg = { 0.235f, 0.235f, 0.235f, 1.0f };   /* #3c3c3c */
+    static const GdkRGBA border = { 0.36f, 0.36f, 0.36f, 0.85f }; /* subtle outline #5c5c5c */
+
+    for (guint i = 0; i < p->code_spans->len; i++) {
+      const CodeSpan *span = &g_array_index(p->code_spans, CodeSpan, i);
+      GtkTextIter start, end;
+      gtk_text_buffer_get_iter_at_offset(buffer, &start, span->start);
+      gtk_text_buffer_get_iter_at_offset(buffer, &end, span->end);
+
+      int s_line = gtk_text_iter_get_line(&start);
+      int e_line = gtk_text_iter_get_line(&end);
+      if (e_line < first_line || s_line > last_line)
+        continue;
+
+      for (int line = MAX(s_line, first_line); line <= MIN(e_line, last_line); line++) {
+        GtkTextIter line_start, line_end;
+        gtk_text_buffer_get_iter_at_line(buffer, &line_start, line);
+        line_end = line_start;
+        if (!gtk_text_iter_ends_line(&line_end))
+          gtk_text_iter_forward_to_line_end(&line_end);
+
+        GtkTextIter seg_start = (line == s_line) ? start : line_start;
+        GtkTextIter seg_end = (line == e_line) ? end : line_end;
+        if (gtk_text_iter_compare(&seg_start, &seg_end) >= 0)
+          continue;
+
+        GdkRectangle r1, r2;
+        gtk_text_view_get_iter_location(view, &seg_start, &r1);
+        gtk_text_view_get_iter_location(view, &seg_end, &r2);
+
+        float pad_l = (line == s_line) ? 1.0f : 0.0f; /* the thin spaces inside it do the rest */
+        float pad_r = (line == e_line) ? 1.0f : 0.0f;
+        float x = (float)r1.x - pad_l;
+        float y = (float)r1.y - 2.0f; /* a little above and below the letters, like VS Code */
+        float w = (float)(r2.x - r1.x) + pad_l + pad_r;
+        float h = (float)r1.height + 4.0f;
+        if (w <= 0.0f || h <= 0.0f)
+          continue;
+
+        graphene_rect_t rect = GRAPHENE_RECT_INIT(x, y, w, h);
+        GskRoundedRect rrect;
+        gsk_rounded_rect_init_from_rect(&rrect, &rect, 4.0f);
+
+        gtk_snapshot_push_rounded_clip(snapshot, &rrect);
+        gtk_snapshot_append_color(snapshot, &bg, &rect);
+        gtk_snapshot_pop(snapshot);
+
+        gtk_snapshot_append_border(snapshot, &rrect, (float[4]){ 1.0f, 1.0f, 1.0f, 1.0f },
+                                   (GdkRGBA[4]){ border, border, border, border });
+      }
+    }
+  }
+
+  if (GTK_TEXT_VIEW_CLASS(tcode_preview_view_parent_class)->snapshot_layer)
+    GTK_TEXT_VIEW_CLASS(tcode_preview_view_parent_class)->snapshot_layer(view, layer, snapshot);
+}
+
+static void tcode_preview_view_class_init(TcodePreviewViewClass *klass)
+{
+  GTK_WIDGET_CLASS(klass)->size_allocate = tcode_preview_view_size_allocate;
+  GTK_TEXT_VIEW_CLASS(klass)->snapshot_layer = tcode_preview_view_snapshot_layer;
+}
+
+static void tcode_preview_view_init(TcodePreviewView *self G_GNUC_UNUSED)
+{
+}
+
+/* HTML --------------------------------------------------------------------------------------- */
+
+/* The value of attribute name in an HTML tag, or NULL. */
+static char *html_attribute(const char *tag, const char *name)
+{
+  char *pattern = g_strdup_printf("\\s%s\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", name);
+  GMatchInfo *match = NULL;
+  char *value = NULL;
+
+  if (g_regex_match_simple(pattern, tag, G_REGEX_CASELESS, 0)) {
+    GRegex *regex = g_regex_new(pattern, G_REGEX_CASELESS, 0, NULL);
+    if (g_regex_match(regex, tag, 0, &match))
+      for (int group = 1; group <= 3 && (!value || !*value); group++) {
+        g_free(value);
+        value = g_match_info_fetch(match, group);
+      }
+    g_match_info_free(match);
+    g_regex_unref(regex);
+  }
+  g_free(pattern);
+  return value;
+}
+
+/* Raw HTML: <img> shows its image, <br> breaks the line, other tags are left out and the text
+ * between them is shown. */
+static void append_html(Render *r, const char *text, gsize size, gboolean block)
+{
+  const char *p = text, *end = text + size;
+
+  while (p < end) {
+    if (*p == '<') {
+      const char *close = memchr(p, '>', end - p);
+      if (!close)
+        break;
+      char *tag = g_strndup(p, close - p + 1);
+      if (g_ascii_strncasecmp(tag, "<img", 4) == 0) {
+        char *src = html_attribute(tag, "src"), *width = html_attribute(tag, "width");
+        if (src && !append_image(r, src, width ? atoi(width) : 0)) {
+          char *alt = html_attribute(tag, "alt");
+          if (alt && *alt) {
+            int start = end_offset(r);
+            append(r, alt, -1);
+            tag_from(r, "dim", NULL, start);
+          }
+          g_free(alt);
+        }
+        g_free(width);
+        g_free(src);
+      } else if (g_ascii_strncasecmp(tag, "<br", 3) == 0) {
+        append(r, "\u2028", -1);
+      }
+      g_free(tag);
+      p = close + 1;
+    } else if (*p == '&') {
+      const char *semi = memchr(p, ';', MIN(end - p, 12));
+      gsize len = semi ? (gsize)(semi - p + 1) : 1;
+      append_entity(r, p, len);
+      p += len;
+    } else {
+      const char *next = p;
+      while (next < end && *next != '<' && *next != '&')
+        next++;
+      if (block) { /* the lines of an HTML block flow like a paragraph's */
+        char *flat = g_strndup(p, next - p);
+        g_strdelimit(flat, "\r\n\t", ' ');
+        append(r, flat, -1);
+        g_free(flat);
+      } else {
+        append(r, p, next - p);
+      }
+      p = next;
+    }
+  }
+}
+
+/* Code blocks -------------------------------------------------------------------------------- */
+
+/* The GtkSourceView language for a code block's info string (```c, ```bash, ...), or NULL. */
+static GtkSourceLanguage *code_language(const char *lang)
+{
+  static const char *const aliases[][2] = {
+    { "c++", "cpp" },  { "cxx", "cpp" },     { "hpp", "cpphdr" },    { "h", "chdr" },        { "bash", "sh" },
+    { "shell", "sh" }, { "zsh", "sh" },      { "console", "sh" },    { "py", "python3" },    { "rs", "rust" },
+    { "yml", "yaml" }, { "md", "markdown" }, { "make", "makefile" }, { "ts", "typescript" },
+  };
+  GtkSourceLanguageManager *languages = gtk_source_language_manager_get_default();
+  GtkSourceLanguage *language;
+  char *id, *name;
+
+  if (!lang || !*lang)
+    return NULL;
+  id = g_ascii_strdown(lang, -1);
+  for (gsize i = 0; i < G_N_ELEMENTS(aliases); i++)
+    if (strcmp(id, aliases[i][0]) == 0)
+      g_set_str(&id, aliases[i][1]);
+  language = gtk_source_language_manager_get_language(languages, id);
+  if (!language) {
+    name = g_strconcat("file.", id, NULL);
+    language = gtk_source_language_manager_guess_language(languages, name, NULL);
+    g_free(name);
+  }
+  g_free(id);
+  return language;
+}
+
+/* The preview's tag with the colors of a style scheme tag, made the first time; NULL when it sets
+ * none of them. */
+static GtkTextTag *color_tag(Preview *p, GtkTextTag *source)
+{
+  gboolean fg_set, weight_set, style_set;
+  GdkRGBA *fg = NULL;
+  int weight = 0, style = 0;
+  char *key, *color;
+  GtkTextTag *tag;
+
+  g_object_get(source, "foreground-set", &fg_set, "weight-set", &weight_set, "style-set", &style_set, NULL);
+  if (!fg_set && !weight_set && !style_set)
+    return NULL;
+  if (fg_set)
+    g_object_get(source, "foreground-rgba", &fg, NULL);
+  if (weight_set)
+    g_object_get(source, "weight", &weight, NULL);
+  if (style_set)
+    g_object_get(source, "style", &style, NULL);
+  color = fg ? gdk_rgba_to_string(fg) : g_strdup("");
+  key = g_strdup_printf("%s|%d|%d", color, weight, style);
+  tag = g_hash_table_lookup(p->colors, key);
+  if (!tag) {
+    tag = gtk_text_buffer_create_tag(p->buffer, NULL, NULL);
+    if (fg)
+      g_object_set(tag, "foreground-rgba", fg, NULL);
+    if (weight_set)
+      g_object_set(tag, "weight", weight, NULL);
+    if (style_set)
+      g_object_set(tag, "style", style, NULL);
+    g_hash_table_insert(p->colors, g_steal_pointer(&key), tag);
+  }
+  g_free(key);
+  g_free(color);
+  if (fg)
+    gdk_rgba_free(fg);
+  return tag;
+}
+
+/* A code block's text, colored like the editor colors it: GtkSourceView highlights it in a buffer
+ * of its own, and its colors are copied over. */
+static void append_code(Render *r, const char *text, const char *lang)
+{
+  GtkSourceLanguage *language = code_language(lang);
+  GtkSourceBuffer *source;
+  GtkTextIter at, end;
+
+  if (!language) {
+    append(r, text, -1);
+    return;
+  }
+  source = gtk_source_buffer_new_with_language(language);
+  gtk_source_buffer_set_style_scheme(source, editor_style_scheme(r->p->tab->app));
+  gtk_text_buffer_set_text(GTK_TEXT_BUFFER(source), text, -1);
+  gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(source), &at, &end);
+  gtk_source_buffer_ensure_highlight(source, &at, &end);
+  while (!gtk_text_iter_equal(&at, &end)) {
+    GtkTextIter next = at;
+    gtk_text_iter_forward_to_tag_toggle(&next, NULL);
+    char *piece = gtk_text_iter_get_slice(&at, &next);
+    GSList *tags = gtk_text_iter_get_tags(&at);
+    int start = end_offset(r);
+    append(r, piece, -1);
+    for (GSList *each = tags; each; each = each->next) {
+      GtkTextTag *tag = color_tag(r->p, each->data);
+      if (tag)
+        tag_from(r, NULL, tag, start);
+    }
+    g_slist_free(tags);
+    g_free(piece);
+    at = next;
+  }
+  g_object_unref(source);
+}
+
+/* Tables ------------------------------------------------------------------------------------- */
+
+static void follow(Preview *p, const char *url);
+
+static void table_free(gpointer data)
+{
+  PreviewTable *table = data;
+
+  g_array_free(table->natural, TRUE);
+  g_free(table);
+}
+
+/* Shares width between the columns like a browser: when they all fit, each gets its widest cell;
+ * else the columns narrower than an even share keep theirs and the others split the rest, their
+ * cells wrapping. */
+static void size_table(PreviewTable *table, int width)
+{
+  guint n = table->natural->len;
+  int *widths = g_new0(int, n), remaining = MAX(width, 1), left = (int)n;
+  gboolean *done = g_new0(gboolean, n);
+
+  while (left > 0) {
+    int share = remaining / left;
+    gboolean fixed = FALSE;
+    for (guint c = 0; c < n; c++)
+      if (!done[c] && g_array_index(table->natural, int, c) <= share) {
+        widths[c] = g_array_index(table->natural, int, c);
+        remaining -= widths[c];
+        done[c] = TRUE;
+        left--;
+        fixed = TRUE;
+      }
+    if (!fixed) {
+      for (guint c = 0; c < n; c++)
+        if (!done[c])
+          widths[c] = share;
+      break;
+    }
+  }
+  for (GtkWidget *cell = gtk_widget_get_first_child(table->grid); cell; cell = gtk_widget_get_next_sibling(cell)) {
+    int column;
+    gtk_grid_query_child(GTK_GRID(table->grid), cell, &column, NULL, NULL, NULL);
+    gtk_widget_set_size_request(cell, MAX(widths[column], 1), -1); /* its CSS padding included */
+  }
+  g_free(done);
+  g_free(widths);
+}
+
+/* A link in a table cell: followed like the others. */
+static gboolean on_cell_link(GtkLabel *label G_GNUC_UNUSED, const char *uri, Preview *p)
+{
+  char *url = g_strdup(uri); /* following it may show the file again, and free the label */
+
+  follow(p, url);
+  g_free(url);
+  return TRUE;
+}
+
+static gboolean link_to_span(const GMatchInfo *match, GString *result, gpointer data G_GNUC_UNUSED)
+{
+  char *tag = g_match_info_fetch(match, 0);
+
+  g_string_append(result, tag[1] == '/' ? "</span>" : "<span>");
+  g_free(tag);
+  return FALSE;
+}
+
+/* A table cell ended: its markup becomes a wrapping label in the grid. */
+static void add_cell(Render *r, gboolean head)
+{
+  static const float xalign[] = { 0.0f, 0.0f, 0.5f, 1.0f }; /* MD_ALIGN_DEFAULT .. RIGHT */
+  GtkWidget *label = gtk_label_new(NULL);
+  GArray *natural = r->table->natural;
+  char size[G_ASCII_DTOSTR_BUF_SIZE];
+  char *markup = g_strdup_printf("<span size=\"%spt\" insert_hyphens=\"false\">%s%s%s</span>",
+                                 g_ascii_dtostr(size, sizeof size, BODY_POINTS * r->p->scale), head ? "<b>" : "",
+                                 r->markup->str, head ? "</b>" : "");
+  PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(r->p->view), NULL); /* in the window's font */
+  int width = 0;
+
+  static GRegex *links;
+  if (!links) /* <a> is GtkLabel's, not Pango's: measured as a <span> */
+    links = g_regex_new("<a href=\"[^\"]*\">|</a>", G_REGEX_OPTIMIZE, 0, NULL);
+  char *measured = g_regex_replace_eval(links, markup, -1, 0, 0, link_to_span, NULL, NULL);
+  pango_layout_set_markup(layout, measured, -1);
+  g_free(measured);
+  pango_layout_get_pixel_size(layout, &width, NULL); /* on one line */
+  g_object_unref(layout);
+  gtk_label_set_markup(GTK_LABEL(label), markup);
+  gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+  gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+  gtk_label_set_max_width_chars(GTK_LABEL(label), 1); /* its width is the one size_table() gives it */
+  gtk_label_set_xalign(GTK_LABEL(label), xalign[r->align]);
+  gtk_label_set_yalign(GTK_LABEL(label), 0.0f);
+  gtk_widget_add_css_class(label, head ? "head" : r->row % 2 ? "odd" : "even");
+  g_signal_connect(label, "activate-link", G_CALLBACK(on_cell_link), r->p);
+  if ((guint)r->cell >= natural->len)
+    g_array_set_size(natural, r->cell + 1);
+  g_array_index(natural, int, r->cell) = MAX(g_array_index(natural, int, r->cell), width + 2 * CELL_PAD + 2);
+  gtk_grid_attach(GTK_GRID(r->table->grid), label, r->cell, r->row, 1, 1);
+  g_free(markup);
+  g_string_free(g_steal_pointer(&r->markup), TRUE);
+}
+
+/* Text in a table cell, as markup. */
+static void cell_text(Render *r, MD_TEXTTYPE type, const char *text, gsize size)
+{
+  char *plain = NULL, *escaped;
+
+  switch (type) {
+    case MD_TEXT_NULLCHAR: g_string_append(r->markup, "\uFFFD"); return;
+    case MD_TEXT_BR: g_string_append_c(r->markup, '\n'); return;
+    case MD_TEXT_SOFTBR: g_string_append_c(r->markup, ' '); return;
+    case MD_TEXT_HTML: /* tags are left out, but <br> */
+      if (g_ascii_strncasecmp(text, "<br", MIN(size, 3)) == 0 && size >= 3)
+        g_string_append_c(r->markup, '\n');
+      return;
+    case MD_TEXT_ENTITY: plain = decode_entity(text, size); break;
+    default: plain = g_strndup(text, size); break;
+  }
+  escaped = g_markup_escape_text(plain, -1);
+  g_string_append(r->markup, escaped);
+  g_free(escaped);
+  g_free(plain);
+}
+
+/* A span opens in a table cell: its markup, and what closes it. */
+static void cell_span(Render *r, MD_SPANTYPE type, void *detail)
+{
+  const char *open = "", *close = "";
+  char *link = NULL;
+
+  switch (type) {
+    case MD_SPAN_EM: open = "<i>", close = "</i>"; break;
+    case MD_SPAN_STRONG: open = "<b>", close = "</b>"; break;
+    case MD_SPAN_DEL: open = "<s>", close = "</s>"; break;
+    case MD_SPAN_U: open = "<u>", close = "</u>"; break;
+    case MD_SPAN_CODE:
+    case MD_SPAN_LATEXMATH:
+    case MD_SPAN_LATEXMATH_DISPLAY:
+      open = "<span font_family=\"monospace\" background=\"#3c3c3c\" foreground=\"#ffffff\">";
+      close = "</span>";
+      break;
+    case MD_SPAN_A: {
+      MD_SPAN_A_DETAIL *a = detail;
+      char *href = g_strndup(a->href.text, a->href.size);
+      link = g_markup_printf_escaped("<a href=\"%s\">", href);
+      g_free(href);
+      open = link, close = "</a>";
+      break;
+    }
+    case MD_SPAN_IMG: open = "<span foreground=\"#9d9d9d\">", close = "</span>"; break; /* its alt text */
+    default: break;
+  }
+  g_string_append(r->markup, open);
+  g_ptr_array_add(r->closers, (gpointer)close);
+  g_free(link);
+}
+
+/* Headings ----------------------------------------------------------------------------------- */
+
+/* A heading's anchor as GitHub makes it: lower case, spaces to '-', punctuation left out; the
+ * second "Usage" is "usage-1". */
+static void add_anchor(Render *r, int start)
+{
+  GtkTextIter from, end;
+  GString *slug = g_string_new(NULL);
+  char *text;
+
+  gtk_text_buffer_get_iter_at_offset(r->p->buffer, &from, start);
+  gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+  text = gtk_text_iter_get_text(&from, &end);
+  for (const char *c = text; *c; c = g_utf8_next_char(c)) {
+    gunichar ch = g_utf8_get_char(c);
+    if (ch == ' ')
+      g_string_append_c(slug, '-');
+    else if (g_unichar_isalnum(ch) || ch == '-' || ch == '_')
+      g_string_append_unichar(slug, g_unichar_tolower(ch));
+  }
+  g_free(text);
+  char *key = g_strdup(slug->str);
+  for (int n = 1; g_hash_table_contains(r->p->anchors, key); n++) {
+    g_free(key);
+    key = g_strdup_printf("%s-%d", slug->str, n);
+  }
+  g_hash_table_insert(r->p->anchors, key, GINT_TO_POINTER(start));
+  g_string_free(slug, TRUE);
+}
+
+/* md4c's callbacks --------------------------------------------------------------------------- */
+
+static int enter_block(MD_BLOCKTYPE type, void *detail, void *data)
+{
+  Render *r = data;
+
+  switch (type) {
+    case MD_BLOCK_UL:
+    case MD_BLOCK_OL:
+      if (r->nlists < MAX_LEVEL) {
+        r->lists[r->nlists] = type == MD_BLOCK_OL ? (int)((MD_BLOCK_OL_DETAIL *)detail)->start : 0;
+        r->tight[r->nlists] =
+            type == MD_BLOCK_OL ? ((MD_BLOCK_OL_DETAIL *)detail)->is_tight : ((MD_BLOCK_UL_DETAIL *)detail)->is_tight;
+      }
+      r->nlists++;
+      r->level++;
+      break;
+    case MD_BLOCK_LI: {
+      static const char *const bullets[] = { "•   ", "◦   ", "▪   " };
+      MD_BLOCK_LI_DETAIL *li = detail;
+      int list = MIN(r->nlists, MAX_LEVEL) - 1;
+      begin_block(r);
+      push_start(r);
+      r->in_item_start = TRUE;
+      r->in_item_p = FALSE;
+      if (li->is_task) {
+        append(r, li->task_mark == ' ' ? "☐   " : "☑   ", -1);
+      } else if (list >= 0 && r->lists[list] > 0) {
+        char *number = g_strdup_printf("%d.  ", r->lists[list]++);
+        append(r, number, -1);
+        g_free(number);
+      } else {
+        append(r, bullets[MAX(list, 0) % 3], -1);
+      }
+      break;
+    }
+    case MD_BLOCK_QUOTE:
+      begin_block(r);
+      push_start(r);
+      r->level++;
+      break;
+    case MD_BLOCK_CODE: {
+      MD_BLOCK_CODE_DETAIL *code = detail;
+      begin_block(r);
+      push_start(r);
+      r->code = g_string_new(NULL);
+      r->lang = g_strndup(code->lang.text, code->lang.size);
+      break;
+    }
+    case MD_BLOCK_HR:
+      begin_block(r);
+      append(r, "\n", 1);
+      tag_last_line(r, "spacer");
+      push_start(r);
+      append(r, " \n", 2); /* an empty line paints no background */
+      tag_from(r, "hr", NULL, pop_start(r));
+      append(r, "\n", 1);
+      tag_last_line(r, "spacer");
+      break;
+    case MD_BLOCK_TABLE:
+      begin_block(r);
+      r->table = g_new0(PreviewTable, 1);
+      r->table->natural = g_array_new(FALSE, TRUE, sizeof(int));
+      r->table->grid = gtk_grid_new();
+      gtk_widget_add_css_class(r->table->grid, "tcode-preview-table");
+      r->row = -1;
+      break;
+    case MD_BLOCK_TR:
+      r->row++;
+      r->cell = 0;
+      break;
+    case MD_BLOCK_TH:
+    case MD_BLOCK_TD:
+      if (r->table) {
+        r->markup = g_string_new(NULL);
+        r->align = ((MD_BLOCK_TD_DETAIL *)detail)->align;
+      }
+      break;
+    case MD_BLOCK_HTML:
+      r->html_block = TRUE;
+      begin_block(r);
+      push_start(r);
+      break;
+    case MD_BLOCK_H:
+      begin_block(r);
+      push_start(r);
+      break;
+    case MD_BLOCK_P:
+      if (r->in_item_start) {
+        r->in_item_start = FALSE;
+        r->in_item_p = TRUE;
+      } else {
+        begin_block(r);
+      }
+      push_start(r);
+      break;
+    default: /* the document, a table's head and body */ break;
+  }
+  return 0;
+}
+
+static int leave_block(MD_BLOCKTYPE type, void *detail, void *data)
+{
+  Render *r = data;
+
+  switch (type) {
+    case MD_BLOCK_UL:
+    case MD_BLOCK_OL:
+      r->nlists--;
+      r->level--;
+      if (r->nlists == 0) /* a list inside an item keeps the item's spacing */
+        tag_last_line(r, "gap");
+      break;
+    case MD_BLOCK_LI: {
+      int start = pop_start(r);
+      GtkTextIter end;
+      gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+      if (gtk_text_iter_backward_char(&end) && gtk_text_iter_get_char(&end) != '\n')
+        append(r, "\n", 1);
+
+      GtkTextIter from, to;
+      gtk_text_buffer_get_iter_at_offset(r->p->buffer, &from, start);
+      to = from;
+      gtk_text_iter_forward_to_line_end(&to);
+      if (!gtk_text_iter_is_end(&to))
+        gtk_text_iter_forward_char(&to);
+
+      char name[16];
+      g_snprintf(name, sizeof name, "li%d", MIN(MAX(r->nlists, 1), MAX_LEVEL));
+      gtk_text_buffer_apply_tag_by_name(r->p->buffer, name, &from, &to);
+
+      gboolean tight = r->nlists > 0 && r->tight[MIN(r->nlists, MAX_LEVEL) - 1];
+      tag_last_line(r, tight ? "tight" : "gap");
+      r->in_item_start = FALSE;
+      r->in_item_p = FALSE;
+      break;
+    }
+    case MD_BLOCK_QUOTE:
+      begin_block(r);
+      tag_from(r, "quote", NULL, pop_start(r));
+      r->level--;
+      tag_last_line(r, "gap");
+      break;
+    case MD_BLOCK_CODE: {
+      int start = pop_start(r);
+      if (r->code->len && r->code->str[r->code->len - 1] == '\n')
+        g_string_truncate(r->code, r->code->len - 1);
+      append_code(r, r->code->str, r->lang);
+      g_string_free(r->code, TRUE);
+      g_clear_pointer(&r->lang, g_free);
+      r->code = NULL;
+      end_paragraph(r, start, "pre-bottom");
+      tag_from(r, "pre", NULL, start);
+      GtkTextIter from, first_end;
+      gtk_text_buffer_get_iter_at_offset(r->p->buffer, &from, start);
+      first_end = from;
+      gtk_text_iter_forward_line(&first_end);
+      gtk_text_buffer_apply_tag_by_name(r->p->buffer, "pre-top", &from, &first_end);
+      append(r, "\n", 1);
+      tag_last_line(r, "spacer");
+      break;
+    }
+    case MD_BLOCK_H: {
+      int start = pop_start(r);
+      char name[4];
+      add_anchor(r, start);
+      end_paragraph(r, start, NULL);
+      g_snprintf(name, sizeof name, "h%u", MIN(((MD_BLOCK_H_DETAIL *)detail)->level, 6u));
+      tag_from(r, name, NULL, start);
+      break;
+    }
+    case MD_BLOCK_P: {
+      int start = pop_start(r);
+      if (r->in_item_p) {
+        r->in_item_p = FALSE;
+        append(r, "\n", 1);
+      } else if (r->nlists > 0) {
+        gboolean in_tight = r->tight[MIN(r->nlists, MAX_LEVEL) - 1];
+        end_paragraph(r, start, in_tight ? "tight" : "gap");
+      } else {
+        end_paragraph(r, start, "gap");
+      }
+      break;
+    }
+    case MD_BLOCK_HTML: {
+      int start = pop_start(r);
+      r->html_block = FALSE;
+      if (end_offset(r) > start) /* not only tags */
+        end_paragraph(r, start, "gap");
+      break;
+    }
+    case MD_BLOCK_TH:
+    case MD_BLOCK_TD:
+      if (r->markup) {
+        add_cell(r, type == MD_BLOCK_TH);
+        r->cell++;
+      }
+      break;
+    case MD_BLOCK_TABLE: {
+      GtkTextIter end;
+      gtk_text_buffer_get_end_iter(r->p->buffer, &end);
+      gtk_text_view_add_child_at_anchor(r->p->view, r->table->grid,
+                                        gtk_text_buffer_create_child_anchor(r->p->buffer, &end));
+      g_ptr_array_add(r->p->tables, r->table);
+      size_table(g_steal_pointer(&r->table), content_width(r->p));
+      append(r, "\n", 1);
+      tag_last_line(r, "gap");
+      break;
+    }
+    default: break;
+  }
+  return 0;
+}
+
+static int enter_span(MD_SPANTYPE type, void *detail, void *data)
+{
+  Render *r = data;
+
+  if (r->markup) {
+    cell_span(r, type, detail);
+    return 0;
+  }
+  push_start(r);
+  if (type == MD_SPAN_CODE)
+    append(r, "\u2009", -1); /* a thin space: the pill's edge, inside it, so the text keeps its spaces */
+  if (type == MD_SPAN_A) {
+    MD_SPAN_A_DETAIL *a = detail;
+    g_ptr_array_add(r->hrefs, g_strndup(a->href.text, a->href.size));
+  } else if (type == MD_SPAN_IMG) {
+    MD_SPAN_IMG_DETAIL *img = detail;
+    char *src = g_strndup(img->src.text, img->src.size);
+    gboolean shown = !r->hidden && append_image(r, src, 0);
+    g_array_append_val(r->images, shown);
+    r->hidden += shown;
+    g_free(src);
+  }
+  return 0;
+}
+
+static int leave_span(MD_SPANTYPE type, void *detail G_GNUC_UNUSED, void *data)
+{
+  Render *r = data;
+
+  if (r->markup) {
+    if (r->closers->len)
+      g_string_append(r->markup, g_ptr_array_steal_index(r->closers, r->closers->len - 1));
+    return 0;
+  }
+  int start = pop_start(r);
+
+  switch (type) {
+    case MD_SPAN_EM: tag_from(r, "italic", NULL, start); break;
+    case MD_SPAN_STRONG: tag_from(r, "bold", NULL, start); break;
+    case MD_SPAN_DEL: tag_from(r, "strike", NULL, start); break;
+    case MD_SPAN_U: tag_from(r, "underline", NULL, start); break;
+    case MD_SPAN_CODE:
+    case MD_SPAN_LATEXMATH:
+    case MD_SPAN_LATEXMATH_DISPLAY: {
+      if (type == MD_SPAN_CODE)
+        append(r, "\u2009", -1);
+      int end = end_offset(r);
+      if (end > start) {
+        CodeSpan span = { start, end };
+        g_array_append_val(r->p->code_spans, span);
+      }
+      tag_from(r, "code", NULL, start);
+      break;
+    }
+    case MD_SPAN_A: {
+      char *url = r->hrefs->len ? g_ptr_array_steal_index(r->hrefs, r->hrefs->len - 1) : NULL;
+      int end = end_offset(r);
+      if (url && end > start) {
+        Link link = { start, end, url };
+        g_array_append_val(r->p->links, link);
+        tag_from(r, "link", NULL, start);
+      } else {
+        g_free(url);
+      }
+      break;
+    }
+    case MD_SPAN_IMG: {
+      gboolean shown = r->images->len && g_array_index(r->images, gboolean, r->images->len - 1);
+      if (r->images->len)
+        g_array_set_size(r->images, r->images->len - 1);
+      r->hidden -= shown;
+      if (!shown)
+        tag_from(r, "dim", NULL, start); /* its alt text */
+      break;
+    }
+    default: break;
+  }
+  return 0;
+}
+
+static int on_text(MD_TEXTTYPE type, const MD_CHAR *text, MD_SIZE size, void *data)
+{
+  Render *r = data;
+
+  if (r->in_item_start)
+    r->in_item_start = FALSE;
+
+  if (r->code) {
+    g_string_append_len(r->code, text, size);
+    return 0;
+  }
+  if (r->markup) {
+    cell_text(r, type, text, size);
+    return 0;
+  }
+  if (r->hidden)
+    return 0;
+  switch (type) {
+    case MD_TEXT_NULLCHAR: append(r, "\uFFFD", -1); break;
+    case MD_TEXT_BR: append(r, "\u2028", -1); break; /* a line break inside the paragraph */
+    case MD_TEXT_SOFTBR: append(r, " ", 1); break;
+    case MD_TEXT_ENTITY: append_entity(r, text, size); break;
+    case MD_TEXT_HTML: append_html(r, text, size, r->html_block); break;
+    default: append(r, text, size); break;
+  }
+  return 0;
+}
+
+/* Rendering ---------------------------------------------------------------------------------- */
+
+static void clear_links(Preview *p)
+{
+  for (guint i = 0; i < p->links->len; i++)
+    g_free(g_array_index(p->links, Link, i).url);
+  g_array_set_size(p->links, 0);
+}
+
+/* Shows the file again from the top line it showed before. */
+static void reload(Preview *p)
+{
+  GtkTextTagTable *table = gtk_text_buffer_get_tag_table(p->buffer);
+  MD_PARSER parser = { 0, MD_DIALECT_GITHUB, enter_block, leave_block, enter_span, leave_span, on_text, NULL, NULL };
+  Render r = { .p = p };
+  GdkRectangle visible;
+  GtkTextIter iter, end;
+  int top_line = -1;
   char *text = NULL;
   gsize len = 0;
   GError *error = NULL;
 
-  if (!g_file_get_contents(path, &text, &len, &error)) {
-    char *message = g_markup_escape_text(error->message, -1);
-    char *html = g_strdup_printf("<p class=\"error\">%s</p>", message);
-    g_free(message);
-    g_error_free(error);
-    return html;
+  if (gtk_text_buffer_get_char_count(p->buffer) > 0) {
+    gtk_text_view_get_visible_rect(p->view, &visible);
+    gtk_text_view_get_line_at_y(p->view, &iter, visible.y, NULL);
+    top_line = gtk_text_iter_get_line(&iter);
   }
-  GString *out = g_string_new(NULL);
-  md_html(text, (MD_SIZE)len, append_html, out, MD_DIALECT_GITHUB, 0);
-  g_free(text);
-  return g_string_free(out, FALSE);
-}
+  g_ptr_array_set_size(p->tables, 0);
+  g_ptr_array_set_size(p->pictures, 0);
+  g_array_set_size(p->code_spans, 0);
+  clear_links(p);
+  g_hash_table_remove_all(p->anchors);
+  gtk_text_buffer_set_text(p->buffer, "", 0);
+  g_object_set(gtk_text_tag_table_lookup(table, "base"), "size-points", BODY_POINTS * p->scale, NULL);
 
-/* s as a JavaScript string literal, for the content swap in reload(). */
-static char *js_string(const char *s)
-{
-  GString *out = g_string_new("\"");
-
-  for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
-    switch (*p) {
-      case '\\': g_string_append(out, "\\\\"); break;
-      case '"': g_string_append(out, "\\\""); break;
-      case '\n': g_string_append(out, "\\n"); break;
-      case '\r': g_string_append(out, "\\r"); break;
-      case '\t': g_string_append(out, "\\t"); break;
-      default:
-        if (*p < 0x20)
-          g_string_append_printf(out, "\\u%04x", *p);
-        else
-          g_string_append_c(out, *p);
-    }
-  }
-  g_string_append_c(out, '"');
-  return g_string_free(out, FALSE);
-}
-
-/* Shows the file: the first time as a whole page; later only the content is swapped, so the scroll
- * position stays. */
-static void reload(Preview *p)
-{
-  char *body = render_body(p->tab->path);
-
-  if (p->loaded) {
-    /* Swap the content in place, so the scroll position stays. */
-    char *literal = js_string(body);
-    char *script = g_strdup_printf("document.getElementById('content').innerHTML = %s;", literal);
-    webkit_web_view_evaluate_javascript(p->view, script, -1, NULL, NULL, NULL, NULL, NULL);
-    g_free(script);
-    g_free(literal);
+  r.dir = g_path_get_dirname(p->tab->path);
+  r.starts = g_array_new(FALSE, FALSE, sizeof(int));
+  r.images = g_array_new(FALSE, FALSE, sizeof(gboolean));
+  r.hrefs = g_ptr_array_new_with_free_func(g_free);
+  r.closers = g_ptr_array_new();
+  if (g_file_get_contents(p->tab->path, &text, &len, &error)) {
+    md_parse(text, (MD_SIZE)len, &parser, &r);
   } else {
-    char *base = g_filename_to_uri(p->tab->path, NULL, NULL);
-    char *page = g_strdup_printf("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>%s</style>"
-                                 "</head><body><div id=\"content\">%s</div></body></html>",
-                                 css, body);
-    webkit_web_view_load_html(p->view, page, base);
-    g_free(page);
-    g_free(base);
+    append(&r, error->message, -1);
+    tag_from(&r, "error", NULL, 0);
+    g_error_free(error);
   }
-  g_free(body);
+  if (r.code)
+    g_string_free(r.code, TRUE);
+  g_free(r.lang);
+  g_free(text);
+  g_free(r.dir);
+  g_array_free(r.starts, TRUE);
+  g_array_free(r.images, TRUE);
+  g_ptr_array_free(r.hrefs, TRUE);
+  g_ptr_array_free(r.closers, TRUE);
+  if (r.markup) /* md4c stopped inside a table */
+    g_string_free(r.markup, TRUE);
+  if (r.table) {
+    g_object_ref_sink(r.table->grid);
+    g_object_unref(r.table->grid);
+    table_free(r.table);
+  }
+
+  gtk_text_buffer_get_bounds(p->buffer, &iter, &end);
+  gtk_text_buffer_apply_tag_by_name(p->buffer, "base", &iter, &end);
+  gtk_text_buffer_place_cursor(p->buffer, &iter);
+  if (p->width <= 0)
+    p->width = gtk_widget_get_width(GTK_WIDGET(p->view));
+  if (p->width > 0)
+    update_layout(p, p->width);
+  if (top_line > 0) {
+    gtk_text_buffer_get_iter_at_line(p->buffer, &iter, top_line);
+    GtkTextMark *mark = gtk_text_buffer_get_mark(p->buffer, "t-code-top");
+    if (mark)
+      gtk_text_buffer_move_mark(p->buffer, mark, &iter);
+    else
+      mark = gtk_text_buffer_create_mark(p->buffer, "t-code-top", &iter, TRUE);
+    gtk_text_view_scroll_to_mark(p->view, mark, 0, TRUE, 0, 0);
+  }
 }
 
 /* on_file_changed()'s timeout. */
@@ -154,52 +1276,76 @@ static void on_file_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file G_G
   p->reload_id = g_timeout_add(150, reload_now, p);
 }
 
-/* The first page has loaded: from now on reload() swaps the content in place. */
-static void on_load_changed(WebKitWebView *view G_GNUC_UNUSED, WebKitLoadEvent event, Preview *p)
+/* Links -------------------------------------------------------------------------------------- */
+
+/* The link at a point of the view, or NULL. */
+static const Link *link_at(Preview *p, double x, double y)
 {
-  if (event == WEBKIT_LOAD_FINISHED)
-    p->loaded = TRUE;
+  GtkTextIter iter;
+  int bx, by;
+
+  gtk_text_view_window_to_buffer_coords(p->view, GTK_TEXT_WINDOW_WIDGET, (int)x, (int)y, &bx, &by);
+  if (!gtk_text_view_get_iter_at_location(p->view, &iter, bx, by) ||
+      !gtk_text_iter_has_tag(&iter, gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(p->buffer), "link")))
+    return NULL;
+  int offset = gtk_text_iter_get_offset(&iter);
+  for (guint i = 0; i < p->links->len; i++) {
+    const Link *link = &g_array_index(p->links, Link, i);
+    if (offset >= link->start && offset < link->end)
+      return link;
+  }
+  return NULL;
 }
 
-/* Links: anchors scroll inside the page, markdown files open as previews, other local files in
- * an editor, and everything else in the default app (the browser, for web links). */
-static gboolean on_decide_policy(WebKitWebView *view G_GNUC_UNUSED, WebKitPolicyDecision *decision,
-                                 WebKitPolicyDecisionType type, Preview *p)
+/* Anchors scroll to their heading, Markdown files open as previews, other local files in an
+ * editor, and everything else in the default app (the browser, for web links). */
+static void follow(Preview *p, const char *url)
 {
-  if (type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION && type != WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION)
-    return FALSE;
+  Render where = { .p = p, .dir = g_path_get_dirname(p->tab->path) };
+  char *path = local_path(&where, url);
 
-  WebKitNavigationAction *action =
-      webkit_navigation_policy_decision_get_navigation_action(WEBKIT_NAVIGATION_POLICY_DECISION(decision));
-  if (webkit_navigation_action_get_navigation_type(action) != WEBKIT_NAVIGATION_TYPE_LINK_CLICKED)
-    return FALSE;
-
-  const char *uri = webkit_uri_request_get_uri(webkit_navigation_action_get_request(action));
-  char *base = g_filename_to_uri(p->tab->path, NULL, NULL);
-  const char *hash = strchr(uri, '#');
-  char *target = hash ? g_strndup(uri, hash - uri) : g_strdup(uri);
-
-  if (g_strcmp0(target, base) == 0 && type == WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) {
-    g_free(target);
-    g_free(base);
-    return FALSE; /* an anchor in this document */
-  }
-  webkit_policy_decision_ignore(decision);
-
-  char *path = g_str_has_prefix(target, "file://") ? g_filename_from_uri(target, NULL, NULL) : NULL;
-  if (path && is_markdown(path) && g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
+  if (url[0] == '#') {
+    char *slug = g_uri_unescape_string(url + 1, NULL);
+    gpointer offset;
+    if (slug && g_hash_table_lookup_extended(p->anchors, slug, NULL, &offset)) {
+      GtkTextIter iter;
+      gtk_text_buffer_get_iter_at_offset(p->buffer, &iter, GPOINTER_TO_INT(offset));
+      gtk_text_view_scroll_to_iter(p->view, &iter, 0, TRUE, 0, 0);
+    }
+    g_free(slug);
+  } else if (path && is_markdown(path) && g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
     open_preview(p->tab->app, path);
   } else if (path && g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
     open_file(p->tab->app, path);
-  } else {
-    GtkUriLauncher *launcher = gtk_uri_launcher_new(uri);
+  } else if (!path) {
+    GtkUriLauncher *launcher = gtk_uri_launcher_new(url);
     gtk_uri_launcher_launch(launcher, p->tab->app->window, NULL, NULL, NULL);
     g_object_unref(launcher);
   }
   g_free(path);
-  g_free(target);
-  g_free(base);
-  return TRUE;
+  g_free(where.dir);
+}
+
+static void on_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press, double x, double y, Preview *p)
+{
+  const Link *link = n_press == 1 && !gtk_text_buffer_get_has_selection(p->buffer) ? link_at(p, x, y) : NULL;
+
+  if (link) {
+    char *url = g_strdup(link->url); /* following it may show the file again */
+    follow(p, url);
+    g_free(url);
+  }
+}
+
+/* The hand over links. */
+static void on_motion(GtkEventControllerMotion *motion G_GNUC_UNUSED, double x, double y, Preview *p)
+{
+  gboolean over = link_at(p, x, y) != NULL;
+
+  if (over != p->over_link) {
+    p->over_link = over;
+    gtk_widget_set_cursor_from_name(GTK_WIDGET(p->view), over ? "pointer" : "text");
+  }
 }
 
 /* Tabs --------------------------------------------------------------------------------------- */
@@ -212,61 +1358,83 @@ void preview_free(Preview *p)
     g_file_monitor_cancel(p->monitor);
     g_object_unref(p->monitor);
   }
+  clear_links(p);
+  g_array_free(p->links, TRUE);
+  g_array_free(p->code_spans, TRUE);
+  g_hash_table_destroy(p->anchors);
+  g_hash_table_destroy(p->colors);
+  g_ptr_array_free(p->tables, TRUE);
+  g_ptr_array_free(p->pictures, TRUE);
   g_free(p);
 }
 
-/* WebKit's 100% looks small next to the 11pt terminals, so previews start zoomed in. */
-#define PREVIEW_ZOOM 1.25
-
 void preview_set_zoom(Tab *tab, double scale)
 {
-  if (tab->preview)
-    webkit_web_view_set_zoom_level(tab->preview->view, scale * PREVIEW_ZOOM);
-}
-
-/* One network session for all previews, held only by their web views: WebKit's network process
- * (~60 MB) quits when the last preview closes. The default session kept it until t-code quit. */
-static WebKitNetworkSession *preview_session(void)
-{
-  static WebKitNetworkSession *session;
-
-  if (session)
-    return g_object_ref(session);
-  session = webkit_network_session_new_ephemeral();
-  g_object_add_weak_pointer(G_OBJECT(session), (gpointer *)&session);
-  return session;
+  if (tab->preview) {
+    tab->preview->scale = scale;
+    reload(tab->preview); /* the tables' tab stops are measured at the text size */
+  }
 }
 
 void open_preview(App *t, const char *path)
 {
-  int n = tab_count(t);
+  static gboolean styled;
+  Tab *open = find_tab(t, TAB_PREVIEW, path);
 
-  for (int i = 0; i < n; i++) {
-    Tab *tab = tab_nth(t, i);
-    if (tab->kind == TAB_PREVIEW && g_strcmp0(tab->path, path) == 0) {
-      select_tab(tab);
-      return;
-    }
+  if (open) {
+    select_tab(open);
+    return;
+  }
+  if (!styled) {
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(provider, css);
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+    styled = TRUE;
   }
 
   Preview *p = g_new0(Preview, 1);
-  GdkRGBA background;
+  GtkWidget *scrolled = gtk_scrolled_window_new();
+  GtkGesture *click = gtk_gesture_click_new();
+  GtkEventController *motion = gtk_event_controller_motion_new();
   GFile *file = g_file_new_for_path(path);
-  WebKitNetworkSession *session = preview_session();
 
-  p->view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "network-session", session, NULL));
-  g_object_unref(session);
-  gdk_rgba_parse(&background, "#1f1f1f");
-  webkit_web_view_set_background_color(p->view, &background);
-  /* Scripts inside the markdown never run; only the content swap above does. */
-  webkit_settings_set_enable_javascript_markup(webkit_web_view_get_settings(p->view), FALSE);
-  webkit_web_view_set_zoom_level(p->view, t->font_scale * PREVIEW_ZOOM);
-  gtk_widget_set_hexpand(GTK_WIDGET(p->view), TRUE);
-  gtk_widget_set_vexpand(GTK_WIDGET(p->view), TRUE);
-  g_signal_connect(p->view, "load-changed", G_CALLBACK(on_load_changed), p);
-  g_signal_connect(p->view, "decide-policy", G_CALLBACK(on_decide_policy), p);
+  p->scale = t->font_scale;
+  p->links = g_array_new(FALSE, FALSE, sizeof(Link));
+  p->code_spans = g_array_new(FALSE, FALSE, sizeof(CodeSpan));
+  p->anchors = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+  p->colors = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+  p->tables = g_ptr_array_new_with_free_func(table_free);
+  p->pictures = g_ptr_array_new();
+  p->buffer = gtk_text_buffer_new(NULL);
+  PangoFontDescription *font = pango_font_description_from_string(t->settings.font ? t->settings.font : DEFAULT_FONT);
+  create_tags(p->buffer,
+              pango_font_description_get_family(font) ? pango_font_description_get_family(font) : "monospace");
+  pango_font_description_free(font);
+  TcodePreviewView *view = g_object_new(TCODE_TYPE_PREVIEW_VIEW, "buffer", p->buffer, NULL);
+  view->preview = p;
+  p->view = GTK_TEXT_VIEW(view);
+  g_object_unref(p->buffer); /* the view holds it */
+  gtk_text_view_set_editable(p->view, FALSE);
+  gtk_text_view_set_cursor_visible(p->view, FALSE);
+  gtk_text_view_set_wrap_mode(p->view, GTK_WRAP_WORD_CHAR);
+  gtk_text_view_set_pixels_inside_wrap(p->view, 5);
+  gtk_text_view_set_left_margin(p->view, MARGIN);
+  gtk_text_view_set_right_margin(p->view, MARGIN);
+  gtk_text_view_set_top_margin(p->view, 24);
+  gtk_text_view_set_bottom_margin(p->view, 48);
+  gtk_widget_add_css_class(GTK_WIDGET(p->view), "tcode-preview");
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), GTK_WIDGET(p->view));
+  gtk_widget_set_hexpand(scrolled, TRUE);
+  gtk_widget_set_vexpand(scrolled, TRUE);
+  g_signal_connect(click, "released", G_CALLBACK(on_click), p);
+  gtk_widget_add_controller(GTK_WIDGET(p->view), GTK_EVENT_CONTROLLER(click));
+  g_signal_connect(motion, "motion", G_CALLBACK(on_motion), p);
+  gtk_widget_add_controller(GTK_WIDGET(p->view), motion);
 
-  p->tab = add_tab(t, TAB_PREVIEW, GTK_WIDGET(p->view), path);
+  p->tab = add_tab(t, TAB_PREVIEW, scrolled, path);
   p->tab->preview = p;
   p->monitor = g_file_monitor_file(file, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
   if (p->monitor)

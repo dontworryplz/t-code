@@ -10,6 +10,10 @@
 #include "git/compare.h"
 #include "window/statusbar.h"
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 /* The page went (its tab closed, or t-code quits): frees everything the tab holds. */
 static void tab_free(Tab *tab)
 {
@@ -20,6 +24,9 @@ static void tab_free(Tab *tab)
   g_free(tab->title);
   g_free(tab->path);
   g_free(tab);
+#ifdef __GLIBC__
+  malloc_trim(0); /* glibc keeps what the tab freed: give it back to the system */
+#endif
 }
 
 /* add_tab() hangs the Tab on its page. */
@@ -129,6 +136,7 @@ void remove_tab(Tab *tab)
 
   if (tab->compare_with && !t->closing)
     forget_comparison(tab);
+  unsync_scroll(tab);
   gtk_notebook_remove_page(group, gtk_notebook_page_num(group, tab->page));
   focus_current_tab(t);
 }
@@ -148,8 +156,10 @@ void close_all_tabs(App *t)
 {
   t->closing = TRUE; /* quiet while the tabs go */
   for (int g = 0; g < GROUPS; g++)
-    while (gtk_notebook_get_n_pages(t->groups[g]) > 0)
+    while (gtk_notebook_get_n_pages(t->groups[g]) > 0) {
+      unsync_scroll(tab_of(gtk_notebook_get_nth_page(t->groups[g], 0)));
       gtk_notebook_remove_page(t->groups[g], 0);
+    }
   t->closing = FALSE;
 }
 

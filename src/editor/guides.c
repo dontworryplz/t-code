@@ -8,6 +8,7 @@
 
 #include "editor/diffgutter.h"
 #include "editor/editorview.h"
+#include "lsp/diagnostics.h"
 
 #include <string.h>
 
@@ -316,6 +317,7 @@ static void snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapsho
     draw_diff_gaps(self, snapshot);
     if (self->tab->app->settings.guides)
       draw_guides(self, snapshot);
+    diagnostics_draw(self->tab, view, snapshot);
   }
 }
 

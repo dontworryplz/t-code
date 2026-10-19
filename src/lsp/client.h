@@ -17,6 +17,10 @@
  * read-only old version. */
 void lsp_open(Tab *tab);
 
+/* The editor was shown: marks it most recently used, and re-opens it on the server if it was
+ * evicted from the open-document LRU pool. */
+void lsp_touch(Tab *tab);
+
 /* The editor was saved. */
 void lsp_saved(Tab *tab);
 

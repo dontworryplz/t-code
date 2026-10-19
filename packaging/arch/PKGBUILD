@@ -6,7 +6,7 @@ pkgdesc='Lightweight C/C++ IDE: file manager, editor tabs with clangd and a shel
 arch=('x86_64')
 url='https://github.com/suacayipkisi/t-code'
 license=('MIT')
-depends=('glib2' 'gtk4' 'gtksourceview5' 'json-glib' 'vte4' 'webkitgtk-6.0' 'md4c' 'clang' 'git'
+depends=('glib2' 'gtk4' 'gtksourceview5' 'json-glib' 'vte4' 'md4c' 'clang' 'git'
          'ttf-cascadia-code' 'hicolor-icon-theme')
 makedepends=('pkgconf')
 optdepends=('ripgrep: faster Search panel (falls back to grep)')

@@ -17,6 +17,9 @@
 #include "window/statusbar.h"
 #include "window/terminal.h"
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 #include <string.h>
 
 /* Unsaved changes ---------------------------------------------------------------------------- */
@@ -118,6 +121,9 @@ static void switch_project(App *t, const char *root)
   close_all_tabs(t);
   set_split(t, FALSE);
   lsp_stop(t); /* not a minute more of the old project's clangd: the next C file starts one here */
+#ifdef __GLIBC__
+  malloc_trim(0); /* the old project's tabs are gone: give their memory back */
+#endif
 
   g_free(t->root);
   t->root = g_strdup(root);

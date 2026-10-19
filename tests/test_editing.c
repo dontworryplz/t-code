@@ -553,6 +553,25 @@ static void test_diff_gutter(void)
   free_tab(tab);
 }
 
+/* Parameter hint ----------------------------------------------------------------------------- */
+
+/* The view's adjustments can outlive the editor (a comparison's other side scrolls them): once
+ * the editor goes, scrolling them must not reach its freed hint. */
+static void test_signature_outlived(void)
+{
+  Tab *tab = new_tab("int a;\n");
+  GtkAdjustment *vertical = g_object_ref(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(tab->source)));
+  GtkAdjustment *horizontal = g_object_ref(gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(tab->source)));
+
+  g_assert_cmpuint(g_signal_handler_find(vertical, G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_scrolled, NULL), !=, 0);
+  free_tab(tab);
+  g_assert_cmpuint(g_signal_handler_find(vertical, G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_scrolled, NULL), ==, 0);
+  g_assert_cmpuint(g_signal_handler_find(horizontal, G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_scrolled, NULL), ==, 0);
+  gtk_adjustment_set_value(vertical, 10);
+  g_object_unref(vertical);
+  g_object_unref(horizontal);
+}
+
 int main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
@@ -592,5 +611,6 @@ int main(int argc, char **argv)
   g_test_add_func("/guides/pair-in-comment", test_guide_pair_in_comment);
   g_test_add_func("/guides/pair-utf8", test_guide_pair_utf8);
   g_test_add_func("/guides/blank-lines", test_guide_blank_lines);
+  g_test_add_func("/signature/outlived", test_signature_outlived);
   return g_test_run();
 }

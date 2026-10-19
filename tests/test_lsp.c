@@ -435,6 +435,38 @@ static void test_idle_stop(void)
   free_tab(tab);
 }
 
+/* At most MAX_OPEN_DOCS files stay open in clangd at once; touching an evicted tab re-opens it. */
+static void test_lru_pool(void)
+{
+  Tab *tabs[MAX_OPEN_DOCS + 2];
+
+  for (int i = 0; i < MAX_OPEN_DOCS + 2; i++) {
+    char *path = g_strdup_printf("/tmp/t-code-test/lru%d.c", i);
+    char *text = g_strdup_printf("int x%d;\n", i);
+    tabs[i] = new_tab(path, text);
+    lsp_open(tabs[i]);
+    g_assert_true(server_agrees(tabs[i]));
+    g_free(text);
+    g_free(path);
+  }
+  /* The oldest two were evicted with didClose; the newest MAX_OPEN_DOCS stay open. */
+  g_assert_false(lsp_has(tabs[0]));
+  g_assert_false(lsp_has(tabs[1]));
+  for (int i = 2; i < MAX_OPEN_DOCS + 2; i++)
+    g_assert_true(lsp_has(tabs[i]));
+
+  /* Touching tabs[2] makes it newest; touching evicted tabs[0] re-opens it and evicts tabs[3]. */
+  lsp_touch(tabs[2]);
+  lsp_touch(tabs[0]);
+  g_assert_true(lsp_has(tabs[0]));
+  g_assert_true(server_agrees(tabs[0]));
+  g_assert_true(lsp_has(tabs[2]));
+  g_assert_false(lsp_has(tabs[3]));
+
+  for (int i = 0; i < MAX_OPEN_DOCS + 2; i++)
+    free_tab(tabs[i]);
+}
+
 /* A server that crashes starts again, and gets the files again. */
 static void test_crash(void)
 {
@@ -734,6 +766,7 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/cancel", test_cancel);
   g_test_add_func("/lsp/close-waiting", test_close_waiting);
   g_test_add_func("/lsp/idle-stop", test_idle_stop);
+  g_test_add_func("/lsp/lru-pool", test_lru_pool);
   g_test_add_func("/lsp/crash", test_crash);
   g_test_add_func("/lsp/churn", test_churn);
   g_test_add_func("/lsp/signature-position", test_signature_position);

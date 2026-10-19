@@ -24,6 +24,9 @@ struct SignatureHelp {
   guint trigger_id; /* a "(" or "," typed: asked once the typing is done */
   char trigger;
   gboolean retrigger; /* it shows: the next request says so */
+  /* The view's adjustments and controllers, which call back with h: they may outlive the editor
+   * (a comparison's other side scrolls them), so signature_free() disconnects them. */
+  GObject *senders[4];
 };
 
 /* One request. The answer to one that is not help->asking any more (a newer one went) is dropped;
@@ -325,10 +328,12 @@ void signature_attach(Tab *tab)
   gtk_widget_set_visible(h->box, FALSE);
   gtk_overlay_add_overlay(GTK_OVERLAY(tab->view->overlay), h->box);
   g_signal_connect(tab->view->overlay, "get-child-position", G_CALLBACK(on_place), h);
-  g_signal_connect(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(tab->source)), "value-changed",
-                   G_CALLBACK(on_scrolled), h);
-  g_signal_connect(gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(tab->source)), "value-changed",
-                   G_CALLBACK(on_scrolled), h);
+  h->senders[0] = g_object_ref(G_OBJECT(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(tab->source))));
+  h->senders[1] = g_object_ref(G_OBJECT(gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(tab->source))));
+  h->senders[2] = g_object_ref(G_OBJECT(keys));
+  h->senders[3] = g_object_ref(G_OBJECT(focus));
+  g_signal_connect(h->senders[0], "value-changed", G_CALLBACK(on_scrolled), h);
+  g_signal_connect(h->senders[1], "value-changed", G_CALLBACK(on_scrolled), h);
 
   g_signal_connect_after(tab->buffer, "insert-text", G_CALLBACK(on_inserted), h);
   g_signal_connect_after(tab->buffer, "delete-range", G_CALLBACK(on_deleted), h);
@@ -352,6 +357,10 @@ void signature_free(SignatureHelp *h)
   if (!h)
     return;
   g_signal_handlers_disconnect_by_data(h->tab->buffer, h);
+  for (gsize i = 0; i < G_N_ELEMENTS(h->senders); i++) {
+    g_signal_handlers_disconnect_by_data(h->senders[i], h);
+    g_object_unref(h->senders[i]);
+  }
   if (h->again_id)
     g_source_remove(h->again_id);
   if (h->trigger_id)

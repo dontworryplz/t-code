@@ -54,11 +54,11 @@ Other files (Markdown, Makefiles, scripts) get completion from the words in the 
 ## Requirements
 
 `clangd`, `git`, the Cascadia Code font (`ripgrep` is optional, for a faster Search panel), and to
-build: `gcc` 14 (C23), `make` and the GTK4, GtkSourceView 5 (5.16 or newer), json-glib, VTE,
-WebKitGTK and md4c headers. The packages below pull in all of these by themselves.
+build: `gcc` 14 (C23), `make` and the GTK4, GtkSourceView 5 (5.16 or newer), json-glib, VTE and
+md4c headers. The packages below pull in all of these by themselves.
 
 ```sh
-sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-devel webkitgtk6.0-devel md4c-devel
+sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-devel md4c-devel
 ```
 
 ## Install
@@ -114,7 +114,7 @@ built directly with `rpmbuild`; install its build dependencies once with
 `packaging/test.sh` installs each package in a fresh container of its distribution (so the
 package manager has to find every dependency), checks the installed files, and starts t-code on
 a headless X server with five C files: the file manager and one clangd (with its malloc arena
-limit) have to come up, a Markdown preview has to start WebKit, and t-code has to quit cleanly.
+limit) have to come up, a Markdown preview has to open, and t-code has to quit cleanly.
 While they build, the packages also run the tests that need no display.
 
 ### From the source, into ~/.local
@@ -250,14 +250,16 @@ results, a result to open the file there. ripgrep skips what `.gitignore` ignore
 grep searches everything but `.git` and `build`.
 
 **Settings** (`Ctrl+,` or the gear in the title bar): minimap, code coloring, indent guides,
-word wrap (off by default; long lines then continue on the next row instead of running off the
-screen), tab size (2 by default), spaces for Tab, detecting a file's own indentation, autosave,
+word wrap (off by default; with it off, long lines run off the screen and scroll sideways with
+the horizontal scrollbar or Shift + wheel), tab size (2 by default), spaces for Tab, detecting a file's own indentation, autosave,
 format on save (`Ctrl+S` formats C and C++ first; off by default), clang-tidy checks (the project's
 `.clang-tidy`; off by default), fonts, text size and reopening the last project. Changes apply at
 once, to the open editors too, and are kept in `session.ini`.
 
-**Markdown preview** opens as a tab and follows the file as you type. Links to other markdown
-files open their preview, other local files open in an editor, and web links open in the browser.
+**Markdown preview** opens as a tab and follows the file as you type. It is drawn natively
+(md4c into a GTK text view, no browser engine): headings, lists, quotes, code blocks colored like
+the editor, tables whose cells wrap, local images. Links to other markdown files open their
+preview, other local files open in an editor, and web links open in the browser.
 
 ## Performance
 
@@ -285,12 +287,20 @@ window. While idle, t-code uses no CPU: nothing polls, editors redraw only when 
 What keeps it small:
 
 - **clangd gets a file once its tab is shown**, and stops a minute after the last C or C++ file
-  closes.
+  closes. It keeps at most five files open: the least recently used hidden tab is closed on the
+  server (its AST freed) and opened again when you go back to it.
+- **clangd's own flags**: precompiled headers on disk (`--pch-storage=disk`), two indexing
+  threads, at most 50 results, and `--malloc-trim` on glibc.
 - **clangd runs with two malloc arenas** (`GLIBC_TUNABLES=glibc.malloc.arena_max=2`). With 25
   files clangd itself accounted for 130 MB, yet held 1.5 GB: glibc's per-thread arenas kept
   memory it had freed. With two arenas it stays at a third of that, at the same speed.
 - **Only what changed goes to clangd** (incremental sync), batched while typing.
-- **The Markdown preview's network process** (about 60 MB) exits with the last preview.
+- **No browser engine**: the Markdown preview is a text view, not WebKit (which started a web and
+  a network process, 150-200 MB, per preview).
+- **Freed memory goes back**: t-code calls glibc's `malloc_trim(0)` when a tab closes, a search
+  ends and the project changes.
+- **The file manager does not watch build output**: `build/`, `target/`, `node_modules/`, `.git/`
+  and `.cache/` are never watched, and a burst of changes refreshes the tree once (250 ms).
 
 How to measure it yourself (see `tools/`):
 

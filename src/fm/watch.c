@@ -30,16 +30,52 @@ int watch_fd(void)
   return fd;
 }
 
+static bool ignored_name(const char *name, size_t len)
+{
+  static const char *const names[] = { "build", "target", "node_modules", ".git", ".cache" };
+
+  for (size_t i = 0; i < sizeof names / sizeof *names; i++)
+    if (strlen(names[i]) == len && strncmp(name, names[i], len) == 0)
+      return true;
+  return false;
+}
+
+/* Build and cache folders churn during compilation: never watch inside them. */
+static bool ignored_dir(const char *path)
+{
+  size_t root_len = strlen(fm.root);
+  const char *p = strncmp(path, fm.root, root_len) == 0 ? path + root_len : path;
+
+  while (*p == '/')
+    p++;
+  while (*p) {
+    const char *slash = strchr(p, '/');
+    size_t len = slash ? (size_t)(slash - p) : strlen(p);
+    if (ignored_name(p, len))
+      return true;
+    p += len;
+    while (*p == '/')
+      p++;
+  }
+  return false;
+}
+
 static bool wanted(const char *path, bool *git)
 {
   *git = fm.git_dir[0] && strcmp(path, fm.git_dir) == 0;
-  if (*git || strcmp(path, fm.root) == 0)
+  if (*git)
     return true;
+  if (strcmp(path, fm.root) == 0)
+    return true;
+  if (ignored_dir(path))
+    return false;
   return is_expanded(path) >= 0;
 }
 
 static void add(const char *path, bool git)
 {
+  if (!git && strcmp(path, fm.root) != 0 && ignored_dir(path))
+    return;
   for (int i = 0; i < nwatches; i++)
     if (strcmp(watches[i].path, path) == 0)
       return;
@@ -50,7 +86,7 @@ static void add(const char *path, bool git)
   watches[nwatches++] = (Watch){ wd, strdup(path), git };
 }
 
-/* Watches exactly the root, the open folders and the .git folder. */
+/* Watches the root, the open folders (except build/cache trees) and the .git folder. */
 void watch_sync(void)
 {
   bool git;
@@ -98,9 +134,12 @@ bool watch_read(void)
         changed = true;
       else if (!w || (e->mask & IN_IGNORED))
         continue;
-      else if (!w->git)
+      else if (!w->git) {
+        if (e->len && ignored_name(e->name, strlen(e->name)) &&
+            !(e->mask & (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO)))
+          continue;
         changed = true;
-      else if (e->len && (strcmp(e->name, "index") == 0 || strcmp(e->name, "HEAD") == 0))
+      } else if (e->len && (strcmp(e->name, "index") == 0 || strcmp(e->name, "HEAD") == 0))
         changed = true; /* git add, commit, checkout, ... (not its lock and temp files) */
     }
   }

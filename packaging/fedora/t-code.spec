@@ -13,8 +13,7 @@ BuildRequires:  pkgconfig(gtksourceview-5)
 BuildRequires:  pkgconfig(json-glib-1.0)
 BuildRequires:  pkgconfig(vte-2.91-gtk4)
 BuildRequires:  pkgconfig(gio-unix-2.0)
-BuildRequires:  pkgconfig(webkitgtk-6.0)
-BuildRequires:  pkgconfig(md4c-html)
+BuildRequires:  pkgconfig(md4c)
 BuildRequires:  desktop-file-utils
 
 Requires:       clang-tools-extra

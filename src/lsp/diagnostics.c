@@ -28,12 +28,9 @@ static GtkTextTag *tag_for(Tab *tab, int severity)
 {
   GtkTextTagTable *table = gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer));
   GtkTextTag *tag = gtk_text_tag_table_lookup(table, tag_names[severity]);
-  GdkRGBA color;
 
   if (!tag) {
-    gdk_rgba_parse(&color, colors[severity]);
-    tag = gtk_text_buffer_create_tag(GTK_TEXT_BUFFER(tab->buffer), tag_names[severity], "underline",
-                                     PANGO_UNDERLINE_ERROR, "underline-rgba", &color, NULL);
+    tag = gtk_text_buffer_create_tag(GTK_TEXT_BUFFER(tab->buffer), tag_names[severity], NULL);
   }
   return tag;
 }
@@ -156,4 +153,106 @@ void diagnostics_lines(Tab *tab, GArray *errors, GArray *warnings)
     else if (d->severity == SEVERITY_WARNING)
       g_array_append_val(warnings, line);
   }
+}
+
+static void draw_wave(cairo_t *cr, double x1, double x2, double y)
+{
+  double p = 3.6;
+  double amp = 0.8;
+  double x = x1;
+
+  cairo_move_to(cr, x, y);
+  while (x + p <= x2) {
+    cairo_curve_to(cr, x + p * 0.25, y - amp, x + p * 0.25, y - amp, x + p * 0.5, y);
+    cairo_curve_to(cr, x + p * 0.75, y + amp, x + p * 0.75, y + amp, x + p, y);
+    x += p;
+  }
+  if (x + p * 0.5 <= x2) {
+    cairo_curve_to(cr, x + p * 0.25, y - amp, x + p * 0.25, y - amp, x + p * 0.5, y);
+    x += p * 0.5;
+  }
+  if (x < x2)
+    cairo_line_to(cr, x2, y);
+}
+
+void diagnostics_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot)
+{
+  if (!tab || !tab->view || !tab->view->diagnostics || tab->view->diagnostics->len == 0)
+    return;
+
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+  GdkRectangle visible;
+  gtk_text_view_get_visible_rect(view, &visible);
+
+  GtkTextIter line_iter;
+  gtk_text_view_get_line_at_y(view, &line_iter, visible.y, NULL);
+  int first_line = gtk_text_iter_get_line(&line_iter);
+  gtk_text_view_get_line_at_y(view, &line_iter, visible.y + visible.height, NULL);
+  int last_line = gtk_text_iter_get_line(&line_iter);
+
+  graphene_rect_t bounds =
+      GRAPHENE_RECT_INIT((float)visible.x, (float)visible.y, (float)visible.width, (float)visible.height);
+  cairo_t *cr = NULL;
+
+  static const double rgb[][3] = {
+    { 0.0, 0.0, 0.0 },
+    { 0.945, 0.298, 0.298 }, /* SEVERITY_ERROR: #F14C4C */
+    { 0.800, 0.655, 0.000 }, /* SEVERITY_WARNING: #CCA700 */
+    { 0.216, 0.580, 1.000 }, /* SEVERITY_INFO: #3794FF */
+    { 0.216, 0.580, 1.000 }  /* SEVERITY_HINT */
+  };
+
+  for (guint i = 0; i < tab->view->diagnostics->len; i++) {
+    Diagnostic *d = g_ptr_array_index(tab->view->diagnostics, i);
+    if (d->severity < SEVERITY_ERROR || d->severity > SEVERITY_INFO)
+      continue;
+
+    GtkTextIter start, end;
+    gtk_text_buffer_get_iter_at_mark(buffer, &start, d->start);
+    gtk_text_buffer_get_iter_at_mark(buffer, &end, d->end);
+
+    int s_line = gtk_text_iter_get_line(&start);
+    int e_line = gtk_text_iter_get_line(&end);
+    if (e_line < first_line || s_line > last_line)
+      continue;
+
+    if (!cr) {
+      cr = gtk_snapshot_append_cairo(snapshot, &bounds);
+      cairo_set_line_width(cr, 1.1);
+      cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+      cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    }
+
+    cairo_set_source_rgb(cr, rgb[d->severity][0], rgb[d->severity][1], rgb[d->severity][2]);
+
+    for (int line = MAX(s_line, first_line); line <= MIN(e_line, last_line); line++) {
+      GtkTextIter line_start, line_end;
+      gtk_text_buffer_get_iter_at_line(buffer, &line_start, line);
+      line_end = line_start;
+      if (!gtk_text_iter_ends_line(&line_end))
+        gtk_text_iter_forward_to_line_end(&line_end);
+
+      GtkTextIter seg_start = (line == s_line) ? start : line_start;
+      GtkTextIter seg_end = (line == e_line) ? end : line_end;
+
+      if (gtk_text_iter_compare(&seg_start, &seg_end) >= 0)
+        continue;
+
+      GdkRectangle r1, r2;
+      gtk_text_view_get_iter_location(view, &seg_start, &r1);
+      gtk_text_view_get_iter_location(view, &seg_end, &r2);
+
+      double x1 = r1.x;
+      double x2 = r2.x;
+      if (x2 <= x1)
+        x2 = x1 + MAX(r1.width, 8);
+      double y = r1.y + r1.height - 1.2;
+
+      draw_wave(cr, x1, x2, y);
+      cairo_stroke(cr);
+    }
+  }
+
+  if (cr)
+    cairo_destroy(cr);
 }

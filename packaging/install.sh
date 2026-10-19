@@ -30,9 +30,9 @@ if ((${#missing[@]})); then
   warn "Fedora: sudo dnf install gcc make pkgconf clang-tools-extra"
   exit 1
 fi
-if ! pkg-config --exists gtk4 gtksourceview-5 json-glib-1.0 vte-2.91-gtk4 webkitgtk-6.0 md4c-html; then
-  warn "GTK4 / GtkSourceView / json-glib / VTE / WebKitGTK / md4c development files are missing"
-  warn "Fedora: sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-devel webkitgtk6.0-devel md4c-devel"
+if ! pkg-config --exists gtk4 gtksourceview-5 json-glib-1.0 vte-2.91-gtk4 md4c; then
+  warn "GTK4 / GtkSourceView / json-glib / VTE / md4c development files are missing"
+  warn "Fedora: sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-devel md4c-devel"
   exit 1
 fi
 [[ "$(fc-match -f '%{family}' 'Cascadia Code' 2>/dev/null)" == *"Cascadia Code"* ]] ||

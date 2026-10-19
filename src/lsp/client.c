@@ -25,6 +25,9 @@
 #ifndef FLUSH_MS
 #define FLUSH_MS 50 /* changes typed within this go in one didChange */
 #endif
+#ifndef MAX_OPEN_DOCS
+#define MAX_OPEN_DOCS 5 /* at most this many files stay didOpen in clangd at once (LRU) */
+#endif
 #define MAX_CRASHES 3
 
 #ifdef __GLIBC__
@@ -33,7 +36,7 @@
 #define MALLOC_TRIM /* glibc's malloc_trim(): clangd built on musl has no such flag and exits on it */
 #endif
 #ifndef SERVER_ARGV /* tests run a fake server */
-#define SERVER_ARGV "clangd", "--background-index", "--pch-storage=disk", "-j=2", "--limit-results=100", MALLOC_TRIM
+#define SERVER_ARGV "clangd", "--background-index", "--pch-storage=disk", "-j=2", "--limit-results=50", MALLOC_TRIM
 #define TIDY_FLAG /* --clang-tidy or not, from the settings */
 #endif
 static const char *const server_argv[] = { SERVER_ARGV NULL };
@@ -43,6 +46,7 @@ typedef struct {
   Tab *tab;
   Lsp *lsp;
   int version;
+  guint64 use;      /* LRU order: bumped when opened, shown, edited or queried */
   gboolean opened;  /* didOpen went to the running server */
   GString *changes; /* contentChanges not sent yet, comma separated */
   guint flush_id;
@@ -71,6 +75,7 @@ struct Lsp {
   GHashTable *pending; /* id -> Pending */
   gint64 next_id;
   GHashTable *docs; /* Tab -> Doc */
+  guint64 use;      /* next LRU stamp for docs */
   guint idle_id, restart_id;
   int crashes;
   gboolean missing; /* the server is not installed: not tried again */
@@ -331,6 +336,7 @@ static void add_change(Doc *doc, const char *range, const char *text)
 {
   char *quoted = json_quote(text);
 
+  doc->use = ++doc->lsp->use;
   g_string_append_printf(doc->changes, "%s{\"range\":%s,\"text\":%s}", doc->changes->len ? "," : "", range, quoted);
   if (!doc->flush_id)
     doc->flush_id = g_timeout_add(FLUSH_MS, flush_later, doc);
@@ -395,11 +401,54 @@ static char *quoted_text(Tab *tab)
   return quoted;
 }
 
+/* Closes the document on the server (so clangd drops its AST from RAM), keeping Doc in l->docs. */
+static void close_on_server(Doc *doc)
+{
+  if (!doc->opened)
+    return;
+  flush(doc);
+  fail_pending(doc->lsp, doc->tab);
+  char *document = lsp_document_params(doc->tab), *params = g_strdup_printf("{%s}", document);
+  notify(doc->lsp, "textDocument/didClose", params);
+  g_free(params);
+  g_free(document);
+  doc->opened = FALSE;
+}
+
+/* Keeps at most MAX_OPEN_DOCS files open in clangd: the least recently used hidden ones get
+ * didClose, and didOpen again when their tab is shown. */
+static void evict_docs(Lsp *l)
+{
+  for (;;) {
+    GHashTableIter iter;
+    gpointer value;
+    Doc *oldest = NULL, *oldest_hidden = NULL;
+    int opened = 0;
+
+    g_hash_table_iter_init(&iter, l->docs);
+    while (g_hash_table_iter_next(&iter, NULL, &value)) {
+      Doc *doc = value;
+      if (!doc->opened)
+        continue;
+      opened++;
+      if (!oldest || doc->use < oldest->use)
+        oldest = doc;
+      if ((!doc->tab->source || !gtk_widget_get_mapped(GTK_WIDGET(doc->tab->source))) &&
+          (!oldest_hidden || doc->use < oldest_hidden->use))
+        oldest_hidden = doc;
+    }
+    if (opened <= MAX_OPEN_DOCS)
+      break;
+    close_on_server(oldest_hidden ? oldest_hidden : oldest);
+  }
+}
+
 /* Tells the server about the file: all of it, as it is now. */
 static void send_document(Doc *doc)
 {
   char *document = lsp_document_params(doc->tab), *text = quoted_text(doc->tab), *params;
 
+  doc->use = ++doc->lsp->use;
   g_string_truncate(doc->changes, 0);
   document[strlen(document) - 1] = '\0';
   if (doc->opened) {
@@ -411,6 +460,7 @@ static void send_document(Doc *doc)
                              g_str_has_prefix(id, "cpp") ? "cpp" : "c", ++doc->version, text);
     notify(doc->lsp, "textDocument/didOpen", params);
     doc->opened = TRUE;
+    evict_docs(doc->lsp);
   }
   semantic_update(doc->tab);
   g_free(params);
@@ -486,7 +536,7 @@ static void on_server_closed(gpointer owner)
     l->restart_id = g_timeout_add_seconds(1, restart, l);
 }
 
-/* initialize answered: the encoding it chose, then every open file. */
+/* initialize answered: the encoding it chose, then the most recently used open files. */
 static void on_initialized(JsonNode *result, gpointer data)
 {
   Lsp *l = data;
@@ -505,8 +555,17 @@ static void on_initialized(JsonNode *result, gpointer data)
   l->ready = TRUE;
   notify(l, "initialized", "{}");
   g_hash_table_iter_init(&iter, l->docs);
-  while (g_hash_table_iter_next(&iter, NULL, &doc))
-    send_document(doc);
+  while (g_hash_table_iter_next(&iter, NULL, &doc)) {
+    GHashTableIter other_iter;
+    gpointer other;
+    int newer = 0;
+    g_hash_table_iter_init(&other_iter, l->docs);
+    while (g_hash_table_iter_next(&other_iter, NULL, &other))
+      if (((Doc *)other)->use > ((Doc *)doc)->use)
+        newer++;
+    if (newer < MAX_OPEN_DOCS)
+      send_document(doc);
+  }
 }
 
 /* The answer the server gets to one of its own requests. */
@@ -695,6 +754,7 @@ void lsp_open(Tab *tab)
     g_signal_connect(tab->buffer, "insert-text", G_CALLBACK(on_insert), doc);
     g_signal_connect(tab->buffer, "delete-range", G_CALLBACK(on_delete), doc);
   }
+  doc->use = ++l->use;
   if (l->idle_id) {
     g_source_remove(l->idle_id);
     l->idle_id = 0;
@@ -705,6 +765,17 @@ void lsp_open(Tab *tab)
     server_start(l); /* the file goes once it has answered initialize */
   else if (l->ready)
     send_document(doc);
+}
+
+void lsp_touch(Tab *tab)
+{
+  Doc *doc = doc_of(tab);
+
+  if (!doc)
+    return;
+  doc->use = ++doc->lsp->use;
+  if (!doc->opened)
+    lsp_open(tab);
 }
 
 void lsp_saved(Tab *tab)
@@ -786,6 +857,7 @@ void lsp_request(Tab *tab, const char *method, const char *params, GCancellable 
     reply(NULL, data);
     return;
   }
+  doc->use = ++doc->lsp->use;
   flush(doc);
   send_request(doc->lsp, tab, method, params, cancel, reply, data);
 }

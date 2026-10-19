@@ -31,6 +31,10 @@ void compare_revisions(App *t, const char *old_rev, const char *old_rel, const c
 /* Closes the old versions of the current file. */
 void stop_comparing(App *t);
 
+/* An editor closes: it and the tab it scrolled together with (a comparison's other side) stop
+ * moving each other. Its adjustments may outlive it, and the other side's would reach a freed tab. */
+void unsync_scroll(Tab *tab);
+
 /* An old version's tab closed: the working file's gutter goes back to following HEAD, unless
  * another old version still compares with it. */
 void forget_comparison(Tab *old_version);

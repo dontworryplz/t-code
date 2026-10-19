@@ -163,6 +163,32 @@ static void sync_scroll(Tab *a, Tab *b)
   }
 }
 
+void unsync_scroll(Tab *tab)
+{
+  int n = tab_count(tab->app);
+
+  if (tab->kind != TAB_EDITOR || !tab->source)
+    return;
+  for (int i = -1; i < n; i++) { /* its own adjustments, then the other tabs' */
+    Tab *other = i < 0 ? tab : tab_nth(tab->app, i);
+    if (other->kind != TAB_EDITOR || !other->source || (other == tab && i >= 0))
+      continue;
+    GtkAdjustment *adjustments[] = { gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(other->source)),
+                                     gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(other->source)) };
+    for (gsize k = 0; k < G_N_ELEMENTS(adjustments); k++) {
+      if (!adjustments[k])
+        continue;
+      if (other == tab) { /* it moves nothing any more */
+        g_signal_handlers_disconnect_matched(adjustments[k], G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_vscroll, NULL);
+        g_signal_handlers_disconnect_matched(adjustments[k], G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_hscroll, NULL);
+      } else { /* nothing moves it any more */
+        g_signal_handlers_disconnect_by_func(adjustments[k], on_vscroll, tab->source);
+        g_signal_handlers_disconnect_by_func(adjustments[k], on_hscroll, tab->source);
+      }
+    }
+  }
+}
+
 /* The working file on the left, its gutter compared with the commit base_rev (by name; it follows
  * new commits when that is HEAD) or else with old_path; on the right old_path read-only ("name @
  * label"), its gutter compared with the working file. */
