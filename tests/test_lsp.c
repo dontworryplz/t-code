@@ -858,6 +858,78 @@ static void test_semantic_colors(void)
   free_tab(tab);
 }
 
+/* The color named "semantic-<color>" at offset, or NULL for none. */
+static const char *semantic_color_at(Tab *tab, int offset)
+{
+  static char color[32];
+  GtkTextIter at;
+  GSList *tags;
+
+  gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, offset);
+  tags = gtk_text_iter_get_tags(&at);
+  color[0] = '\0';
+  for (GSList *each = tags; each; each = each->next) {
+    char *name = NULL;
+    g_object_get(each->data, "name", &name, NULL);
+    if (name && g_str_has_prefix(name, "semantic-"))
+      g_strlcpy(color, name + strlen("semantic-"), sizeof color);
+    g_free(name);
+  }
+  g_slist_free(tags);
+  return color[0] ? color : NULL;
+}
+
+/* full/delta: the edits go into the kept tokens and only their lines are colored again; an answer
+ * for an older text is kept too, its lines colored with the next answer. */
+static void test_semantic_delta(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/delta.c", "int f;\nint v;\nint w;\n");
+  Semantic *s = g_new0(Semantic, 1);
+  JsonNode *full = json_of("{\"resultId\":\"1\",\"data\":[0,4,1,0,0, 1,4,1,1,0, 1,4,1,1,0]}");
+  JsonNode *delta, *nothing;
+  GtkTextIter at;
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  s->tab = tab;
+  tab->view->semantic = s;
+  apply(tab, full);
+  g_assert_cmpstr(s->result_id, ==, "1");
+  g_assert_cmpuint(s->data->len, ==, 15);
+  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "#9CDCFE"); /* v, a variable */
+
+  /* v becomes a function: the server sends the second token's type only. */
+  delta = json_of("{\"resultId\":\"2\",\"edits\":[{\"start\":8,\"deleteCount\":1,\"data\":[0]}]}");
+  apply_delta(s, delta, TRUE);
+  g_assert_cmpstr(s->result_id, ==, "2");
+  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "#DCDCAA");
+  g_assert_cmpstr(semantic_color_at(tab, 4), ==, "#DCDCAA");  /* f: unchanged */
+  g_assert_cmpstr(semantic_color_at(tab, 18), ==, "#9CDCFE"); /* w: unchanged */
+  json_node_unref(delta);
+
+  /* A line typed above: the colors move with the text. The answer for it comes after more typing:
+   * kept, and its lines colored with the next answer. */
+  gtk_text_buffer_get_start_iter(GTK_TEXT_BUFFER(tab->buffer), &at);
+  gtk_text_buffer_insert(GTK_TEXT_BUFFER(tab->buffer), &at, "int g;\n", -1);
+  g_assert_cmpstr(semantic_color_at(tab, 7 + 4), ==, "#DCDCAA"); /* f, moved down a line */
+  delta = json_of("{\"resultId\":\"3\",\"edits\":[{\"start\":0,\"deleteCount\":0,\"data\":[0,4,1,1,0]},"
+                  "{\"start\":0,\"deleteCount\":1,\"data\":[1]}]}");
+  apply_delta(s, delta, FALSE);
+  g_assert_cmpuint(s->data->len, ==, 20);
+  g_assert_null(semantic_color_at(tab, 4)); /* g: not colored yet */
+  g_assert_nonnull(s->dirty_from);
+  nothing = json_of("{\"resultId\":\"4\",\"edits\":[]}");
+  apply_delta(s, nothing, TRUE);
+  g_assert_cmpstr(semantic_color_at(tab, 4), ==, "#9CDCFE");  /* g */
+  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "#DCDCAA"); /* f */
+  g_assert_null(s->dirty_from);
+
+  json_node_unref(nothing);
+  json_node_unref(delta);
+  json_node_unref(full);
+  free_tab(tab); /* frees s */
+}
+
 int main(int argc, char **argv)
 {
   if (argc > 1 && strcmp(argv[1], "--fake-server") == 0)
@@ -888,6 +960,7 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/column-in", test_column_in);
   g_test_add_func("/lsp/snippet-text", test_snippet_text);
   g_test_add_func("/lsp/semantic-colors", test_semantic_colors);
+  g_test_add_func("/lsp/semantic-delta", test_semantic_delta);
   g_test_add_func("/lsp/problem-end", test_problem_end);
   g_test_add_func("/lsp/completion-items", test_completion_items);
   g_test_add_func("/lsp/completion-shorten", test_completion_shorten);

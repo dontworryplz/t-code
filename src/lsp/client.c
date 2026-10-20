@@ -717,7 +717,7 @@ static void server_start(Lsp *l)
       "\"signatureHelp\":{\"signatureInformation\":{\"documentationFormat\":[\"plaintext\"],"
       "\"parameterInformation\":{\"labelOffsetSupport\":true},\"activeParameterSupport\":true}},"
       "\"definition\":{},\"declaration\":{},\"references\":{},\"formatting\":{},\"rename\":{},"
-      "\"semanticTokens\":{\"requests\":{\"full\":true},\"formats\":[\"relative\"],"
+      "\"semanticTokens\":{\"requests\":{\"full\":{\"delta\":true}},\"formats\":[\"relative\"],"
       "\"tokenTypes\":[\"namespace\",\"type\",\"class\",\"enum\",\"interface\",\"struct\",\"typeParameter\","
       "\"parameter\",\"variable\",\"property\",\"enumMember\",\"function\",\"method\",\"macro\",\"concept\"],"
       "\"tokenModifiers\":[\"declaration\",\"definition\",\"readonly\",\"static\",\"deprecated\"]}}}}",
