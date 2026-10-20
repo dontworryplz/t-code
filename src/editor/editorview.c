@@ -35,6 +35,8 @@ static const char *const css =
     ".tcode-editor textview border.left gutter { background: #1f1f1f; padding-right: 12px; }"
     ".tcode-editor .tcode-minimap { border-left: 1px solid #2b2b2b; }"
     ".tcode-editor .tcode-overview { border-left: 1px solid #2b2b2b; }"
+    ".tcode-conflict { background: #3a2f12; color: #cccccc; padding: 4px 8px; border-bottom: 1px solid #5c4a1a; }"
+    ".tcode-conflict button { padding: 2px 10px; min-height: 0; }"
     /* Completion: square and compact like VS Code's suggest widget, not GtkSourceView's rounded
      * list of 28px rows. */
     "GtkSourceAssistant.completion { border-radius: 0; background: #202020;"
@@ -445,9 +447,11 @@ void editor_view_init(Tab *tab, gboolean readonly)
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), GTK_WIDGET(view));
   v->overlay = gtk_overlay_new(); /* the find bar goes over the text */
   gtk_overlay_set_child(GTK_OVERLAY(v->overlay), scrolled);
-  gtk_widget_set_hexpand(v->overlay, TRUE);
   gtk_widget_set_vexpand(v->overlay, TRUE);
-  gtk_box_append(GTK_BOX(page), v->overlay);
+  v->column = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  gtk_widget_set_hexpand(v->column, TRUE);
+  gtk_box_append(GTK_BOX(v->column), v->overlay);
+  gtk_box_append(GTK_BOX(page), v->column);
 
   v->map = tcode_map_new(tab);
   gtk_source_map_set_view(GTK_SOURCE_MAP(v->map), view);

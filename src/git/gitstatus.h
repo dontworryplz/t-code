@@ -12,7 +12,8 @@
 void git_status_start(App *t);
 
 /* Watches the git directory of the project (t->project.root) and finds the top of its work tree
- * (t->project.git_top, NULL outside a repository); call again after the root changes. */
+ * (t->project.git_top: NULL at once, set when git answers, and stays NULL outside a repository);
+ * call again after the root changes. */
 void watch_git(App *t);
 
 /* Runs git status shortly; changes that come together (a commit touches several files) share

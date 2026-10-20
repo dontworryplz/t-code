@@ -43,8 +43,12 @@ typedef void (*SavedFunc)(App *t, gpointer data);
  * closes: then checks t->closing itself). */
 void save_all(App *t, SavedFunc then, gpointer data);
 
-/* Saves one editor (Ctrl+S). */
+/* Saves one editor (Ctrl+S). A file changed on disk since it was loaded or saved is not written
+ * over: a bar over the editor offers Compare, Reload and Overwrite. */
 void save_editor(Tab *tab);
+
+/* Whether that bar is showing. */
+gboolean editor_in_conflict(Tab *tab);
 
 /* Turns code coloring off or on in every open editor (F7); new ones start the same way. */
 void toggle_syntax(App *t);

@@ -22,6 +22,7 @@ typedef struct DiffGutter DiffGutter; /* editor/diffgutter.c */
 
 struct EditorView {
   Tab *tab;
+  GtkWidget *column;      /* [ the save conflict bar (editor.c), overlay ] */
   GtkWidget *overlay;     /* the text, with the find bar over it */
   GtkWidget *map;         /* the minimap */
   GtkWidget *overview;    /* the problems strip: the whole file's errors and warnings, and the
@@ -44,6 +45,8 @@ struct EditorView {
   char *etag;                  /* the file on disk as last loaded or saved: other changes reload it */
   gboolean saving, save_again; /* a save is in flight; another one is due after it */
   gboolean save_failed;        /* told the user once; quiet until a save works again */
+  GtkWidget *conflict;         /* the bar shown when the file changed on disk under unsaved changes */
+  gboolean overwrite;          /* the next save writes over a file changed on disk */
   GArray *next_waiters;        /* SaveWaiter: for the save after the one in flight */
   guint autosave_id, reload_id, scroll_id;
   gboolean scroll_pending;    /* the cursor is scrolled to once the view is shown */

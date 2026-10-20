@@ -139,19 +139,20 @@ static void on_git_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file, GFi
     refresh_branch(t);
 }
 
-void watch_git(App *t)
+/* git rev-parse answered watch_git(): the git directory and the work tree top, one per line. */
+static void on_git_dir(GObject *source, GAsyncResult *result, gpointer data)
 {
-  char *argv[] = { "git", "-C", t->project.root, "rev-parse", "--absolute-git-dir", "--show-toplevel", NULL };
+  App *t = data;
   char *out = NULL;
-  int status = 0;
+  gboolean ok = g_subprocess_communicate_utf8_finish(G_SUBPROCESS(source), result, &out, NULL, NULL) &&
+                g_subprocess_get_successful(G_SUBPROCESS(source));
 
-  if (git_monitor) {
-    g_file_monitor_cancel(git_monitor);
-    g_clear_object(&git_monitor);
+  /* Another project opened meanwhile: its own rev-parse answers for it. */
+  if (t->closing || g_strcmp0(g_object_get_data(source, "root"), t->project.root) != 0) {
+    g_free(out);
+    return;
   }
-  if (g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, &out, NULL, &status,
-                   NULL) &&
-      g_spawn_check_wait_status(status, NULL)) {
+  if (ok && out) {
     char **lines = g_strsplit(out, "\n", 3);
     GFile *dir = g_file_new_for_path(lines[0]);
     g_free(t->project.git_top);
@@ -161,11 +162,30 @@ void watch_git(App *t)
     if (git_monitor)
       g_signal_connect(git_monitor, "changed", G_CALLBACK(on_git_changed), t);
     g_object_unref(dir);
-  } else {
-    g_clear_pointer(&t->project.git_top, g_free);
+    files_git_changed(t); /* its git colors need git_top */
   }
   g_free(out);
   refresh_branch(t);
+}
+
+void watch_git(App *t)
+{
+  GSubprocess *proc;
+
+  if (git_monitor) {
+    g_file_monitor_cancel(git_monitor);
+    g_clear_object(&git_monitor);
+  }
+  g_clear_pointer(&t->project.git_top, g_free); /* until git answers for the new root */
+  proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL, "git", "-C",
+                          t->project.root, "rev-parse", "--absolute-git-dir", "--show-toplevel", NULL);
+  if (!proc) {
+    refresh_branch(t);
+    return;
+  }
+  g_object_set_data_full(G_OBJECT(proc), "root", g_strdup(t->project.root), g_free);
+  g_subprocess_communicate_utf8_async(proc, NULL, NULL, on_git_dir, t);
+  g_object_unref(proc);
 }
 
 void git_status_start(App *t)

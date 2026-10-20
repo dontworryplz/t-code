@@ -9,6 +9,7 @@
 #include "editor/diffgutter.h"
 #include "editor/editorview.h"
 #include "editor/tabs.h"
+#include "git/compare.h"
 #include "git/gitstatus.h"
 #include "lsp/client.h"
 #include "lsp/completion.h"
@@ -40,6 +41,72 @@ static char *disk_etag(const char *path)
   g_clear_object(&info);
   g_object_unref(file);
   return etag;
+}
+
+/* The save conflict ---------------------------------------------------------------------------- */
+
+/* The file changed on disk while the editor has changes of its own: neither side is thrown away
+ * until the user says which (VS Code's "Overwrite / Revert / Compare"). */
+static void hide_conflict(Tab *tab)
+{
+  if (tab->view->conflict)
+    gtk_widget_set_visible(tab->view->conflict, FALSE);
+}
+
+static void on_overwrite(GtkButton *button G_GNUC_UNUSED, Tab *tab)
+{
+  hide_conflict(tab);
+  tab->view->overwrite = TRUE;
+  save_editor(tab);
+}
+
+static void on_reload(GtkButton *button G_GNUC_UNUSED, Tab *tab)
+{
+  hide_conflict(tab);
+  editor_reload(tab);
+}
+
+static void on_compare(GtkButton *button G_GNUC_UNUSED, Tab *tab)
+{
+  compare_with_disk(tab->app, tab->path);
+}
+
+static void add_button(GtkWidget *bar, const char *label, GCallback clicked, Tab *tab)
+{
+  GtkWidget *button = gtk_button_new_with_label(label);
+
+  g_signal_connect(button, "clicked", clicked, tab);
+  gtk_box_append(GTK_BOX(bar), button);
+}
+
+/* Shows the bar over the editor (made the first time). */
+static void show_conflict(Tab *tab)
+{
+  EditorView *v = tab->view;
+
+  if (!v->conflict) {
+    char *name = g_path_get_basename(tab->path);
+    char *text = g_strdup_printf("%s changed on disk. Your changes are not saved.", name);
+    GtkWidget *label = gtk_label_new(text);
+    v->conflict = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_add_css_class(v->conflict, "tcode-conflict");
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_hexpand(label, TRUE);
+    gtk_box_append(GTK_BOX(v->conflict), label);
+    add_button(v->conflict, "Compare", G_CALLBACK(on_compare), tab);
+    add_button(v->conflict, "Reload", G_CALLBACK(on_reload), tab);
+    add_button(v->conflict, "Overwrite", G_CALLBACK(on_overwrite), tab);
+    gtk_box_prepend(GTK_BOX(v->column), v->conflict);
+    g_free(text);
+    g_free(name);
+  }
+  gtk_widget_set_visible(v->conflict, TRUE);
+}
+
+gboolean editor_in_conflict(Tab *tab)
+{
+  return tab->kind == TAB_EDITOR && tab->view->conflict && gtk_widget_get_visible(tab->view->conflict);
 }
 
 /* Following the cursor and the changes ------------------------------------------------------- */
@@ -91,7 +158,7 @@ static void on_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, Tab *tab)
   if (v->loading)
     return;
   update_position(tab);
-  if (!tab->app->settings.autosave || v->readonly)
+  if (!tab->app->settings.autosave || v->readonly || editor_in_conflict(tab)) /* the user decides first */
     return;
   if (v->autosave_id)
     g_source_remove(v->autosave_id);
@@ -168,6 +235,7 @@ static void on_saved(GObject *source, GAsyncResult *result, gpointer data)
     EditorView *v = tab->view;
     v->saving = FALSE;
     if (ok) {
+      hide_conflict(tab);
       g_free(v->etag);
       v->etag = g_steal_pointer(&etag);
       v->save_failed = FALSE;
@@ -175,6 +243,8 @@ static void on_saved(GObject *source, GAsyncResult *result, gpointer data)
         gtk_text_buffer_set_modified(GTK_TEXT_BUFFER(tab->buffer), FALSE);
       refresh_branch(tab->app); /* the work tree changed */
       lsp_saved(tab);
+    } else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_WRONG_ETAG)) { /* changed on disk meanwhile */
+      show_conflict(tab);
     } else if (!v->save_failed) { /* autosave would say it every second */
       char *name = g_path_get_basename(tab->path), *message = g_strdup_printf("Could not save %s", name);
       v->save_failed = TRUE;
@@ -222,9 +292,12 @@ static void start_save(Tab *tab, GArray *waiters)
   job->text = gtk_text_buffer_get_text(buffer, &start, &end, TRUE); /* the file exactly (see editorview.c) */
   v->saving = TRUE;
   file = g_file_new_for_path(tab->path);
-  /* Not cancelled when the tab goes: a save that started finishes. */
-  g_file_replace_contents_async(file, job->text, strlen(job->text), NULL, FALSE, G_FILE_CREATE_NONE, NULL, on_saved,
-                                job);
+  /* Only over the file as it was loaded or last saved: one changed on disk since then (git, another
+   * program) fails with G_IO_ERROR_WRONG_ETAG, and the user chooses. Not cancelled when the tab
+   * goes: a save that started finishes. */
+  g_file_replace_contents_async(file, job->text, strlen(job->text), v->overwrite ? NULL : v->etag, FALSE,
+                                G_FILE_CREATE_NONE, NULL, on_saved, job);
+  v->overwrite = FALSE;
   g_object_unref(file);
 }
 
@@ -320,6 +393,7 @@ static void on_loaded(GObject *source, GAsyncResult *result, gpointer data)
     char *text = buffer_start(buffer, SNIFF_BYTES);
 
     v->loading = FALSE;
+    hide_conflict(tab); /* the file as it is on disk now */
     gtk_text_view_set_editable(GTK_TEXT_VIEW(tab->source), !v->readonly);
     if (!ok && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) { /* not found: a new file */
       char *name = g_path_get_basename(tab->path), *message = g_strdup_printf("Could not open %s", name);
@@ -405,8 +479,12 @@ static gboolean check_disk(gpointer data)
   char *etag = disk_etag(tab->path);
 
   v->reload_id = 0;
-  if (etag && g_strcmp0(etag, v->etag) != 0 && !tab->modified && !v->saving && !v->loading)
-    load(tab, tab->cursor.line, tab->cursor.column);
+  if (etag && g_strcmp0(etag, v->etag) != 0 && !v->saving && !v->loading) {
+    if (!tab->modified)
+      load(tab, tab->cursor.line, tab->cursor.column);
+    else if (!v->readonly) /* told now, not only when it is saved */
+      show_conflict(tab);
+  }
   g_free(etag);
   return G_SOURCE_REMOVE;
 }

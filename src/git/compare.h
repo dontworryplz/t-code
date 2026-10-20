@@ -14,11 +14,17 @@
  * working file it is compared with. NULL without an editor. */
 const char *comparable_path(App *t);
 
+/* The comparisons ask git in the background: the tab opens once it answers. */
+
 /* path next to its version in the last commit (Ctrl+Alt+D). */
 void compare_with_head(App *t, const char *path);
 
 /* path next to its staged version: what is not staged yet. */
 void compare_with_index(App *t, const char *path);
+
+/* path next to the file as it is on disk now: the editor's unsaved text against a version written
+ * there meanwhile (the save conflict bar's Compare). */
+void compare_with_disk(App *t, const char *path);
 
 /* Lists path's commits in the picker; the chosen one is compared with the working file (Ctrl+Alt+H). */
 void file_history(App *t, const char *path);
