@@ -3,9 +3,14 @@
  * (src/editor/findbar.c), on a real GtkSourceView. The editor page's files are included to reach
  * their static functions: keys are fed to the typing help the way the view's key controller would.
  */
+#define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
+
 #include "editor_page.h"
 
 #include <glib/gstdio.h>
+#include <math.h>
+#include <signal.h>
+#include <stdlib.h>
 
 static App app;
 
@@ -283,6 +288,34 @@ static void test_enter_between_braces(void)
   free_tab(tab);
 }
 
+/* Enter after any opening bracket goes one level deeper, blanks after the bracket dropped; not in a
+ * comment. */
+static void test_enter_after_open(void)
+{
+  Tab *tab = new_tab("  call(\n  int a[] = { \n  x = (a, b);\n// (\n");
+  GtkTextIter start, end;
+
+  app.settings.tab_size = 4;
+  app.settings.tabs_to_spaces = TRUE;
+  editor_view_apply_settings(tab);
+  gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+  gtk_source_buffer_ensure_highlight(tab->buffer, &start, &end);
+
+  cursor_at(tab, 0, 7);
+  type_key(tab, GDK_KEY_Return);
+  assert_cursor(tab, 1, 6);
+  cursor_at(tab, 2, 13); /* after "{ " */
+  type_key(tab, GDK_KEY_Return);
+  assert_cursor(tab, 3, 6);
+  cursor_at(tab, 4, 7); /* "(|a, b)": the rest goes deeper */
+  type_key(tab, GDK_KEY_Return);
+  assert_cursor(tab, 5, 6);
+  cursor_at(tab, 6, 4); /* in a comment: a plain line break */
+  type_key(tab, GDK_KEY_Return);
+  assert_text(tab, "  call(\n      \n  int a[] = {\n      \n  x = (\n      a, b);\n// (\n\n");
+  free_tab(tab);
+}
+
 static void test_outdent_brace(void)
 {
   Tab *tab = new_tab("{\n    x;\n    ");
@@ -308,6 +341,148 @@ static void test_no_pair_in_comment(void)
   type_text(tab, "(");
   assert_text(tab, "// a(\n");
   free_tab(tab);
+}
+
+/* Words ------------------------------------------------------------------------------------ */
+
+/* What a double click on line, column selects. */
+static char *double_click(Tab *tab, int line, int column)
+{
+  GtkTextIter at, start, end;
+  gboolean stop = FALSE;
+
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &at, line, column);
+  start = end = at;
+  g_signal_emit_by_name(tab->source, "extend-selection", GTK_TEXT_EXTEND_SELECTION_WORD, &at, &start, &end, &stop);
+  g_assert_true(stop);
+  return gtk_text_buffer_get_text(GTK_TEXT_BUFFER(tab->buffer), &start, &end, TRUE);
+}
+
+/* A double click selects the name only, without the brackets and punctuation around it. */
+static void test_double_click(void)
+{
+  Tab *tab = new_tab("x = f(a_1, [b])->c<T>;\n");
+  char *word;
+
+  word = double_click(tab, 0, 4); /* on "f" */
+  g_assert_cmpstr(word, ==, "f");
+  g_free(word);
+  word = double_click(tab, 0, 7); /* in "a_1" */
+  g_assert_cmpstr(word, ==, "a_1");
+  g_free(word);
+  word = double_click(tab, 0, 12); /* on "b" in "[b]" */
+  g_assert_cmpstr(word, ==, "b");
+  g_free(word);
+  word = double_click(tab, 0, 19); /* on "T" in "<T>" */
+  g_assert_cmpstr(word, ==, "T");
+  g_free(word);
+  word = double_click(tab, 0, 15); /* on the "-" of "->": nothing */
+  g_assert_cmpstr(word, ==, "");
+  g_free(word);
+  free_tab(tab);
+}
+
+/* Runs the main loop for ms. */
+static void run_for(int ms)
+{
+  gint64 until = g_get_monotonic_time() + ms * 1000;
+
+  while (g_get_monotonic_time() < until)
+    g_main_context_iteration(NULL, FALSE);
+}
+
+/* A selected name's whole-word occurrences are highlighted and their lines marked; not a part of a
+ * name, and an edit clears them. */
+static void test_occurrences(void)
+{
+  Tab *tab = new_tab("int count;\nint counter;\ncount++;\n/* x.count */\n");
+  GtkTextTag *tag = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer)), TAG);
+  GArray *lines = g_array_new(FALSE, FALSE, sizeof(int));
+  GtkTextIter iter;
+
+  select_lines(tab, 0, 4, 0, 9);
+  run_for(200);
+  occurrences_lines(tab, lines);
+  g_assert_cmpint(lines->len, ==, 3);
+  g_assert_cmpint(g_array_index(lines, int, 0), ==, 0);
+  g_assert_cmpint(g_array_index(lines, int, 1), ==, 2);
+  g_assert_cmpint(g_array_index(lines, int, 2), ==, 3);
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &iter, 3, 5);
+  g_assert_true(gtk_text_iter_has_tag(&iter, tag));
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &iter, 1, 4); /* "counter" */
+  g_assert_false(gtk_text_iter_has_tag(&iter, tag));
+
+  gtk_text_buffer_insert_at_cursor(GTK_TEXT_BUFFER(tab->buffer), "s", -1);
+  g_array_set_size(lines, 0);
+  occurrences_lines(tab, lines);
+  g_assert_cmpint(lines->len, ==, 0);
+
+  select_lines(tab, 0, 4, 0, 7); /* "cou": part of a name */
+  run_for(200);
+  occurrences_lines(tab, lines);
+  g_assert_cmpint(lines->len, ==, 0);
+  g_array_free(lines, TRUE);
+  free_tab(tab);
+}
+
+/* The strip's marks sit beside their lines in the minimap, also once the minimap scrolled; lines it
+ * does not show go to its edges; a click there goes to the line beside it. */
+static void test_strip_follows_map(void)
+{
+  GString *text = g_string_new(NULL);
+  GtkWidget *window = gtk_window_new();
+  GtkTextView *map;
+  Tab *tab;
+
+  for (int i = 0; i < 2000; i++)
+    g_string_append_printf(text, "line %d\n", i);
+  app.settings.minimap = TRUE;
+  tab = new_tab(text->str);
+  map = GTK_TEXT_VIEW(tab->view->map);
+  gtk_window_set_default_size(GTK_WINDOW(window), 600, 300);
+  gtk_window_set_child(GTK_WINDOW(window), tab->page);
+  gtk_window_present(GTK_WINDOW(window));
+  for (gint64 until = g_get_monotonic_time() + 3 * G_USEC_PER_SEC;
+       !gtk_widget_get_mapped(GTK_WIDGET(map)) && g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, TRUE);
+  run_for(300);
+  if (!gtk_widget_get_mapped(GTK_WIDGET(map))) {
+    g_test_skip("the window was not shown");
+  } else {
+    int height = gtk_widget_get_height(tab->view->overview);
+    for (int round = 0; round < 2; round++) {
+      GdkRectangle shown;
+      GtkTextIter iter;
+      int top, bottom, middle, y, h, window_y;
+      gtk_text_view_get_visible_rect(map, &shown);
+      gtk_text_view_get_line_at_y(map, &iter, shown.y, NULL);
+      top = gtk_text_iter_get_line(&iter);
+      gtk_text_view_get_line_at_y(map, &iter, shown.y + shown.height - 1, NULL);
+      bottom = gtk_text_iter_get_line(&iter);
+      middle = (top + bottom) / 2;
+      g_assert_cmpint(bottom, <, 1999); /* the minimap shows a part only */
+
+      gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(tab->buffer), &iter, middle);
+      gtk_text_view_get_line_yrange(map, &iter, &y, &h);
+      gtk_text_view_buffer_to_window_coords(map, GTK_TEXT_WINDOW_WIDGET, 0, y, NULL, &window_y);
+      g_assert_cmpfloat(fabs(strip_y(tab, middle, height) + MARK_HEIGHT / 2 - (window_y + h / 2.0)), <=, 1);
+      g_assert_cmpint(abs(strip_line(tab, window_y + h / 2.0, height) - middle), <=, 1);
+      if (top > 0)
+        g_assert_cmpfloat(strip_y(tab, 0, height), ==, 0);
+      g_assert_cmpfloat(strip_y(tab, 1999, height), ==, height - MARK_HEIGHT);
+
+      /* Far down: the minimap scrolls with the view. */
+      gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(tab->buffer), &iter, 1500);
+      gtk_text_buffer_place_cursor(GTK_TEXT_BUFFER(tab->buffer), &iter);
+      gtk_text_view_scroll_to_iter(GTK_TEXT_VIEW(tab->source), &iter, 0, TRUE, 0, 0.5);
+      run_for(300);
+    }
+  }
+  gtk_window_set_child(GTK_WINDOW(window), NULL); /* the tab keeps the page */
+  gtk_window_destroy(GTK_WINDOW(window));
+  free_tab(tab);
+  g_string_free(text, TRUE);
+  app.settings.minimap = FALSE;
 }
 
 /* Snippets ----------------------------------------------------------------------------------- */
@@ -693,9 +868,30 @@ static void test_indent_order(void)
   free_tab(tab);
 }
 
+static GPid broadway;
+
+/* /editing/strip-follows-map shows a window: on GTK's Broadway backend, nothing appears on the
+ * screen. Without gtk4-broadwayd it opens on the desktop for a moment. */
+static void start_broadway(void)
+{
+  char *display = g_strdup_printf(":%d", 50 + g_random_int_range(0, 50));
+  char *argv[] = { "gtk4-broadwayd", display, NULL };
+
+  if (g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+                    NULL, NULL, &broadway, NULL)) {
+    g_setenv("GDK_BACKEND", "broadway", TRUE);
+    g_setenv("BROADWAY_DISPLAY", display, TRUE);
+    g_usleep(300 * 1000); /* until it listens */
+  }
+  g_free(display);
+}
+
 int main(int argc, char **argv)
 {
+  int status;
+
   g_test_init(&argc, &argv, NULL);
+  start_broadway();
   if (!gtk_init_check()) {
     g_test_skip("no display");
     return g_test_run();
@@ -706,6 +902,10 @@ int main(int argc, char **argv)
   app.font_scale = 1.0;
   app.styles_dir = g_canonicalize_filename("styles", NULL); /* run from the repository (make test) */
   g_test_add_func("/editing/comment-lines", test_comment_lines);
+  g_test_add_func("/editing/enter-after-open", test_enter_after_open);
+  g_test_add_func("/editing/double-click", test_double_click);
+  g_test_add_func("/editing/occurrences", test_occurrences);
+  g_test_add_func("/editing/strip-follows-map", test_strip_follows_map);
   g_test_add_func("/editing/indent-order", test_indent_order);
   g_test_add_func("/editing/comment-indented", test_comment_indented);
   g_test_add_func("/editing/block-comment", test_block_comment);
@@ -736,5 +936,8 @@ int main(int argc, char **argv)
   g_test_add_func("/guides/pair-utf8", test_guide_pair_utf8);
   g_test_add_func("/guides/blank-lines", test_guide_blank_lines);
   g_test_add_func("/signature/outlived", test_signature_outlived);
-  return g_test_run();
+  status = g_test_run();
+  if (broadway)
+    kill(broadway, SIGTERM);
+  return status;
 }

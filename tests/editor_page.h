@@ -12,6 +12,7 @@
 #include "editor/findbar.c"
 #include "editor/indentconf.c"
 #include "editor/guides.c"
+#include "editor/occurrences.c"
 #include "lsp/channel.c"
 #include "lsp/client.c"
 #include "lsp/compiledb.c"

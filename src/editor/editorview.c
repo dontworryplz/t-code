@@ -9,6 +9,7 @@
 #include "editor/editing.h"
 #include "editor/findbar.h"
 #include "editor/guides.h"
+#include "editor/occurrences.h"
 #include "lsp/client.h"
 #include "lsp/completion.h"
 #include "lsp/diagnostics.h"
@@ -167,6 +168,8 @@ void editor_view_apply_settings(Tab *tab)
   gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), t->settings.word_wrap ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
   gtk_source_buffer_set_highlight_syntax(tab->buffer, !t->plain);
   gtk_widget_set_visible(v->map, t->settings.minimap);
+  if (v->overview) /* follows the minimap, or the whole file without it */
+    gtk_widget_queue_draw(v->overview);
   if (lsp_has(tab))
     semantic_update(tab);                  /* code coloring may have been turned off or on */
   gtk_widget_queue_draw(GTK_WIDGET(view)); /* the indent guides, turned off or on */
@@ -177,38 +180,90 @@ void editor_view_apply_settings(Tab *tab)
 
 /* The problems strip ------------------------------------------------------------------------- */
 
-/* A mark per line with problems, where that line is in the whole file; errors over warnings. */
+#define MARK_HEIGHT 3.0
+
+/* Whether the strip follows the minimap (shown and laid out); else it is the whole file. */
+static gboolean strip_follows_map(EditorView *v)
+{
+  return v->map && gtk_widget_get_visible(v->map) && gtk_widget_get_mapped(v->map);
+}
+
+/* The top of line's mark on a strip height pixels high: beside the line in the minimap (a line
+ * above or below the part it shows at its top or bottom edge); without the minimap, where the line
+ * is in the whole file. The strip and the minimap are side by side, with the same top and height. */
+static double strip_y(Tab *tab, int line, int height)
+{
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+
+  if (strip_follows_map(tab->view)) {
+    GtkTextView *map = GTK_TEXT_VIEW(tab->view->map);
+    GtkTextIter iter;
+    int y, h, top;
+    gtk_text_buffer_get_iter_at_line(buffer, &iter, line);
+    gtk_text_view_get_line_yrange(map, &iter, &y, &h);
+    gtk_text_view_buffer_to_window_coords(map, GTK_TEXT_WINDOW_WIDGET, 0, y, NULL, &top);
+    return CLAMP(top + (h - MARK_HEIGHT) / 2, 0, height - MARK_HEIGHT);
+  }
+  return MIN(line / (double)MAX(gtk_text_buffer_get_line_count(buffer), 1) * height, height - MARK_HEIGHT);
+}
+
+/* The line at y on the strip: the inverse of strip_y. */
+static int strip_line(Tab *tab, double y, int height)
+{
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+
+  if (strip_follows_map(tab->view)) {
+    GtkTextView *map = GTK_TEXT_VIEW(tab->view->map);
+    GtkTextIter iter;
+    int buffer_y;
+    gtk_text_view_window_to_buffer_coords(map, GTK_TEXT_WINDOW_WIDGET, 0, (int)y, NULL, &buffer_y);
+    gtk_text_view_get_line_at_y(map, &iter, buffer_y, NULL);
+    return gtk_text_iter_get_line(&iter);
+  }
+  return (int)(y / MAX(height, 1) * gtk_text_buffer_get_line_count(buffer));
+}
+
+/* A mark per line with problems, beside that line in the minimap (see strip_y); errors over
+ * warnings over the selected name's occurrences. */
 static void draw_overview(GtkDrawingArea *area G_GNUC_UNUSED, cairo_t *cr, int width, int height, gpointer data)
 {
   Tab *tab = data;
-  GArray *lines[2] = { g_array_new(FALSE, FALSE, sizeof(int)), g_array_new(FALSE, FALSE, sizeof(int)) };
-  double total = MAX(gtk_text_buffer_get_line_count(GTK_TEXT_BUFFER(tab->buffer)), 1);
-  static const double rgb[2][3] = { { 0.80, 0.65, 0.0 }, { 0.95, 0.30, 0.30 } }; /* warning, error */
+  GArray *lines[3] = { g_array_new(FALSE, FALSE, sizeof(int)), g_array_new(FALSE, FALSE, sizeof(int)),
+                       g_array_new(FALSE, FALSE, sizeof(int)) };
+  static const double rgb[3][3] = { { 0.63, 0.63, 0.63 }, { 0.80, 0.65, 0.0 }, { 0.95, 0.30, 0.30 } };
 
-  diagnostics_lines(tab, lines[1], lines[0]);
-  for (int k = 0; k < 2; k++) {
+  occurrences_lines(tab, lines[0]);
+  diagnostics_lines(tab, lines[2], lines[1]);
+  for (int k = 0; k < 3; k++) {
     cairo_set_source_rgb(cr, rgb[k][0], rgb[k][1], rgb[k][2]);
-    for (guint i = 0; i < lines[k]->len; i++) {
-      double y = g_array_index(lines[k], int, i) / total * height;
-      cairo_rectangle(cr, 1, MIN(y, height - 3.0), width - 1, 3);
-    }
+    for (guint i = 0; i < lines[k]->len; i++)
+      cairo_rectangle(cr, 1, strip_y(tab, g_array_index(lines[k], int, i), height), width - 1, MARK_HEIGHT);
     cairo_fill(cr);
     g_array_free(lines[k], TRUE);
   }
 }
 
-/* A click on the strip goes to that part of the file. */
+/* A click on the strip goes to that line (the one beside it in the minimap). */
 static void on_overview_click(GtkGestureClick *click, int n G_GNUC_UNUSED, double x G_GNUC_UNUSED, double y, Tab *tab)
 {
   GtkWidget *strip = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(click));
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
-  int line = (int)(y / MAX(gtk_widget_get_height(strip), 1) * gtk_text_buffer_get_line_count(buffer));
+  int line = strip_line(tab, y, gtk_widget_get_height(strip));
   GtkTextIter iter;
 
   gtk_text_buffer_get_iter_at_line(buffer, &iter, line);
   gtk_text_buffer_place_cursor(buffer, &iter);
   editor_view_reveal_cursor(tab);
   gtk_widget_grab_focus(GTK_WIDGET(tab->source));
+}
+
+/* The strip is drawn again when the minimap scrolls (notify::vadjustment: when it gets a new one). */
+static void watch_map_scroll(GObject *map, GParamSpec *spec G_GNUC_UNUSED, GtkWidget *strip)
+{
+  GtkAdjustment *adjustment = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(map));
+
+  if (adjustment)
+    g_signal_connect_object(adjustment, "value-changed", G_CALLBACK(gtk_widget_queue_draw), strip, G_CONNECT_SWAPPED);
 }
 
 void editor_view_show_problems(Tab *tab)
@@ -351,6 +406,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   v->cancel = g_cancellable_new();
   v->next_waiters = g_array_new(FALSE, FALSE, sizeof(SaveWaiter));
   editing_attach(tab);
+  occurrences_attach(tab);
   diff_gutter_attach(tab);
   hover_attach(tab);
   completion_attach(tab);
@@ -391,6 +447,12 @@ void editor_view_init(Tab *tab, gboolean readonly)
   g_signal_connect(click, "pressed", G_CALLBACK(on_overview_click), tab);
   gtk_widget_add_controller(v->overview, GTK_EVENT_CONTROLLER(click));
   gtk_box_append(GTK_BOX(page), v->overview);
+  /* The marks move with the minimap: it scrolls with the view, and has its own adjustment. */
+  g_signal_connect_object(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled)), "value-changed",
+                          G_CALLBACK(gtk_widget_queue_draw), v->overview, G_CONNECT_SWAPPED);
+  g_signal_connect_object(v->map, "notify::vadjustment", G_CALLBACK(watch_map_scroll), v->overview, 0);
+  watch_map_scroll(G_OBJECT(v->map), NULL, v->overview);
+  g_signal_connect_object(buffer, "changed", G_CALLBACK(gtk_widget_queue_draw), v->overview, G_CONNECT_SWAPPED);
   signature_attach(tab); /* in the overlay */
   editor_view_apply_settings(tab);
 }
@@ -404,6 +466,7 @@ void editor_view_free(EditorView *v)
   diagnostics_clear(v->tab);
   signature_free(v->signature);
   semantic_free(v->semantic);
+  occurrences_free(v->occurrences);
   findbar_free(v->find);
   diff_gutter_free(v->diff);
   g_free(v->closers);

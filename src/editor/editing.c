@@ -393,33 +393,46 @@ static char *indent_unit(Tab *tab)
   return g_strnfill(gtk_source_view_get_tab_width(tab->source), ' ');
 }
 
-/* Enter between "{" and "}" (or another pair): the closer goes to a line of its own and the cursor
- * to an indented line between them. */
-static gboolean enter_between(Tab *tab)
+/* Enter after an opening bracket ("(", "[", "{", "<", blanks after it allowed): the new line one
+ * level deeper; between a pair ("{|}") the closer goes to a line of its own below it. Not in
+ * comments or strings. */
+static gboolean enter_after_open(Tab *tab)
 {
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
-  GtkTextIter cursor, before;
+  GtkTextIter cursor, before, after;
   char *line, *indent, *unit, *text;
-  gunichar open;
+  gunichar open, close;
+  gboolean pair;
 
   if (gtk_text_buffer_get_has_selection(buffer))
     return FALSE;
   cursor_iter(buffer, &cursor);
   before = cursor;
-  if (!gtk_text_iter_backward_char(&before))
-    return FALSE;
+  do {
+    if (gtk_text_iter_starts_line(&before) || !gtk_text_iter_backward_char(&before))
+      return FALSE;
+  } while (gtk_text_iter_get_char(&before) == ' ' || gtk_text_iter_get_char(&before) == '\t');
   open = gtk_text_iter_get_char(&before);
-  if (open == '"' || open == '\'' || !closer_of(open) || gtk_text_iter_get_char(&cursor) != closer_of(open))
+  close = open == '<' ? '>' : closer_of(open);
+  if (!close || open == '"' || open == '\'' || in_comment(tab, &before) ||
+      gtk_source_buffer_iter_has_context_class(tab->buffer, &before, "string"))
     return FALSE;
+  after = cursor; /* the blanks around the cursor go: none trail the bracket or start the new line */
+  while (gtk_text_iter_get_char(&after) == ' ' || gtk_text_iter_get_char(&after) == '\t')
+    gtk_text_iter_forward_char(&after);
+  pair = gtk_text_iter_get_char(&after) == close;
   line = line_text(buffer, gtk_text_iter_get_line(&cursor));
   indent = g_strndup(line, lead(line));
   unit = indent_unit(tab);
-  text = g_strconcat("\n", indent, unit, "\n", indent, NULL);
+  text = pair ? g_strconcat("\n", indent, unit, "\n", indent, NULL) : g_strconcat("\n", indent, unit, NULL);
+  gtk_text_iter_forward_char(&before);
   gtk_text_buffer_begin_user_action(buffer);
-  gtk_text_buffer_insert(buffer, &cursor, text, -1);
+  gtk_text_buffer_delete(buffer, &before, &after);
+  gtk_text_buffer_insert(buffer, &before, text, -1);
   gtk_text_buffer_end_user_action(buffer);
-  gtk_text_iter_backward_chars(&cursor, (int)g_utf8_strlen(indent, -1) + 1);
-  gtk_text_buffer_place_cursor(buffer, &cursor);
+  if (pair)
+    gtk_text_iter_backward_chars(&before, (int)g_utf8_strlen(indent, -1) + 1);
+  gtk_text_buffer_place_cursor(buffer, &before);
   gtk_text_view_scroll_mark_onscreen(GTK_TEXT_VIEW(tab->source), gtk_text_buffer_get_insert(buffer));
   g_clear_pointer(&tab->view->closers, g_free); /* the closer is on another line now */
   g_free(text);
@@ -461,7 +474,7 @@ static gboolean on_typing_key(GtkEventControllerKey *keys G_GNUC_UNUSED, guint k
   if (!editable(tab) || (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)))
     return FALSE;
   if (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter)
-    return !(state & GDK_SHIFT_MASK) && enter_between(tab);
+    return !(state & GDK_SHIFT_MASK) && enter_after_open(tab);
   if (key == GDK_KEY_BackSpace)
     return delete_pair(tab);
   c = gdk_keyval_to_unicode(key);
@@ -479,10 +492,48 @@ static gboolean on_typing_key(GtkEventControllerKey *keys G_GNUC_UNUSED, guint k
   return FALSE;
 }
 
+/* Words ------------------------------------------------------------------------------------ */
+
+static gboolean is_word_char(gunichar c)
+{
+  return g_unichar_isalnum(c) || c == '_';
+}
+
+gboolean editor_word_at(const GtkTextIter *iter, GtkTextIter *start, GtkTextIter *end)
+{
+  *start = *iter;
+  if (!is_word_char(gtk_text_iter_get_char(start))) { /* just after a word: that one */
+    if (!gtk_text_iter_backward_char(start) || !is_word_char(gtk_text_iter_get_char(start)))
+      return FALSE;
+  }
+  *end = *start;
+  while (gtk_text_iter_backward_char(start) && is_word_char(gtk_text_iter_get_char(start)))
+    ;
+  if (!is_word_char(gtk_text_iter_get_char(start)))
+    gtk_text_iter_forward_char(start);
+  while (is_word_char(gtk_text_iter_get_char(end)) && gtk_text_iter_forward_char(end))
+    ;
+  return TRUE;
+}
+
+/* A double click (and the drag after it) selects names only: letters, digits and "_", never the
+ * brackets or punctuation next to them (GtkSourceView's own words run up to the next blank). */
+static gboolean on_extend_selection(GtkTextView *view G_GNUC_UNUSED, GtkTextExtendSelection granularity,
+                                    const GtkTextIter *location, GtkTextIter *start, GtkTextIter *end,
+                                    gpointer data G_GNUC_UNUSED)
+{
+  if (granularity != GTK_TEXT_EXTEND_SELECTION_WORD)
+    return GDK_EVENT_PROPAGATE; /* a triple click's line */
+  if (!editor_word_at(location, start, end))
+    *start = *end = *location;
+  return GDK_EVENT_STOP;
+}
+
 void editing_attach(Tab *tab)
 {
   GtkEventController *keys = gtk_event_controller_key_new();
 
+  g_signal_connect(tab->source, "extend-selection", G_CALLBACK(on_extend_selection), NULL);
   gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
   g_signal_connect(keys, "key-pressed", G_CALLBACK(on_typing_key), tab);
   gtk_widget_add_controller(GTK_WIDGET(tab->source), keys);

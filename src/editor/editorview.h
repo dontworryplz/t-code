@@ -24,12 +24,14 @@ struct EditorView {
   Tab *tab;
   GtkWidget *overlay;     /* the text, with the find bar over it */
   GtkWidget *map;         /* the minimap */
-  GtkWidget *overview;    /* the problems strip: the whole file's errors and warnings */
+  GtkWidget *overview;    /* the problems strip: the whole file's errors and warnings, and the
+                           * selected name's occurrences */
   GPtrArray *diagnostics; /* lsp/diagnostics.c */
   FindBar *find;          /* made on the first Ctrl+F */
   DiffGutter *diff;
   struct SignatureHelp *signature; /* lsp/signature.c */
   struct Semantic *semantic;       /* lsp/semantic.c */
+  struct Occurrences *occurrences; /* editor/occurrences.c */
   char *closers;                   /* closing brackets and quotes typed for the user (editing.c), from the
                             * cursor to closers_end: typing one steps over it, Backspace takes the pair */
   GtkTextMark *closers_end;
