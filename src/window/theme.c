@@ -36,24 +36,23 @@ static const char *const css =
     "windowcontrols > button.close:hover { background: #c42b1c; color: #ffffff; }"
     "windowcontrols > button.close:active { background: #a52617; color: #ffffff; }"
 
-    /* Editor tabs: rounded on top, the current one in the editor's color, flowing into it. */
-    /* No frame: its 1px border pushed the tabs below the docks' headers. */
+    /* Editor tabs (editor/tabs.c's strip over each group): rounded on top, the current one in the
+     * editor's color, flowing into it. */
     "notebook, notebook.frame { background: none; border: none; }"
-    "notebook > header { background: #181818; border: none; box-shadow: none; padding: 4px 4px 0; }"
-    /* Adwaita pulls the tabs over its header border (which t-code has not) with a negative margin: an
-     * empty group then measured a negative height (a GTK warning). */
-    "notebook > header > tabs { margin: 0; }"
-    "notebook > header > tabs > tab { min-height: 30px; padding: 0 4px 0 12px; margin: 0 1px;"
-    "  border-radius: 9px 9px 0 0; background: none; box-shadow: none; border: none; outline: none; color: #9d9d9d; }"
-    "notebook > header > tabs > tab:hover { background: #222222; color: #cccccc; }"
-    "notebook > header > tabs > tab:checked { background: #1f1f1f; color: #ffffff;"
-    "  box-shadow: inset 0 2px #0078d4; }"
-    "notebook > header > tabs > tab button { min-width: 20px; min-height: 20px; padding: 0; margin: 0;"
+    ".tcode-tabs { background: #181818; padding: 4px 4px 0; }"
+    ".tcode-tab { min-height: 30px; padding: 0 4px 0 12px; margin: 0 1px; border-radius: 9px 9px 0 0;"
+    "  color: #9d9d9d; }"
+    ".tcode-tab:hover { background: #222222; color: #cccccc; }"
+    ".tcode-tab:checked { background: #1f1f1f; color: #ffffff; box-shadow: inset 0 2px #0078d4; }"
+    ".tcode-tab button { min-width: 20px; min-height: 20px; padding: 0; margin: 0;"
     "  border-radius: 6px; background: none; box-shadow: none; opacity: 0; }"
-    "notebook > header > tabs > tab:hover button, notebook > header > tabs > tab:checked button { opacity: 1; }"
-    "notebook > header > tabs > tab button:hover { background: rgba(255, 255, 255, .12); }"
-    "notebook > header > tabs > tab label.temporary { font-style: italic; }"
-    "notebook > header > arrow { border-radius: 6px; }"
+    ".tcode-tab:hover button, .tcode-tab:checked button { opacity: 1; }"
+    ".tcode-tab button:hover { background: rgba(255, 255, 255, .12); }"
+    ".tcode-tab label.temporary { font-style: italic; }"
+    /* The strip's scrollbar: thin, over the tabs' bottom edge, like VS Code's. */
+    ".tcode-tabs scrollbar.horizontal slider { min-height: 3px; border-radius: 0; background: rgba(121, 121, 121, .4); }"
+    ".tcode-tabs scrollbar.horizontal:hover slider { min-height: 5px; background: rgba(100, 100, 100, .7); }"
+    ".tcode-tabs scrollbar { background: none; border: none; }"
     "notebook > stack { background: #1f1f1f; }"
 
     /* Everything else rounded too. */
@@ -75,16 +74,15 @@ static const char *const square_css =
     ".tcode-status { border-top: 1px solid #2b2b2b; padding: 0 6px; }"
     ".tcode-status button { border-radius: 0; padding: 3px 8px; }"
 
-    "notebook > header { padding: 0; box-shadow: inset 0 -1px #2b2b2b; }"
+    ".tcode-tabs { padding: 0; box-shadow: inset 0 -1px #2b2b2b; }"
     /* 36px and the line under them, level with the docks' headers beside them. */
-    "notebook > header > tabs > tab { min-height: 37px; margin: 0; border-radius: 0;"
+    ".tcode-tab { min-height: 37px; margin: 0; border-radius: 0;"
     "  box-shadow: inset -1px 0 #2b2b2b, inset 0 -1px #2b2b2b; }"
-    "notebook > header > tabs > tab:hover { background: #1f1f1f; }"
+    ".tcode-tab:hover { background: #1f1f1f; }"
     /* The current tab keeps the line under the tabs too: flowing into the editor (VS Code's way), it
      * looked a pixel or two taller than the others. */
-    "notebook > header > tabs > tab:checked { box-shadow: inset 0 1px #0078d4, inset -1px 0 #2b2b2b,"
-    "  inset 0 -1px #2b2b2b; }"
-    "notebook > header > tabs > tab button, notebook > header > arrow { border-radius: 4px; }"
+    ".tcode-tab:checked { box-shadow: inset 0 1px #0078d4, inset -1px 0 #2b2b2b, inset 0 -1px #2b2b2b; }"
+    ".tcode-tab button { border-radius: 4px; }"
 
     "button, entry, spinbutton, textview, .tcode-scm .message { border-radius: 2px; }"
     "tooltip, tooltip.background { border-radius: 2px; }"

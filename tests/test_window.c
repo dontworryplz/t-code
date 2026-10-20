@@ -10,6 +10,7 @@
 #include "editor/editorview.h"
 #include "editor/tabs.h"
 #include "files/fileops.h"
+#include "files/opentabs.h"
 #include "git/compare.h"
 #include "ipc/socket.h"
 #include "project/session.h"
@@ -417,6 +418,140 @@ static void test_second_window(void)
   g_free(b);
 }
 
+/* The tab names in a group's strip, in order: "a.txt b.txt". */
+static char *strip_names(int group)
+{
+  GtkWidget *strip = gtk_widget_get_parent(tab_nth(&app, 0)->item);
+  GString *text = g_string_new(NULL);
+
+  for (int i = 0; i < tab_count(&app); i++)
+    if (tab_group(tab_nth(&app, i)) == group)
+      strip = gtk_widget_get_parent(tab_nth(&app, i)->item);
+  for (GtkWidget *w = gtk_widget_get_first_child(strip); w; w = gtk_widget_get_next_sibling(w)) {
+    Tab *tab = NULL;
+    for (int i = 0; i < tab_count(&app); i++)
+      if (tab_nth(&app, i)->item == w)
+        tab = tab_nth(&app, i);
+    char *name = g_path_get_basename(tab->path);
+    g_string_append_printf(text, "%s%s%s", text->len ? " " : "", name,
+                           gtk_widget_get_state_flags(w) & GTK_STATE_FLAG_CHECKED ? "!" : "");
+    g_free(name);
+  }
+  return g_string_free(text, FALSE);
+}
+
+static void assert_strip(int group, const char *want)
+{
+  char *now = strip_names(group);
+
+  g_assert_cmpstr(now, ==, want);
+  g_free(now);
+}
+
+static gboolean laid_out(gconstpointer item)
+{
+  return gtk_widget_get_width((GtkWidget *)item) > 30;
+}
+
+/* Each group's tab strip follows its tabs: their order, the current one ("!"), a tab moved to the
+ * other group or dropped among the tabs, a comparison (one tab). */
+static void test_tab_strip(void)
+{
+  open_kept("s1.txt");
+  open_kept("s2.txt");
+  open_kept("s3.txt");
+  assert_strip(0, "s1.txt s2.txt s3.txt!");
+  select_tab(tab_nth(&app, 0));
+  run(20);
+  assert_strip(0, "s1.txt! s2.txt s3.txt");
+
+  /* s3 dropped before s1 in the same strip */
+  GtkWidget *strip = gtk_widget_get_parent(tab_nth(&app, 0)->item);
+  GtkWidget *scrolled = gtk_widget_get_ancestor(strip, GTK_TYPE_SCROLLED_WINDOW);
+  GValue value = G_VALUE_INIT;
+  g_value_init(&value, G_TYPE_POINTER);
+  g_value_set_pointer(&value, tab_nth(&app, 2));
+  GtkDropTarget *target = NULL;
+  GListModel *controllers = gtk_widget_observe_controllers(scrolled);
+  for (guint i = 0; i < g_list_model_get_n_items(controllers) && !target; i++) {
+    GObject *controller = g_list_model_get_item(controllers, i);
+    if (GTK_IS_DROP_TARGET(controller))
+      target = GTK_DROP_TARGET(controller);
+    g_object_unref(controller);
+  }
+  g_object_unref(controllers);
+  g_assert_nonnull(target);
+  run_until(laid_out, gtk_widget_get_first_child(strip)); /* the drop is placed by the tabs' places */
+  gboolean dropped = FALSE;
+  g_signal_emit_by_name(target, "drop", &value, 0.0, 0.0, &dropped);
+  g_assert_true(dropped);
+  run(20);
+  assert_strip(0, "s3.txt! s1.txt s2.txt");
+  assert_tabs("s3.txt s1.txt s2.txt");
+
+  set_split(&app, TRUE);
+  move_tab(tab_nth(&app, 1), 1); /* s1 to the right */
+  run(20);
+  assert_strip(0, "s3.txt! s2.txt");
+  assert_strip(1, "s1.txt!");
+  g_value_unset(&value);
+  close_everything();
+}
+
+/* The Open Tabs list at the top of the Files panel (its first child). */
+static GtkListBox *open_tabs_list(void)
+{
+  GtkWidget *section = gtk_widget_get_first_child(app.files);
+  GtkWidget *scrolled = gtk_widget_get_last_child(section);
+
+  return GTK_LIST_BOX(gtk_widget_get_first_child(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled))));
+}
+
+static int list_rows(GtkListBox *list)
+{
+  int n = 0;
+
+  while (gtk_list_box_get_row_at_index(list, n))
+    n++;
+  return n;
+}
+
+/* Open Tabs lists every group's tabs (with group headings once two groups have tabs), the current
+ * one selected; a click shows a tab; it folds, and the session keeps that. */
+static void test_open_tabs(void)
+{
+  GtkListBox *list = open_tabs_list();
+  GtkListBoxRow *row;
+
+  open_kept("o1.txt");
+  open_kept("o2.txt");
+  run(50);
+  g_assert_cmpint(list_rows(list), ==, 2);
+  g_assert_true(gtk_list_box_get_selected_row(list) == gtk_list_box_get_row_at_index(list, 1)); /* o2 */
+
+  row = gtk_list_box_get_row_at_index(list, 0);
+  g_signal_emit_by_name(list, "row-activated", row);
+  run(50);
+  g_assert_true(current_tab(&app) == tab_nth(&app, 0)); /* o1 */
+
+  set_split(&app, TRUE);
+  move_tab(tab_nth(&app, 1), 1);
+  run(50);
+  g_assert_cmpint(list_rows(list), ==, 4); /* GROUP 1, o1, GROUP 2, o2 */
+
+  open_tabs_show(FALSE);
+  g_assert_false(open_tabs_shown());
+  session_save(&app);
+  open_tabs_show(TRUE);
+  session_apply_window(&app); /* as saved: folded */
+  g_assert_false(open_tabs_shown());
+  open_tabs_show(TRUE);
+  session_save(&app);
+  close_everything();
+  run(50);
+  g_assert_cmpint(list_rows(list), ==, 0);
+}
+
 /* A file opens at its left edge, also in a narrow view without word wrap (the cursor's reveal used to
  * scroll sideways by a few pixels, cutting off every line's first letters). */
 static void test_opens_at_left_edge(void)
@@ -606,6 +741,8 @@ int main(int argc, char **argv)
   g_test_add_func("/window/save-conflict", test_save_conflict);
   g_test_add_func("/window/socket-requests", test_socket_requests);
   g_test_add_func("/window/second-window", test_second_window);
+  g_test_add_func("/window/tab-strip", test_tab_strip);
+  g_test_add_func("/window/open-tabs", test_open_tabs);
 
   gapp = gtk_application_new("io.github.tcode.test", G_APPLICATION_NON_UNIQUE);
   g_object_set_data(G_OBJECT(gapp), "status", &status);

@@ -94,8 +94,11 @@ void focus_group(App *t, int group);
  * open there. */
 void create_groups(App *t);
 
-/* A new group's notebook (the second window's: window/secondwindow.c). */
+/* A new group's notebook (the second window's: window/secondwindow.c), under its tab strip. */
 GtkNotebook *new_tab_group(App *t);
+
+/* What to put in a window for a group: its tab strip over its notebook. */
+GtkWidget *tab_group_widget(GtkNotebook *group);
 
 /* Shows the tabs or the hint, whichever fits now. */
 void update_editor_area(App *t);

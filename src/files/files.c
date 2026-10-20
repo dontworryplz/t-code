@@ -14,6 +14,7 @@
 #include "files/icons.h"
 #include "git/compare.h"
 #include "project/project.h"
+#include "files/opentabs.h"
 #include "window/secondwindow.h"
 #include "window/terminal.h"
 
@@ -1044,6 +1045,7 @@ GtkWidget *files_panel(App *t)
   g_signal_connect(drop, "drop", G_CALLBACK(on_drop), NULL);
   gtk_widget_add_controller(files.panel, GTK_EVENT_CONTROLLER(drop));
 
+  gtk_box_append(GTK_BOX(files.panel), open_tabs_new(t));
   gtk_box_append(GTK_BOX(files.panel), GTK_WIDGET(files.title));
   gtk_box_append(GTK_BOX(files.panel), scroll);
   gtk_box_append(GTK_BOX(files.panel), GTK_WIDGET(files.message));
@@ -1089,7 +1091,8 @@ void files_apply_font(App *t)
   double points = (size > 0 ? size / (double)PANGO_SCALE : 11) * t->font_scale;
   char number[G_ASCII_DTOSTR_BUF_SIZE]; /* "11.5", not the locale's "11,5": CSS wants a dot */
   char *css_text =
-      g_strdup_printf(".tcode-files listview, .tcode-files .title { font-family: \"%s\", monospace; font-size: %spt; }",
+      g_strdup_printf(".tcode-files listview, .tcode-files .title, .tcode-opentabs list"
+                      " { font-family: \"%s\", monospace; font-size: %spt; }",
                       family ? family : "Cascadia Code", g_ascii_formatd(number, sizeof number, "%.1f", points));
 
   if (!files.font_css) {

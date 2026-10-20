@@ -9,6 +9,7 @@
 #include "editor/editorview.h"
 #include "editor/preview.h"
 #include "files/files.h"
+#include "files/opentabs.h"
 #include "git/compare.h"
 #include "window/statusbar.h"
 
@@ -23,6 +24,7 @@ static void tab_free(Tab *tab)
   if (tab->preview)
     preview_free(tab->preview);
   editor_view_free(tab->view);
+  g_clear_object(&tab->item);
   g_free(tab->compare.with);
   g_free(tab->compare.title);
   g_free(tab->path);
@@ -211,6 +213,7 @@ void close_all_tabs(App *t)
       gtk_notebook_remove_page(t->editors.groups[g], 0);
     }
   t->closing = closing;
+  open_tabs_changed(t); /* it was quiet meanwhile */
   if (!closing && t->editors.second) /* empty now */
     gtk_window_close(t->editors.second);
 }
@@ -240,6 +243,7 @@ void update_tab_label(Tab *tab)
   else
     gtk_widget_remove_css_class(GTK_WIDGET(tab->label), "temporary");
   gtk_widget_set_tooltip_text(gtk_widget_get_parent(GTK_WIDGET(tab->label)), tab->path);
+  open_tabs_changed(tab->app); /* "●", italics */
   g_free(text);
   g_free(name);
 }
@@ -251,47 +255,61 @@ static void on_tab_middle_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_pr
   close_tab(tab);
 }
 
-/* A double click on a temporary tab's label keeps it, like in VS Code. */
-static void on_tab_double_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press, double x G_GNUC_UNUSED,
-                                double y G_GNUC_UNUSED, Tab *tab)
+/* A click on a tab shows it; a double click on a temporary one keeps it, like in VS Code. */
+static void on_tab_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press, double x G_GNUC_UNUSED,
+                         double y G_GNUC_UNUSED, Tab *tab)
 {
-  if (n_press == 2)
+  if (n_press == 1)
+    select_tab(tab);
+  else if (n_press == 2)
     keep_tab(tab);
 }
 
-/* A tab's label: its name (update_tab_label fills it) and a close button. */
+/* A tab is dragged: what is carried is the Tab itself (drops look it up among the open tabs). */
+static GdkContentProvider *on_tab_drag(GtkDragSource *source, double x G_GNUC_UNUSED, double y G_GNUC_UNUSED, Tab *tab)
+{
+  GdkPaintable *icon = gtk_widget_paintable_new(tab->item);
+
+  gtk_drag_source_set_icon(source, icon, 0, 0);
+  g_object_unref(icon);
+  return gdk_content_provider_new_typed(G_TYPE_POINTER, tab);
+}
+
+/* A tab in the strip: its name (update_tab_label fills it) and a close button. */
 static GtkWidget *tab_label(Tab *tab)
 {
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
   GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
-  GtkGesture *middle = gtk_gesture_click_new(), *twice = gtk_gesture_click_new();
+  GtkGesture *middle = gtk_gesture_click_new(), *click = gtk_gesture_click_new();
+  GtkDragSource *drag = gtk_drag_source_new();
 
+  gtk_widget_add_css_class(box, "tcode-tab");
   tab->label = GTK_LABEL(gtk_label_new(NULL));
   gtk_box_append(GTK_BOX(box), GTK_WIDGET(tab->label));
   gtk_button_set_has_frame(GTK_BUTTON(close), FALSE);
   gtk_widget_set_focusable(close, FALSE);
+  gtk_widget_set_valign(close, GTK_ALIGN_CENTER);
   g_signal_connect_swapped(close, "clicked", G_CALLBACK(close_tab), tab);
   gtk_box_append(GTK_BOX(box), close);
 
   gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(middle), GDK_BUTTON_MIDDLE);
   g_signal_connect(middle, "pressed", G_CALLBACK(on_tab_middle_click), tab);
   gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(middle));
-  g_signal_connect(twice, "pressed", G_CALLBACK(on_tab_double_click), tab);
-  gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(twice));
+  g_signal_connect(click, "pressed", G_CALLBACK(on_tab_click), tab);
+  gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(click));
+  gtk_drag_source_set_actions(drag, GDK_ACTION_MOVE);
+  g_signal_connect(drag, "prepare", G_CALLBACK(on_tab_drag), tab);
+  gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(drag));
   return box;
 }
 
 /* Adding and moving -------------------------------------------------------------------------- */
 
-/* Puts a page into a group at position (-1: the end) and shows it; tabs can be dragged to
- * reorder them and to the other group. */
-static void insert_page(GtkNotebook *group, GtkWidget *page, GtkWidget *label, int position)
+/* Puts a page into a group at position (-1: the end) and shows it; its tab goes into the group's
+ * strip (sync_strip, from page-added). */
+static void insert_page(GtkNotebook *group, GtkWidget *page, int position)
 {
-  int index = gtk_notebook_insert_page(group, page, label, position);
-
-  gtk_notebook_set_tab_reorderable(group, page, TRUE);
-  gtk_notebook_set_tab_detachable(group, page, TRUE); /* drag between the two groups */
-  gtk_notebook_set_current_page(group, index);
+  gtk_notebook_set_current_page(group, gtk_notebook_insert_page(group, page, NULL, position));
 }
 
 /* Adds page as a tab of the active group, right after its current tab, and switches to it. */
@@ -299,16 +317,15 @@ Tab *add_tab(App *t, TabKind kind, GtkWidget *page, const char *path)
 {
   GtkNotebook *group = t->editors.groups[t->editors.active];
   Tab *tab = g_new0(Tab, 1);
-  GtkWidget *label;
 
   tab->app = t;
   tab->kind = kind;
   tab->page = page;
   tab->path = g_strdup(path);
   g_object_set_data_full(G_OBJECT(page), "t-code-tab", tab, (GDestroyNotify)tab_free);
-  label = tab_label(tab);
+  tab->item = g_object_ref_sink(tab_label(tab)); /* the tab's: it moves between strips */
   update_tab_label(tab);
-  insert_page(group, page, label, gtk_notebook_get_current_page(group) + 1);
+  insert_page(group, page, gtk_notebook_get_current_page(group) + 1);
   return tab;
 }
 
@@ -357,7 +374,6 @@ void join_tabs(Tab *left, Tab *right)
   App *t = left->app;
   GtkNotebook *group = t->editors.groups[tab_group(left)], *right_group = t->editors.groups[tab_group(right)];
   int position = tab_position(left);
-  GtkWidget *label = g_object_ref(gtk_notebook_get_tab_label(group, left->page));
   GtkPaned *paned = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_HORIZONTAL));
 
   g_object_ref(left->page);
@@ -373,9 +389,8 @@ void join_tabs(Tab *left, Tab *right)
   g_object_set_data(G_OBJECT(paned), "t-code-tab", left); /* tab_of(): the left side */
   left->frame = GTK_WIDGET(paned);
   left->compare.old_side = right;
-  insert_page(group, left->frame, label, position);
+  insert_page(group, left->frame, position);
   update_tab_label(left);
-  g_object_unref(label);
   g_object_unref(right->page);
   g_object_unref(left->page);
 }
@@ -384,24 +399,21 @@ void part_tabs(Tab *left)
 {
   App *t = left->app;
   GtkNotebook *group;
-  GtkWidget *label;
   int position;
 
   if (!left->compare.old_side)
     return;
   group = t->editors.groups[tab_group(left)];
   position = tab_position(left);
-  label = g_object_ref(gtk_notebook_get_tab_label(group, left->frame));
   unpair(left);
   g_object_ref(left->page);
   gtk_paned_set_start_child(GTK_PANED(left->frame), NULL);
   gtk_notebook_remove_page(group, gtk_notebook_page_num(group, left->frame)); /* the right side goes with it */
   left->frame = NULL;
   left->compare.old_side = NULL;
-  insert_page(group, left->page, label, position);
+  insert_page(group, left->page, position);
   update_tab_label(left);
   g_object_unref(left->page);
-  g_object_unref(label);
 }
 
 /* Moves a tab (with its editor) to the end of another group. */
@@ -409,15 +421,13 @@ void move_tab(Tab *tab, int to)
 {
   App *t = tab->app;
   int from = tab_group(tab);
-  GtkWidget *frame = frame_of(tab), *label = gtk_notebook_get_tab_label(t->editors.groups[from], frame);
+  GtkWidget *frame = frame_of(tab);
 
   if (from == to)
     return;
   g_object_ref(frame);
-  g_object_ref(label);
   gtk_notebook_remove_page(t->editors.groups[from], gtk_notebook_page_num(t->editors.groups[from], frame));
-  insert_page(t->editors.groups[to], frame, label, -1);
-  g_object_unref(label);
+  insert_page(t->editors.groups[to], frame, -1);
   g_object_unref(frame);
 }
 
@@ -509,15 +519,194 @@ static void on_group_focus(GtkEventControllerFocus *focus, App *t)
   update_status(t);
 }
 
-/* A tab group's notebook. They all share a group name, so tabs can be dragged between them. */
+/* The tab strip ------------------------------------------------------------------------------ */
+
+/* GtkNotebook's own tabs scroll with arrows only: each group shows its notebook's pages in a strip of
+ * its own instead, a box in a scrolled window (a thin scrollbar, the wheel scrolls it sideways). The
+ * notebook keeps the pages and their order; the strip follows it. */
+
+static GtkWidget *strip_of(GtkNotebook *group)
+{
+  return g_object_get_data(G_OBJECT(group), "t-code-strip");
+}
+
+/* Scrolls the strip to show the current tab (once the strip is laid out). */
+static gboolean reveal_current(gpointer data)
+{
+  GtkNotebook *group = data;
+  GtkWidget *strip = strip_of(group);
+  int current = gtk_notebook_get_current_page(group);
+  Tab *tab = current >= 0 ? tab_of(gtk_notebook_get_nth_page(group, current)) : NULL;
+  graphene_rect_t bounds;
+
+  g_object_set_data(G_OBJECT(group), "t-code-reveal", NULL);
+  if (strip && tab && gtk_widget_compute_bounds(tab->item, strip, &bounds)) {
+    GtkWidget *scrolled = gtk_widget_get_ancestor(strip, GTK_TYPE_SCROLLED_WINDOW);
+    GtkAdjustment *sideways = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(scrolled));
+    double value = gtk_adjustment_get_value(sideways), page = gtk_adjustment_get_page_size(sideways);
+    if (bounds.origin.x < value)
+      gtk_adjustment_set_value(sideways, bounds.origin.x);
+    else if (bounds.origin.x + bounds.size.width > value + page)
+      gtk_adjustment_set_value(sideways, bounds.origin.x + bounds.size.width - page);
+  }
+  g_object_unref(group);
+  return G_SOURCE_REMOVE;
+}
+
+/* Makes the strip hold the notebook's tabs in its order, the current one checked. */
+static void sync_strip(GtkNotebook *group)
+{
+  GtkWidget *strip = strip_of(group), *previous = NULL;
+  int n = gtk_notebook_get_n_pages(group), current = gtk_notebook_get_current_page(group);
+  GHashTable *items = g_hash_table_new(NULL, NULL);
+
+  if (!strip)
+    return;
+  for (int i = 0; i < n; i++)
+    g_hash_table_add(items, tab_of(gtk_notebook_get_nth_page(group, i))->item);
+  for (GtkWidget *w = gtk_widget_get_first_child(strip), *next; w; w = next) {
+    next = gtk_widget_get_next_sibling(w);
+    if (!g_hash_table_contains(items, w)) /* closed, or moved to another group */
+      gtk_box_remove(GTK_BOX(strip), w);
+  }
+  for (int i = 0; i < n; i++) {
+    GtkWidget *item = tab_of(gtk_notebook_get_nth_page(group, i))->item;
+    if (gtk_widget_get_parent(item) != strip) {
+      if (gtk_widget_get_parent(item)) /* still in the group it comes from */
+        gtk_box_remove(GTK_BOX(gtk_widget_get_parent(item)), item);
+      gtk_box_append(GTK_BOX(strip), item);
+    }
+    gtk_box_reorder_child_after(GTK_BOX(strip), item, previous);
+    if (i == current)
+      gtk_widget_set_state_flags(item, GTK_STATE_FLAG_CHECKED, FALSE);
+    else
+      gtk_widget_unset_state_flags(item, GTK_STATE_FLAG_CHECKED);
+    previous = item;
+  }
+  g_hash_table_destroy(items);
+  open_tabs_changed(g_object_get_data(G_OBJECT(group), "t-code-app"));
+  if (!g_object_get_data(G_OBJECT(group), "t-code-reveal")) {
+    g_object_set_data(G_OBJECT(group), "t-code-reveal", GINT_TO_POINTER(1));
+    g_idle_add(reveal_current, g_object_ref(group));
+  }
+}
+
+static void on_strip_laid_out(GtkNotebook *group)
+{
+  if (!g_object_get_data(G_OBJECT(group), "t-code-reveal")) {
+    g_object_set_data(G_OBJECT(group), "t-code-reveal", GINT_TO_POINTER(1));
+    g_idle_add(reveal_current, g_object_ref(group));
+  }
+}
+
+static void on_pages_changed(GtkNotebook *group)
+{
+  sync_strip(group);
+}
+
+/* The current page changes once the signal is done: the strip follows after it. */
+static void on_page_switched(GtkNotebook *group)
+{
+  sync_strip(group);
+}
+
+/* The wheel scrolls the strip sideways (it has no vertical scrolling for the wheel to do). */
+static gboolean on_strip_wheel(GtkEventControllerScroll *wheel, double dx, double dy, gpointer data G_GNUC_UNUSED)
+{
+  GtkWidget *scrolled = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(wheel));
+  GtkAdjustment *sideways = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(scrolled));
+  double step = gtk_event_controller_scroll_get_unit(wheel) == GDK_SCROLL_UNIT_WHEEL ? 40 : 1;
+
+  gtk_adjustment_set_value(sideways, gtk_adjustment_get_value(sideways) + (dy + dx) * step);
+  return TRUE;
+}
+
+/* A tab dropped on a strip: it goes to that group, where it was dropped among the tabs. */
+static gboolean on_tab_drop(GtkDropTarget *target, const GValue *value, double x, double y G_GNUC_UNUSED,
+                            GtkNotebook *group)
+{
+  App *t = g_object_get_data(G_OBJECT(group), "t-code-app");
+  GtkWidget *scrolled = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)), *strip = strip_of(group);
+  Tab *tab = g_value_get_pointer(value), *found = NULL;
+  int to = 0, position = 0, n = tab_count(t);
+  graphene_point_t at;
+
+  for (int i = 0; i < n && !found; i++) /* only a tab that is still open */
+    if (tab_nth(t, i) == tab)
+      found = tab;
+  for (int g = 0; g < GROUPS; g++)
+    if (t->editors.groups[g] == group)
+      to = g;
+  if (!found || !gtk_widget_compute_point(scrolled, strip, &GRAPHENE_POINT_INIT(x, 0), &at))
+    return FALSE;
+  /* Before the first tab whose middle is right of the drop. */
+  for (GtkWidget *w = gtk_widget_get_first_child(strip); w; w = gtk_widget_get_next_sibling(w), position++) {
+    graphene_rect_t bounds;
+    if (gtk_widget_compute_bounds(w, strip, &bounds) && at.x < bounds.origin.x + bounds.size.width / 2)
+      break;
+  }
+  if (tab_group(tab) != to) {
+    move_tab(tab, to);
+  } else if (tab_position(tab) < position) {
+    position--; /* it leaves its place first */
+  }
+  set_tab_position(tab, position);
+  select_tab(tab);
+  return TRUE;
+}
+
+/* The strip goes before its notebook when a window closes: the notebook's last page-removed signals
+ * must not reach it. */
+static void forget_strip(GtkNotebook *group)
+{
+  g_object_set_data(G_OBJECT(group), "t-code-strip", NULL);
+}
+
+GtkWidget *tab_group_widget(GtkNotebook *group)
+{
+  return g_object_get_data(G_OBJECT(group), "t-code-group");
+}
+
+/* A tab group's notebook (its pages), under its own tab strip; tab_group_widget() holds both, shown
+ * and hidden with the notebook. Tabs can be dragged between the groups' strips. */
 GtkNotebook *new_tab_group(App *t)
 {
   GtkNotebook *group = GTK_NOTEBOOK(gtk_notebook_new());
   GtkEventController *focus = gtk_event_controller_focus_new();
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0), *scrolled = gtk_scrolled_window_new();
+  GtkWidget *strip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  GtkEventController *wheel = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+  GtkDropTarget *drop = gtk_drop_target_new(G_TYPE_POINTER, GDK_ACTION_MOVE);
 
-  gtk_notebook_set_scrollable(group, TRUE);
-  gtk_notebook_set_group_name(group, "t-code-editors");
+  gtk_notebook_set_show_tabs(group, FALSE);
+  gtk_notebook_set_show_border(group, FALSE);
   gtk_widget_set_hexpand(GTK_WIDGET(group), TRUE);
+  gtk_widget_set_vexpand(GTK_WIDGET(group), TRUE);
+  g_object_set_data(G_OBJECT(group), "t-code-app", t);
+  g_object_set_data(G_OBJECT(group), "t-code-strip", strip);
+  g_signal_connect_object(strip, "destroy", G_CALLBACK(forget_strip), group, G_CONNECT_SWAPPED);
+  g_object_set_data(G_OBJECT(group), "t-code-group", box);
+
+  gtk_widget_add_css_class(scrolled, "tcode-tabs");
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), strip);
+  /* Laid out (tabs added, the window resized): the current tab stays in view. */
+  g_signal_connect_object(gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(scrolled)), "changed",
+                          G_CALLBACK(on_strip_laid_out), group, G_CONNECT_SWAPPED);
+  gtk_event_controller_set_propagation_phase(wheel, GTK_PHASE_CAPTURE);
+  g_signal_connect(wheel, "scroll", G_CALLBACK(on_strip_wheel), NULL);
+  gtk_widget_add_controller(scrolled, wheel);
+  g_signal_connect(drop, "drop", G_CALLBACK(on_tab_drop), group);
+  gtk_widget_add_controller(scrolled, GTK_EVENT_CONTROLLER(drop));
+  gtk_box_append(GTK_BOX(box), scrolled);
+  gtk_box_append(GTK_BOX(box), GTK_WIDGET(group));
+  gtk_widget_set_hexpand(box, TRUE);
+  g_object_bind_property(group, "visible", box, "visible", G_BINDING_SYNC_CREATE);
+
+  g_signal_connect(group, "page-added", G_CALLBACK(on_pages_changed), NULL);
+  g_signal_connect(group, "page-removed", G_CALLBACK(on_pages_changed), NULL);
+  g_signal_connect(group, "page-reordered", G_CALLBACK(on_pages_changed), NULL);
+  g_signal_connect_after(group, "switch-page", G_CALLBACK(on_page_switched), NULL);
   g_signal_connect(group, "page-added", G_CALLBACK(on_tabs_changed), t);
   g_signal_connect(group, "page-removed", G_CALLBACK(on_tabs_changed), t);
   g_signal_connect(group, "switch-page", G_CALLBACK(on_tab_switched), t);
@@ -534,8 +723,8 @@ void create_groups(App *t)
   for (int g = 0; g < WINDOW_GROUP; g++) /* the second window's comes with it */
     t->editors.groups[g] = new_tab_group(t);
   t->editors.split = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_HORIZONTAL));
-  gtk_paned_set_start_child(t->editors.split, GTK_WIDGET(t->editors.groups[0]));
-  gtk_paned_set_end_child(t->editors.split, GTK_WIDGET(t->editors.groups[1]));
+  gtk_paned_set_start_child(t->editors.split, tab_group_widget(t->editors.groups[0]));
+  gtk_paned_set_end_child(t->editors.split, tab_group_widget(t->editors.groups[1]));
   gtk_widget_set_visible(GTK_WIDGET(t->editors.groups[1]), FALSE);
 
   t->editors.area = GTK_STACK(gtk_stack_new());

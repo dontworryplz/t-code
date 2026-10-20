@@ -44,10 +44,10 @@ void show_second_window(App *t)
   gtk_window_set_title(window, gtk_window_get_title(t->window));
   gtk_window_set_titlebar(window, gtk_header_bar_new());
   gtk_window_set_default_size(window, 1000, 750);
-  gtk_widget_set_vexpand(group, TRUE);
-  make_card(group);
-  gtk_widget_add_css_class(group, "tcode-workspace");
-  gtk_window_set_child(window, group);
+  gtk_widget_set_vexpand(tab_group_widget(GTK_NOTEBOOK(group)), TRUE);
+  make_card(tab_group_widget(GTK_NOTEBOOK(group)));
+  gtk_widget_add_css_class(tab_group_widget(GTK_NOTEBOOK(group)), "tcode-workspace");
+  gtk_window_set_child(window, tab_group_widget(GTK_NOTEBOOK(group)));
   add_shortcuts_to(t, window);
   g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), t);
   g_signal_connect(window, "destroy", G_CALLBACK(on_destroy), t);

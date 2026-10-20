@@ -42,6 +42,7 @@ typedef struct Tab {
   GtkSourceBuffer *buffer;
   Preview *preview; /* previews only */
   GtkLabel *label;
+  GtkWidget *item; /* its tab in the group's tab strip (editor/tabs.c): the label and a close button */
   char *path;
   gboolean temporary; /* VS Code's preview editor: a click in Files opens it, the next one replaces it */
   gboolean modified;

@@ -12,6 +12,7 @@
 #include "editor/editor.h"
 #include "editor/preview.h"
 #include "editor/tabs.h"
+#include "files/opentabs.h"
 #include "git/scm.h"
 #include "window/secondwindow.h"
 #include "window/terminal.h"
@@ -222,6 +223,7 @@ void session_apply_window(App *t)
 
   gtk_window_set_default_size(t->window, get_int(kf, "window", "width", 1400), get_int(kf, "window", "height", 900));
   scm_show_commits(get_bool(kf, "window", "scm-commits", TRUE));
+  open_tabs_show(get_bool(kf, "window", "open-tabs", TRUE));
   if (get_bool(kf, "window", "maximized", FALSE))
     gtk_window_maximize(t->window);
   for (int pass = 0; pass < 2; pass++) {
@@ -432,6 +434,7 @@ void session_save(App *t)
     g_key_file_set_string(kf, "window", "sidebar-page", vis);
   g_key_file_set_double(kf, "window", "font-scale", t->font_scale);
   g_key_file_set_boolean(kf, "window", "scm-commits", scm_commits_shown());
+  g_key_file_set_boolean(kf, "window", "open-tabs", open_tabs_shown());
 
   g_key_file_set_string(kf, group, "root", t->project.root);
   for (int g = 0; g < GROUPS; g++) {
