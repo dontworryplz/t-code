@@ -21,13 +21,13 @@
 #define RELOAD_MS 200     /* a burst of changes on disk is looked at once */
 #define SNIFF_BYTES 65536 /* the start of a file, enough to tell its language and indentation */
 
-/* A message box over the window ("Could not save main.c"). */
-static void show_error(App *t, const char *message, const char *detail)
+/* A message box over the tab's window ("Could not save main.c"). */
+static void show_error(Tab *tab, const char *message, const char *detail)
 {
   GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", message);
 
   gtk_alert_dialog_set_detail(dialog, detail);
-  gtk_alert_dialog_show(dialog, t->window);
+  gtk_alert_dialog_show(dialog, tab_window(tab));
   g_object_unref(dialog);
 }
 
@@ -248,7 +248,7 @@ static void on_saved(GObject *source, GAsyncResult *result, gpointer data)
     } else if (!v->save_failed) { /* autosave would say it every second */
       char *name = g_path_get_basename(tab->path), *message = g_strdup_printf("Could not save %s", name);
       v->save_failed = TRUE;
-      show_error(tab->app, message, error->message);
+      show_error(tab, message, error->message);
       g_free(message);
       g_free(name);
     }
@@ -397,7 +397,7 @@ static void on_loaded(GObject *source, GAsyncResult *result, gpointer data)
     gtk_text_view_set_editable(GTK_TEXT_VIEW(tab->source), !v->readonly);
     if (!ok && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) { /* not found: a new file */
       char *name = g_path_get_basename(tab->path), *message = g_strdup_printf("Could not open %s", name);
-      show_error(tab->app, message, error->message);
+      show_error(tab, message, error->message);
       g_free(message);
       g_free(name);
     }
@@ -662,7 +662,7 @@ void quit_editor(Tab *tab)
   gtk_alert_dialog_set_buttons(dialog, buttons);
   gtk_alert_dialog_set_cancel_button(dialog, 0);
   gtk_alert_dialog_set_default_button(dialog, 2);
-  gtk_alert_dialog_choose(dialog, tab->app->window, NULL, on_close_answer, c);
+  gtk_alert_dialog_choose(dialog, tab_window(tab), NULL, on_close_answer, c);
   g_object_unref(dialog);
   g_free(name);
 }

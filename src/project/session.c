@@ -12,6 +12,7 @@
 #include "editor/editor.h"
 #include "editor/preview.h"
 #include "editor/tabs.h"
+#include "window/secondwindow.h"
 #include "window/terminal.h"
 #include "window/window.h"
 
@@ -20,8 +21,8 @@
 #define PREVIEW_PREFIX "preview:"
 #define MAX_RECENT 10
 
-static const char *const tab_keys[GROUPS] = { "tabs", "tabs-side" };
-static const char *const active_keys[GROUPS] = { "active", "active-side" };
+static const char *const tab_keys[GROUPS] = { "tabs", "tabs-side", "tabs-window" };
+static const char *const active_keys[GROUPS] = { "active", "active-side", "active-window" };
 
 /* ~/.config/t-code/session.ini */
 static char *session_file(void)
@@ -349,6 +350,16 @@ gboolean session_restore_tabs(App *t)
     }
     g_strfreev(side);
   }
+  char **window = g_key_file_get_string_list(kf, group, tab_keys[WINDOW_GROUP], NULL, NULL);
+  if (window && window[0]) { /* the second window's tabs */
+    show_second_window(t);
+    t->editors.active = WINDOW_GROUP;
+    int restored = restore_group(t, kf, group, WINDOW_GROUP);
+    if (!restored) /* its files are gone */
+      gtk_window_close(t->editors.second);
+    opened += restored;
+  }
+  g_strfreev(window);
   t->editors.active = 0;
   if (opened)
     focus_current_tab(t);
@@ -416,9 +427,9 @@ void session_save(App *t)
 
   g_key_file_set_string(kf, group, "root", t->project.root);
   for (int g = 0; g < GROUPS; g++) {
-    GtkNotebook *notebook = t->editors.groups[g];
-    int n = gtk_notebook_get_n_pages(notebook), kept = 0, active = 0;
-    int current = gtk_notebook_get_current_page(notebook);
+    GtkNotebook *notebook = t->editors.groups[g]; /* NULL: no second window */
+    int n = notebook ? gtk_notebook_get_n_pages(notebook) : 0, kept = 0, active = 0;
+    int current = notebook ? gtk_notebook_get_current_page(notebook) : -1;
     char **tabs = g_new0(char *, n + 1);
     for (int i = 0; i < n; i++) {
       Tab *tab = g_object_get_data(G_OBJECT(gtk_notebook_get_nth_page(notebook, i)), "t-code-tab");

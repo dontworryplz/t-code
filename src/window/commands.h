@@ -10,6 +10,10 @@
 /* Adds the table's shortcuts to the window. */
 void add_shortcuts(App *t);
 
+/* The same for another window (the second window): commands that are not about the focused editor
+ * bring the main window up first. */
+void add_shortcuts_to(App *t, GtkWindow *window);
+
 /* Opens the command palette. */
 void command_palette(App *t);
 

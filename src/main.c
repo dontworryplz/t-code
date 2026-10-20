@@ -127,6 +127,8 @@ static gboolean on_signal(gpointer data)
   if (t->window && !t->closing) { /* closing: the window is gone already */
     session_save(t);
     t->closing = TRUE;
+    if (t->editors.second)
+      gtk_window_destroy(t->editors.second);
     gtk_window_destroy(t->window);
   }
   t->closing = TRUE;

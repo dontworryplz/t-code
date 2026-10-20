@@ -526,6 +526,8 @@ static void close_window(App *t, const char *arg G_GNUC_UNUSED)
 {
   session_save(t);
   t->closing = TRUE;
+  if (t->editors.second) /* its tabs go with it, as the main window's do */
+    gtk_window_destroy(t->editors.second);
   gtk_window_destroy(t->window);
 }
 

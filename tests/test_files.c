@@ -33,6 +33,7 @@ void open_to_side(App *t G_GNUC_UNUSED, const char *path)
 
 /* clang-format off */
 void open_preview(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
+void open_in_new_window(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 gboolean is_markdown(const char *path) { return g_str_has_suffix(path, ".md"); }
 void compare_with_head(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void file_history(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}

@@ -2,7 +2,7 @@
  * The control socket, for scripts and tools (tools/headless.sh, packaging/smoke-test.sh); its path
  * is in $TCODE_SOCKET. One request per line; a client that ends its requests with NUL bytes instead
  * (a path may hold a line break: printf 'open %s\0' "$path") ends them all that way:
- *   open <path>        open-side <path>    preview <path>     project <dir>
+ *   open <path>        open-side <path>    open-window <path> preview <path>     project <dir>
  *   compare <path>     history <path>      terminal <dir>     copy <text>
  * Paths are absolute. "compare" and "history" are git comparisons (git/compare.c), "terminal"
  * does cd in the shell, "copy" puts text on the clipboard.
@@ -13,6 +13,7 @@
 #include "editor/preview.h"
 #include "git/compare.h"
 #include "project/project.h"
+#include "window/secondwindow.h"
 #include "window/terminal.h"
 
 #include <gio/gunixsocketaddress.h>
@@ -32,6 +33,8 @@ static void handle(App *t, const char *command, const char *arg)
     open_file(t, arg);
   else if (strcmp(command, "open-side") == 0)
     open_to_side(t, arg);
+  else if (strcmp(command, "open-window") == 0)
+    open_in_new_window(t, arg);
   else if (strcmp(command, "preview") == 0)
     open_preview(t, arg);
   else if (strcmp(command, "compare") == 0)

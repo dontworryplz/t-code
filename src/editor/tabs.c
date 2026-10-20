@@ -38,17 +38,27 @@ Tab *tab_of(GtkWidget *page)
   return g_object_get_data(G_OBJECT(page), "t-code-tab");
 }
 
+/* The tabs in a group; 0 for the second window's while there is none. */
+static int pages(App *t, int group)
+{
+  return t->editors.groups[group] ? gtk_notebook_get_n_pages(t->editors.groups[group]) : 0;
+}
+
 int tab_count(App *t)
 {
-  return gtk_notebook_get_n_pages(t->editors.groups[0]) + gtk_notebook_get_n_pages(t->editors.groups[1]);
+  int n = 0;
+
+  for (int g = 0; g < GROUPS; g++)
+    n += pages(t, g);
+  return n;
 }
 
 Tab *tab_nth(App *t, int index)
 {
-  int first = gtk_notebook_get_n_pages(t->editors.groups[0]);
-
-  return index < first ? tab_of(gtk_notebook_get_nth_page(t->editors.groups[0], index))
-                       : tab_of(gtk_notebook_get_nth_page(t->editors.groups[1], index - first));
+  for (int g = 0; g < GROUPS; index -= pages(t, g), g++)
+    if (index < pages(t, g))
+      return tab_of(gtk_notebook_get_nth_page(t->editors.groups[g], index));
+  return NULL;
 }
 
 /* The tab's notebook page: its own, or the comparison holding both sides. */
@@ -59,18 +69,32 @@ static GtkWidget *frame_of(Tab *tab)
 
 int tab_group(Tab *tab)
 {
-  return gtk_notebook_page_num(tab->app->editors.groups[1], frame_of(tab)) >= 0 ? 1 : 0;
+  for (int g = 1; g < GROUPS; g++)
+    if (tab->app->editors.groups[g] && gtk_notebook_page_num(tab->app->editors.groups[g], frame_of(tab)) >= 0)
+      return g;
+  return 0;
+}
+
+GtkWindow *tab_window(Tab *tab)
+{
+  return tab_group(tab) == WINDOW_GROUP ? tab->app->editors.second : tab->app->window;
+}
+
+/* The group's current tab, or NULL. */
+static Tab *group_current(App *t, int g)
+{
+  int current = t->editors.groups[g] ? gtk_notebook_get_current_page(t->editors.groups[g]) : -1;
+
+  return current >= 0 ? tab_of(gtk_notebook_get_nth_page(t->editors.groups[g], current)) : NULL;
 }
 
 Tab *current_tab(App *t)
 {
-  for (int k = 0; k < GROUPS; k++) {
-    GtkNotebook *group = t->editors.groups[k == 0 ? t->editors.active : 1 - t->editors.active];
-    int current = gtk_notebook_get_current_page(group);
-    if (current >= 0)
-      return tab_of(gtk_notebook_get_nth_page(group, current));
-  }
-  return NULL;
+  Tab *tab = group_current(t, t->editors.active);
+
+  for (int g = 0; g < GROUPS && !tab; g++)
+    tab = group_current(t, g);
+  return tab;
 }
 
 Tab *find_tab(App *t, TabKind kind, const char *path)
@@ -115,6 +139,8 @@ void focus_group(App *t, int group)
 {
   if (group == 1 && !gtk_widget_get_visible(GTK_WIDGET(t->editors.groups[1])))
     return;
+  if (group == WINDOW_GROUP && !t->editors.second)
+    return;
   t->editors.active = group;
   focus_current_tab(t);
 }
@@ -127,6 +153,8 @@ void select_tab(Tab *tab)
   gtk_notebook_set_current_page(t->editors.groups[group],
                                 gtk_notebook_page_num(t->editors.groups[group], frame_of(tab)));
   t->editors.active = group;
+  if (!gtk_window_is_active(tab_window(tab)))
+    gtk_window_present(tab_window(tab));
   gtk_widget_grab_focus(focus_widget(tab));
 }
 
@@ -174,13 +202,17 @@ static void close_tab(Tab *tab)
 
 void close_all_tabs(App *t)
 {
+  gboolean closing = t->closing;
+
   t->closing = TRUE; /* quiet while the tabs go */
   for (int g = 0; g < GROUPS; g++)
-    while (gtk_notebook_get_n_pages(t->editors.groups[g]) > 0) {
+    while (pages(t, g) > 0) {
       unpair(tab_of(gtk_notebook_get_nth_page(t->editors.groups[g], 0)));
       gtk_notebook_remove_page(t->editors.groups[g], 0);
     }
-  t->closing = FALSE;
+  t->closing = closing;
+  if (!closing && t->editors.second) /* empty now */
+    gtk_window_close(t->editors.second);
 }
 
 /* Labels ------------------------------------------------------------------------------------- */
@@ -282,7 +314,7 @@ Tab *add_tab(App *t, TabKind kind, GtkWidget *page, const char *path)
 
 Tab *temporary_tab(App *t, int group)
 {
-  for (int i = 0; i < gtk_notebook_get_n_pages(t->editors.groups[group]); i++) {
+  for (int i = 0; i < pages(t, group); i++) {
     Tab *tab = tab_of(gtk_notebook_get_nth_page(t->editors.groups[group], i));
     if (tab->temporary)
       return tab;
@@ -372,7 +404,7 @@ void part_tabs(Tab *left)
   g_object_unref(label);
 }
 
-/* Moves a tab (with its editor) to the end of the other group. */
+/* Moves a tab (with its editor) to the end of another group. */
 void move_tab(Tab *tab, int to)
 {
   App *t = tab->app;
@@ -395,7 +427,7 @@ void update_editor_area(App *t)
 {
   gboolean split = gtk_widget_get_visible(GTK_WIDGET(t->editors.groups[1]));
 
-  gtk_stack_set_visible_child_name(t->editors.area, tab_count(t) > 0 || split ? "tabs" : "empty");
+  gtk_stack_set_visible_child_name(t->editors.area, pages(t, 0) > 0 || split ? "tabs" : "empty");
 }
 
 void set_split(App *t, gboolean split)
@@ -431,6 +463,25 @@ static gboolean unsplit_if_empty(gpointer data)
   return G_SOURCE_REMOVE;
 }
 
+/* The second window goes when its last tab closes (or moves away). */
+static gboolean close_window_if_empty(gpointer data)
+{
+  App *t = data;
+
+  if (!t->closing && t->editors.second && pages(t, WINDOW_GROUP) == 0)
+    gtk_window_close(t->editors.second);
+  return G_SOURCE_REMOVE;
+}
+
+/* Which group a notebook is. */
+static int group_index(App *t, GtkWidget *notebook)
+{
+  for (int g = 1; g < GROUPS; g++)
+    if (notebook == GTK_WIDGET(t->editors.groups[g]))
+      return g;
+  return 0;
+}
+
 /* A tab was added to or removed from a group. */
 static void on_tabs_changed(GtkNotebook *group, GtkWidget *child G_GNUC_UNUSED, guint index G_GNUC_UNUSED, App *t)
 {
@@ -440,26 +491,26 @@ static void on_tabs_changed(GtkNotebook *group, GtkWidget *child G_GNUC_UNUSED, 
   update_status(t);
   if (group == t->editors.groups[1] && gtk_notebook_get_n_pages(group) == 0)
     g_idle_add(unsplit_if_empty, t);
+  if (group == t->editors.groups[WINDOW_GROUP] && gtk_notebook_get_n_pages(group) == 0)
+    g_idle_add(close_window_if_empty, t);
 }
 
 /* Another tab became the current one of a group: that group is the active one now. */
 static void on_tab_switched(GtkNotebook *group, GtkWidget *page G_GNUC_UNUSED, guint index G_GNUC_UNUSED, App *t)
 {
-  t->editors.active = group == t->editors.groups[1];
+  t->editors.active = group_index(t, GTK_WIDGET(group));
   update_status(t);
 }
 
 /* A click into a group makes it the active one (new tabs go there). */
 static void on_group_focus(GtkEventControllerFocus *focus, App *t)
 {
-  GtkWidget *group = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(focus));
-
-  t->editors.active = group == GTK_WIDGET(t->editors.groups[1]);
+  t->editors.active = group_index(t, gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(focus)));
   update_status(t);
 }
 
-/* One of the two notebooks. Both share a group name, so tabs can be dragged between them. */
-static GtkNotebook *new_group(App *t)
+/* A tab group's notebook. They all share a group name, so tabs can be dragged between them. */
+GtkNotebook *new_tab_group(App *t)
 {
   GtkNotebook *group = GTK_NOTEBOOK(gtk_notebook_new());
   GtkEventController *focus = gtk_event_controller_focus_new();
@@ -480,8 +531,8 @@ void create_groups(App *t)
 {
   GtkWidget *hint = gtk_label_new("Open a file from the file manager on the left, or press Ctrl+P");
 
-  for (int g = 0; g < GROUPS; g++)
-    t->editors.groups[g] = new_group(t);
+  for (int g = 0; g < WINDOW_GROUP; g++) /* the second window's comes with it */
+    t->editors.groups[g] = new_tab_group(t);
   t->editors.split = GTK_PANED(gtk_paned_new(GTK_ORIENTATION_HORIZONTAL));
   gtk_paned_set_start_child(t->editors.split, GTK_WIDGET(t->editors.groups[0]));
   gtk_paned_set_end_child(t->editors.split, GTK_WIDGET(t->editors.groups[1]));

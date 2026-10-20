@@ -14,6 +14,7 @@
 #include "ipc/socket.h"
 #include "project/session.h"
 #include "project/userfiles.h"
+#include "window/secondwindow.h"
 #include "window/window.h"
 
 #include <gio/gunixsocketaddress.h>
@@ -363,6 +364,59 @@ static void test_socket_requests(void)
   g_free(odd);
 }
 
+static gboolean no_second_window(gconstpointer data G_GNUC_UNUSED)
+{
+  return app.editors.second == NULL;
+}
+
+/* "Open in New Window": the file's tab goes to a second window (one tab per file still); closing that
+ * window brings its tabs back, and the session remembers them. */
+static void test_second_window(void)
+{
+  char *a = file("w1.txt"), *b = file("w2.txt");
+  Tab *tab;
+
+  open_kept("w1.txt");
+  open_in_new_window(&app, a); /* already open: its tab moves */
+  run(50);
+  g_assert_nonnull(app.editors.second);
+  g_assert_cmpint(tab_count(&app), ==, 1);
+  tab = find_tab(&app, TAB_EDITOR, a);
+  g_assert_cmpint(tab_group(tab), ==, WINDOW_GROUP);
+  g_assert_true(tab_window(tab) == app.editors.second);
+  open_file(&app, a); /* still one tab */
+  g_assert_cmpint(tab_count(&app), ==, 1);
+
+  open_kept("w2.txt");
+  move_to_new_window(&app); /* the current tab: w2.txt, opened in the active group (the window's) */
+  g_assert_cmpint(tab_group(find_tab(&app, TAB_EDITOR, b)), ==, WINDOW_GROUP);
+
+  session_save(&app);
+  gtk_window_close(app.editors.second); /* the tabs come back */
+  run_until(no_second_window, NULL);
+  g_assert_null(app.editors.second);
+  g_assert_cmpint(tab_count(&app), ==, 2);
+  g_assert_cmpint(tab_group(find_tab(&app, TAB_EDITOR, a)), ==, 0);
+  g_assert_cmpint(tab_group(find_tab(&app, TAB_EDITOR, b)), ==, 0);
+
+  close_everything();
+  session_restore_tabs(&app); /* as saved: both in the second window */
+  run(100);
+  g_assert_nonnull(app.editors.second);
+  g_assert_cmpint(tab_group(find_tab(&app, TAB_EDITOR, a)), ==, WINDOW_GROUP);
+  g_assert_cmpint(tab_group(find_tab(&app, TAB_EDITOR, b)), ==, WINDOW_GROUP);
+
+  remove_tab(find_tab(&app, TAB_EDITOR, a));
+  remove_tab(find_tab(&app, TAB_EDITOR, b)); /* the last one: the window goes */
+  run_until(no_second_window, NULL);
+  g_assert_null(app.editors.second);
+  g_assert_cmpint(app.editors.active, ==, 0);
+  close_everything();
+  session_save(&app);
+  g_free(a);
+  g_free(b);
+}
+
 /* A file opens at its left edge, also in a narrow view without word wrap (the cursor's reveal used to
  * scroll sideways by a few pixels, cutting off every line's first letters). */
 static void test_opens_at_left_edge(void)
@@ -551,6 +605,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/comparisons-in-a-row", test_comparisons_in_a_row);
   g_test_add_func("/window/save-conflict", test_save_conflict);
   g_test_add_func("/window/socket-requests", test_socket_requests);
+  g_test_add_func("/window/second-window", test_second_window);
 
   gapp = gtk_application_new("io.github.tcode.test", G_APPLICATION_NON_UNIQUE);
   g_object_set_data(G_OBJECT(gapp), "status", &status);

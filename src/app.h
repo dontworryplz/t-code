@@ -59,8 +59,10 @@ typedef struct Tab {
   } compare;              /* a comparison's two sides (git/compare.c) */
 } Tab;
 
-/* The editor area holds two tab groups side by side; the second one only while split. */
-#define GROUPS 2
+/* The editor area holds two tab groups side by side (the second one only while split); a third
+ * one is the second window's ("Open in New Window"), while it is open. */
+#define GROUPS 3
+#define WINDOW_GROUP 2
 #define DOCKS 12 /* 0..3: left stacked, 4..7: bottom side-by-side, 8..11: right stacked */
 
 struct App {
@@ -89,8 +91,9 @@ struct App {
   /* editors */
   struct {
     GtkStack *area;
-    GtkNotebook *groups[GROUPS];
-    int active;      /* the group new tabs go to */
+    GtkNotebook *groups[GROUPS]; /* groups[WINDOW_GROUP]: NULL while there is no second window */
+    GtkWindow *second;           /* the second window (window/secondwindow.c), or NULL */
+    int active;                  /* the group new tabs go to */
     GtkPaned *split; /* groups[0] | groups[1] */
     GtkToggleButton *split_button;
   } editors;

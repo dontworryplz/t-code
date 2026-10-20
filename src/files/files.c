@@ -14,6 +14,7 @@
 #include "files/icons.h"
 #include "git/compare.h"
 #include "project/project.h"
+#include "window/secondwindow.h"
 #include "window/terminal.h"
 
 #include <string.h>
@@ -609,6 +610,8 @@ static void on_menu_action(GSimpleAction *action, GVariant *param G_GNUC_UNUSED,
     }
   } else if (strcmp(name, "open-side") == 0) {
     open_to_side(t, path);
+  } else if (strcmp(name, "open-window") == 0) {
+    open_in_new_window(t, path);
   } else if (strcmp(name, "preview") == 0) {
     open_preview(t, path);
   } else if (strcmp(name, "project") == 0) {
@@ -669,10 +672,11 @@ static void show_menu(const char *path, double x, double y)
     add_section(menu, (const char *const[]){ "Open", "open", "Open Folder as Project", "project", NULL });
   } else if (path) {
     if (is_markdown(path))
-      add_section(menu, (const char *const[]){ "Open", "open", "Open to the Side", "open-side", "Open Preview",
-                                               "preview", NULL });
+      add_section(menu, (const char *const[]){ "Open", "open", "Open to the Side", "open-side", "Open in New Window",
+                                               "open-window", "Open Preview", "preview", NULL });
     else
-      add_section(menu, (const char *const[]){ "Open", "open", "Open to the Side", "open-side", NULL });
+      add_section(menu, (const char *const[]){ "Open", "open", "Open to the Side", "open-side", "Open in New Window",
+                                               "open-window", NULL });
     if (files.app->project.git_top)
       add_section(menu, (const char *const[]){ "Compare with HEAD", "compare", "File History…", "history", NULL });
   }
@@ -973,9 +977,9 @@ static GtkPopover *build_ask(void)
 
 static void add_actions(void)
 {
-  static const char *const names[] = { "open",      "open-side",     "preview",  "project", "compare", "history",
-                                       "new-file",  "new-folder",    "terminal", "cut",     "copy",    "paste",
-                                       "copy-path", "copy-relative", "rename",   "delete" };
+  static const char *const names[] = { "open",    "open-side", "open-window",   "preview",  "project", "compare",
+                                       "history", "new-file",  "new-folder",    "terminal", "cut",     "copy",
+                                       "paste",   "copy-path", "copy-relative", "rename",   "delete" };
   GSimpleActionGroup *group = g_simple_action_group_new();
 
   for (size_t i = 0; i < G_N_ELEMENTS(names); i++) {

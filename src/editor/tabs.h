@@ -25,8 +25,11 @@ Tab *current_tab(App *t);
 /* The tab of that kind showing path, or NULL. */
 Tab *find_tab(App *t, TabKind kind, const char *path);
 
-/* The group a tab is in: 0 or 1. */
+/* The group a tab is in: 0, 1 or WINDOW_GROUP. */
 int tab_group(Tab *tab);
+
+/* The window a tab is in: the main one, or the second window. Its dialogs go over it. */
+GtkWindow *tab_window(Tab *tab);
 
 /* Whether an editor has unsaved changes. */
 gboolean any_unsaved(App *t);
@@ -55,7 +58,7 @@ void part_tabs(Tab *left);
 int tab_position(Tab *tab);
 void set_tab_position(Tab *tab, int position);
 
-/* Moves a tab (with its editor) to the end of the other group. */
+/* Moves a tab (with its editor) to the end of another group. */
 void move_tab(Tab *tab, int group);
 
 /* Takes the tab out of its group at once, unsaved changes or not; a comparison goes with both
@@ -63,7 +66,7 @@ void move_tab(Tab *tab, int group);
  * quit_editor(), which asks about unsaved changes. */
 void remove_tab(Tab *tab);
 
-/* Removes every tab without asking (a project switch, after asking). */
+/* Removes every tab without asking (a project switch, after asking); the second window goes too. */
 void close_all_tabs(App *t);
 
 /* The label: the file name, "●" when unsaved, "Preview" for previews, in italics while temporary;
@@ -81,13 +84,18 @@ void step_tab(App *t, int step);
 /* Gives the keyboard to the current tab, or to the file manager when there is none. */
 void focus_current_tab(App *t);
 
-/* Makes a group (0 or 1) the active one and focuses its tab; 1 only while split. */
+/* Makes a group the active one and focuses its tab; 1 only while split, WINDOW_GROUP only while
+ * the second window is open. */
 void focus_group(App *t, int group);
 
 /* The groups --------------------------------------------------------------------------------- */
 
-/* Creates both groups and t->editors.area, which shows a hint while no tab is open. */
+/* Creates the main window's two groups and t->editors.area, which shows a hint while no tab is
+ * open there. */
 void create_groups(App *t);
+
+/* A new group's notebook (the second window's: window/secondwindow.c). */
+GtkNotebook *new_tab_group(App *t);
 
 /* Shows the tabs or the hint, whichever fits now. */
 void update_editor_area(App *t);

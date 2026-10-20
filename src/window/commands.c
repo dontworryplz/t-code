@@ -22,6 +22,7 @@
 #include "project/project.h"
 #include "project/run.h"
 #include "project/userfiles.h"
+#include "window/secondwindow.h"
 #include "window/statusbar.h"
 #include "window/window.h"
 
@@ -34,6 +35,8 @@ typedef struct {
   void (*run)(App *t);
   gboolean editor; /* the shortcut works in an editor (or its find bar) only: elsewhere the
                           * key goes on (Ctrl+W deletes a word in the shell) */
+  gboolean here;   /* from the second window, it stays there (it is about its tabs) instead of bringing
+                    * the main window up */
 } Command;
 
 /* What the commands do ----------------------------------------------------------------------- */
@@ -189,59 +192,60 @@ static void history(App *t)
 /* The table ---------------------------------------------------------------------------------- */
 
 static const Command commands[] = {
-  { "Save", "<Control>s", "Ctrl+S", save, TRUE },
-  { "Close Tab", "<Control>w|<Control>q", "Ctrl+W", close_current, TRUE },
-  { "Go to File…", "<Control>p", "Ctrl+P", quick_open_show, FALSE },
-  { "Search in Files", "<Control><Shift>f", "Ctrl+Shift+F", show_search, FALSE },
-  { "Command Palette…", "<Control><Shift>p|F1", "Ctrl+Shift+P, F1", command_palette, FALSE },
-  { "Go to Line…", "<Control>g", "Ctrl+G", go_to_line, TRUE },
-  { "Find", "<Control>f", "Ctrl+F", find, TRUE },
-  { "Replace", "<Control>h", "Ctrl+H", replace, TRUE },
-  { "Find Next", "F3", "F3, Enter", find_next, TRUE },
-  { "Find Previous", "<Shift>F3", "Shift+F3, Shift+Enter", find_previous, TRUE },
-  { "Toggle Line Comment", "<Control>slash|<Control>KP_Divide|<Alt>slash", "Ctrl+/", comment, TRUE },
-  { "Duplicate Line", "<Control>d|<Shift><Alt>Down", "Ctrl+D", duplicate, TRUE },
-  { "Move Line Up", "<Alt>Up", "Alt+↑", line_up, TRUE },
-  { "Move Line Down", "<Alt>Down", "Alt+↓", line_down, TRUE },
-  { "Delete Line", "<Control><Shift>k", "Ctrl+Shift+K", delete_line, TRUE },
-  { "Redo", "<Control>y", "Ctrl+Y, Ctrl+Shift+Z", redo, TRUE },
-  { "Go to Definition", "F12|<Alt>d", "F12, Ctrl+Click", definition, TRUE },
-  { "Go Back", "<Alt>Left", "Alt+←", go_back, TRUE },
-  { "Find All References", "<Shift>F12|<Alt>r", "Shift+F12", references, TRUE },
-  { "Rename Symbol", "F2", "F2", rename_it, TRUE },
-  { "Format Document", "<Shift><Alt>f|<Alt>f", "Shift+Alt+F", format, TRUE },
-  { "Trigger Suggest", "<Control>space", "Ctrl+Space", suggest, TRUE },
-  { "Trigger Parameter Hints", "<Control><Shift>space", "Ctrl+Shift+Space", parameter_hints, TRUE },
-  { "Build", "<Control><Shift>b", "Ctrl+Shift+B", build, FALSE },
-  { "Build and Run", "F5", "F5", run, FALSE },
-  { "Git: Compare with HEAD", "<Control><Alt>d", "Ctrl+Alt+D", compare_head, FALSE },
-  { "Git: File History…", "<Control><Alt>h", "Ctrl+Alt+H", history, FALSE },
-  { "Git: Stop Comparing", NULL, NULL, stop_comparing, FALSE },
-  { "Markdown Preview", "<Control><Shift>v", "Ctrl+Shift+V", preview, FALSE },
-  { "Split Editor", "<Control>backslash", "Ctrl+\\", toggle_split, FALSE },
-  { "Focus Left Editor Group", "<Control>1", "Ctrl+1", focus_left, FALSE },
-  { "Focus Right Editor Group", "<Control>2", "Ctrl+2", focus_right, FALSE },
-  { "Next Tab", "<Control>Page_Down|<Alt>period", "Ctrl+PageDown, Alt+.", next_tab, FALSE },
-  { "Previous Tab", "<Control>Page_Up|<Alt>comma", "Ctrl+PageUp, Alt+,", prev_tab, FALSE },
-  { "Focus File Manager", "<Alt>1", "Alt+1", focus_fm, FALSE },
-  { "Focus Editor", "<Alt>2", "Alt+2", focus_current_tab, FALSE },
-  { "Focus Shell", "<Alt>3", "Alt+3", focus_shell, FALSE },
-  { "Toggle Sidebar", "<Control>b", "Ctrl+B", toggle_files, FALSE },
-  { "Toggle Shell", "<Control>j", "Ctrl+J", toggle_shell, FALSE },
-  { "Source Control", "<Control><Shift>g", "Ctrl+Shift+G", show_scm, FALSE },
-  { "Toggle Code Coloring", "F7", "F7", toggle_syntax, FALSE },
-  { "clangd: Restart Language Server", NULL, NULL, lsp_restart, FALSE },
-  { "Change Indentation for This Project…", NULL, NULL, status_pick_indent, FALSE },
-  { "Zoom In", "<Control>equal|<Control>plus|<Control>KP_Add", "Ctrl+=", zoom_in, FALSE },
-  { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out, FALSE },
-  { "Reset Zoom", "<Control>0|<Control>KP_0", "Ctrl+0", zoom_reset, FALSE },
-  { "Open Folder…", "<Control><Shift>o", "Ctrl+Shift+O", choose_folder, FALSE },
-  { "Settings…", "<Control>comma", "Ctrl+,", show_settings, FALSE },
-  { "Preferences: Open Settings File", NULL, NULL, open_settings_file, FALSE },
-  { "Preferences: Open Theme CSS", NULL, NULL, open_user_theme, FALSE },
-  { "Preferences: Open Editor Colors", NULL, NULL, open_editor_colors, FALSE },
-  { "Keyboard Shortcuts", NULL, NULL, show_keybinds, FALSE },
-  { "About t-code", NULL, NULL, show_about, FALSE },
+  { "Save", "<Control>s", "Ctrl+S", save, TRUE, FALSE },
+  { "Close Tab", "<Control>w|<Control>q", "Ctrl+W", close_current, TRUE, FALSE },
+  { "Go to File…", "<Control>p", "Ctrl+P", quick_open_show, FALSE, FALSE },
+  { "Search in Files", "<Control><Shift>f", "Ctrl+Shift+F", show_search, FALSE, FALSE },
+  { "Command Palette…", "<Control><Shift>p|F1", "Ctrl+Shift+P, F1", command_palette, FALSE, FALSE },
+  { "Go to Line…", "<Control>g", "Ctrl+G", go_to_line, TRUE, FALSE },
+  { "Find", "<Control>f", "Ctrl+F", find, TRUE, FALSE },
+  { "Replace", "<Control>h", "Ctrl+H", replace, TRUE, FALSE },
+  { "Find Next", "F3", "F3, Enter", find_next, TRUE, FALSE },
+  { "Find Previous", "<Shift>F3", "Shift+F3, Shift+Enter", find_previous, TRUE, FALSE },
+  { "Toggle Line Comment", "<Control>slash|<Control>KP_Divide|<Alt>slash", "Ctrl+/", comment, TRUE, FALSE },
+  { "Duplicate Line", "<Control>d|<Shift><Alt>Down", "Ctrl+D", duplicate, TRUE, FALSE },
+  { "Move Line Up", "<Alt>Up", "Alt+↑", line_up, TRUE, FALSE },
+  { "Move Line Down", "<Alt>Down", "Alt+↓", line_down, TRUE, FALSE },
+  { "Delete Line", "<Control><Shift>k", "Ctrl+Shift+K", delete_line, TRUE, FALSE },
+  { "Redo", "<Control>y", "Ctrl+Y, Ctrl+Shift+Z", redo, TRUE, FALSE },
+  { "Go to Definition", "F12|<Alt>d", "F12, Ctrl+Click", definition, TRUE, FALSE },
+  { "Go Back", "<Alt>Left", "Alt+←", go_back, TRUE, FALSE },
+  { "Find All References", "<Shift>F12|<Alt>r", "Shift+F12", references, TRUE, FALSE },
+  { "Rename Symbol", "F2", "F2", rename_it, TRUE, FALSE },
+  { "Format Document", "<Shift><Alt>f|<Alt>f", "Shift+Alt+F", format, TRUE, FALSE },
+  { "Trigger Suggest", "<Control>space", "Ctrl+Space", suggest, TRUE, FALSE },
+  { "Trigger Parameter Hints", "<Control><Shift>space", "Ctrl+Shift+Space", parameter_hints, TRUE, FALSE },
+  { "Build", "<Control><Shift>b", "Ctrl+Shift+B", build, FALSE, FALSE },
+  { "Build and Run", "F5", "F5", run, FALSE, FALSE },
+  { "Git: Compare with HEAD", "<Control><Alt>d", "Ctrl+Alt+D", compare_head, FALSE, FALSE },
+  { "Git: File History…", "<Control><Alt>h", "Ctrl+Alt+H", history, FALSE, FALSE },
+  { "Git: Stop Comparing", NULL, NULL, stop_comparing, FALSE, TRUE },
+  { "Markdown Preview", "<Control><Shift>v", "Ctrl+Shift+V", preview, FALSE, TRUE },
+  { "Split Editor", "<Control>backslash", "Ctrl+\\", toggle_split, FALSE, FALSE },
+  { "View: Move Editor into New Window", NULL, NULL, move_to_new_window, FALSE, TRUE },
+  { "Focus Left Editor Group", "<Control>1", "Ctrl+1", focus_left, FALSE, FALSE },
+  { "Focus Right Editor Group", "<Control>2", "Ctrl+2", focus_right, FALSE, FALSE },
+  { "Next Tab", "<Control>Page_Down|<Alt>period", "Ctrl+PageDown, Alt+.", next_tab, FALSE, TRUE },
+  { "Previous Tab", "<Control>Page_Up|<Alt>comma", "Ctrl+PageUp, Alt+,", prev_tab, FALSE, TRUE },
+  { "Focus File Manager", "<Alt>1", "Alt+1", focus_fm, FALSE, FALSE },
+  { "Focus Editor", "<Alt>2", "Alt+2", focus_current_tab, FALSE, TRUE },
+  { "Focus Shell", "<Alt>3", "Alt+3", focus_shell, FALSE, FALSE },
+  { "Toggle Sidebar", "<Control>b", "Ctrl+B", toggle_files, FALSE, FALSE },
+  { "Toggle Shell", "<Control>j", "Ctrl+J", toggle_shell, FALSE, FALSE },
+  { "Source Control", "<Control><Shift>g", "Ctrl+Shift+G", show_scm, FALSE, FALSE },
+  { "Toggle Code Coloring", "F7", "F7", toggle_syntax, FALSE, TRUE },
+  { "clangd: Restart Language Server", NULL, NULL, lsp_restart, FALSE, FALSE },
+  { "Change Indentation for This Project…", NULL, NULL, status_pick_indent, FALSE, FALSE },
+  { "Zoom In", "<Control>equal|<Control>plus|<Control>KP_Add", "Ctrl+=", zoom_in, FALSE, TRUE },
+  { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out, FALSE, TRUE },
+  { "Reset Zoom", "<Control>0|<Control>KP_0", "Ctrl+0", zoom_reset, FALSE, TRUE },
+  { "Open Folder…", "<Control><Shift>o", "Ctrl+Shift+O", choose_folder, FALSE, FALSE },
+  { "Settings…", "<Control>comma", "Ctrl+,", show_settings, FALSE, FALSE },
+  { "Preferences: Open Settings File", NULL, NULL, open_settings_file, FALSE, FALSE },
+  { "Preferences: Open Theme CSS", NULL, NULL, open_user_theme, FALSE, FALSE },
+  { "Preferences: Open Editor Colors", NULL, NULL, open_editor_colors, FALSE, FALSE },
+  { "Keyboard Shortcuts", NULL, NULL, show_keybinds, FALSE, FALSE },
+  { "About t-code", NULL, NULL, show_about, FALSE, FALSE },
 };
 
 const KeyHelp *window_keys(int *n)
@@ -268,18 +272,27 @@ static gboolean in_editor(GtkWidget *focus)
 static gboolean on_shortcut(GtkWidget *window, GVariant *args G_GNUC_UNUSED, gpointer data)
 {
   const Command *command = data;
+  App *t = g_object_get_data(G_OBJECT(window), "t-code-app");
 
   if (command->editor && !in_editor(gtk_root_get_focus(GTK_ROOT(window))))
     return FALSE;
-  command->run(g_object_get_data(G_OBJECT(window), "t-code-app"));
+  /* In the second window: the panels, pickers and the shell are in the main window. */
+  if (!command->editor && window != GTK_WIDGET(t->window) && !command->here)
+    gtk_window_present(t->window);
+  command->run(t);
   return TRUE;
 }
 
 void add_shortcuts(App *t)
 {
+  add_shortcuts_to(t, t->window);
+}
+
+void add_shortcuts_to(App *t, GtkWindow *window)
+{
   GtkEventController *controller = gtk_shortcut_controller_new();
 
-  g_object_set_data(G_OBJECT(t->window), "t-code-app", t);
+  g_object_set_data(G_OBJECT(window), "t-code-app", t);
   /* Capture phase: the window sees these keys before the focused terminal or editor does. */
   gtk_event_controller_set_propagation_phase(controller, GTK_PHASE_CAPTURE);
   for (size_t i = 0; i < G_N_ELEMENTS(commands); i++) {
@@ -290,7 +303,7 @@ void add_shortcuts(App *t)
         gtk_shortcut_new(gtk_shortcut_trigger_parse_string(commands[i].trigger),
                          gtk_callback_action_new(on_shortcut, (gpointer)&commands[i], NULL)));
   }
-  gtk_widget_add_controller(GTK_WIDGET(t->window), controller);
+  gtk_widget_add_controller(GTK_WIDGET(window), controller);
 }
 
 /* Command palette ---------------------------------------------------------------------------- */
