@@ -225,6 +225,23 @@ static void test_head_moves(void)
   g_assert_true(head_moved_after(before));
 }
 
+/* A folded Commits section runs no git log; it lists the commits once it opens. */
+static void test_commits_folded(void)
+{
+  open_project_at(with_commits);
+  wait_for(2, commits);
+  scm_show_commits(FALSE);
+  g_assert_false(scm_commits_shown());
+  git(with_commits, (const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                      "-m", "folded", NULL });
+  commits++;
+  poll_branch(&app);
+  runs_for(800);
+  g_assert_cmpint(rows(2), ==, commits - 1); /* the old list, not read again */
+  scm_show_commits(TRUE);
+  wait_for(2, commits);
+}
+
 int main(int argc, char **argv)
 {
   int status;
@@ -262,6 +279,7 @@ int main(int argc, char **argv)
   g_test_add_func("/scm/late-log", test_late_log);
   g_test_add_func("/scm/late-status", test_late_status);
   g_test_add_func("/scm/head-moves", test_head_moves);
+  g_test_add_func("/scm/commits-folded", test_commits_folded);
   status = g_test_run();
 
   app.closing = TRUE;

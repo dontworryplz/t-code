@@ -13,5 +13,9 @@ GtkWidget *scm_panel(App *t);
  * (size bytes; out NULL: not a repository, or git failed). gitstatus.c calls it with each answer. */
 void scm_update(App *t, const char *out, gsize size);
 
+/* Whether the Commits section is open (not folded), and opening or folding it (the session keeps it). */
+gboolean scm_commits_shown(void);
+void scm_show_commits(gboolean shown);
+
 /* Empties the panel at once (another project was opened); the next git status fills it again. */
 void scm_reset(void);

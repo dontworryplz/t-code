@@ -30,7 +30,8 @@ static struct {
   GtkLabel *note; /* the last error or result */
   GtkListBox *staged_list, *changes_list, *commits_list;
   GtkLabel *staged_title, *changes_title;
-  GtkWidget *staged_box, *changes_box;
+  GtkWidget *staged_box, *changes_box, *commits_box;
+  gboolean commits_stale;      /* HEAD moved while Commits was folded: listed once it opens */
   GPtrArray *staged, *changes; /* Change */
   char *head;                  /* the commit HEAD is at: commits are listed again when it moves */
   char *upstream;
@@ -55,7 +56,8 @@ static const char *const css =
     ".tcode-scm .primary:hover { background: #026ec1; }"
     ".tcode-scm .note { color: #9d9d9d; font-size: 0.85em; margin: 0 10px 4px; }"
     ".tcode-scm .note.error { color: #f14c4c; }"
-    ".tcode-scm .section { font-size: 0.8em; font-weight: bold; color: #cccccc; padding: 2px 10px; }"
+    ".tcode-scm .section { font-size: 0.8em; font-weight: bold; color: #cccccc; padding: 2px 10px 2px 2px; }"
+    ".tcode-scm .section .chevron { -gtk-icon-size: 12px; margin-right: 4px; color: #cccccc; }"
     ".tcode-scm list { background: transparent; }"
     ".tcode-scm row { padding: 0 6px 0 18px; margin: 0 4px; min-height: 22px; border-radius: 6px; color: #cccccc; }"
     ".tcode-scm row:hover { background: #2a2d2e; }"
@@ -838,7 +840,10 @@ void scm_update(App *t, const char *out, gsize size)
   if (!head || scm.initial || g_strcmp0(head, scm.head) != 0) {
     g_free(scm.head);
     scm.head = head;
-    if (head && !scm.initial)
+    scm.commits_stale = FALSE;
+    if (head && !scm.initial && !scm_commits_shown())
+      scm.commits_stale = TRUE; /* folded: no git log until it opens */
+    else if (head && !scm.initial)
       load_commits();
     else
       clear_list(scm.commits_list);
@@ -888,14 +893,57 @@ static gboolean on_message_key(GtkEventControllerKey *controller G_GNUC_UNUSED, 
   return FALSE;
 }
 
-/* A section heading with buttons on its right; the list goes below it in the returned box. */
+/* A section opens or folds; Commits lists what it missed while folded. */
+static void set_section_open(GtkWidget *box, gboolean open)
+{
+  GtkWidget *head = gtk_widget_get_first_child(box), *list = gtk_widget_get_next_sibling(head);
+
+  gtk_widget_set_visible(list, open);
+  gtk_image_set_from_icon_name(GTK_IMAGE(gtk_widget_get_first_child(head)),
+                               open ? "pan-down-symbolic" : "pan-end-symbolic");
+  if (open && box == scm.commits_box && scm.commits_stale) {
+    scm.commits_stale = FALSE;
+    load_commits();
+  }
+}
+
+/* A click on a section's heading (not on its buttons) opens or folds it, like VS Code's. */
+static void on_section_click(GtkGestureClick *click, int n G_GNUC_UNUSED, double x G_GNUC_UNUSED,
+                             double y G_GNUC_UNUSED, GtkWidget *box)
+{
+  GtkWidget *list = gtk_widget_get_next_sibling(gtk_widget_get_first_child(box));
+
+  gtk_gesture_set_state(GTK_GESTURE(click), GTK_EVENT_SEQUENCE_CLAIMED);
+  set_section_open(box, !gtk_widget_get_visible(list));
+}
+
+gboolean scm_commits_shown(void)
+{
+  return !scm.commits_box ||
+         gtk_widget_get_visible(gtk_widget_get_next_sibling(gtk_widget_get_first_child(scm.commits_box)));
+}
+
+void scm_show_commits(gboolean shown)
+{
+  if (scm.commits_box)
+    set_section_open(scm.commits_box, shown);
+}
+
+/* A section heading (a fold arrow, the title, buttons on its right); the list goes below it in the
+ * returned box. */
 static GtkWidget *section(GtkLabel **title, const char *text, GtkListBox **list, GtkWidget *buttons[], int n)
 {
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
   GtkWidget *label = gtk_label_new(text);
+  GtkWidget *chevron = gtk_image_new_from_icon_name("pan-down-symbolic");
+  GtkGesture *click = gtk_gesture_click_new();
 
   gtk_widget_add_css_class(head, "section");
+  gtk_widget_add_css_class(chevron, "chevron");
+  gtk_box_append(GTK_BOX(head), chevron);
+  g_signal_connect(click, "released", G_CALLBACK(on_section_click), box);
+  gtk_widget_add_controller(head, GTK_EVENT_CONTROLLER(click));
   gtk_label_set_xalign(GTK_LABEL(label), 0);
   gtk_widget_set_hexpand(label, TRUE);
   gtk_box_append(GTK_BOX(head), label);
@@ -990,7 +1038,8 @@ GtkWidget *scm_panel(App *t)
   scm.changes_box = section(&scm.changes_title, "CHANGES", &scm.changes_list, changes_buttons, 1);
   gtk_box_append(GTK_BOX(content), scm.staged_box);
   gtk_box_append(GTK_BOX(content), scm.changes_box);
-  gtk_box_append(GTK_BOX(content), section(NULL, "COMMITS", &scm.commits_list, commits_buttons, 1));
+  scm.commits_box = section(NULL, "COMMITS", &scm.commits_list, commits_buttons, 1);
+  gtk_box_append(GTK_BOX(content), scm.commits_box);
   gtk_list_box_set_activate_on_single_click(scm.staged_list, TRUE);
   gtk_list_box_set_activate_on_single_click(scm.changes_list, TRUE);
   gtk_list_box_set_activate_on_single_click(scm.commits_list, TRUE);
