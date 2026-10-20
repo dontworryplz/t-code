@@ -47,6 +47,15 @@ static void on_minimap(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpoint
   session_save_settings(t);
 }
 
+static void on_sticky_scroll(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+  App *t = app_of(GTK_WIDGET(toggle));
+
+  t->settings.sticky_scroll = gtk_switch_get_active(toggle);
+  each_editor(t);
+  session_save_settings(t);
+}
+
 static void on_coloring(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
 {
   App *t = app_of(GTK_WIDGET(toggle));
@@ -322,6 +331,9 @@ void show_settings(App *t)
   add_heading(GTK_GRID(grid), &row, "Editor");
   add_row(GTK_GRID(grid), &row, "Minimap", "A small picture of the file next to the scrollbar",
           switch_for(t->settings.minimap, G_CALLBACK(on_minimap)));
+  add_row(GTK_GRID(grid), &row, "Sticky scroll",
+          "The first lines of the blocks around the top (namespace, function, loop) stay at the top",
+          switch_for(t->settings.sticky_scroll, G_CALLBACK(on_sticky_scroll)));
   add_row(GTK_GRID(grid), &row, "Code coloring", "Also F7", switch_for(!t->plain, G_CALLBACK(on_coloring)));
   add_row(GTK_GRID(grid), &row, "Indent guides",
           "Lines at each indentation level; the block around the cursor in color",

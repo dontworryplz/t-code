@@ -26,6 +26,9 @@ void folding_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot);
  * the editor: valid until its next change. */
 GArray *folding_blocks(Tab *tab);
 
+/* The line numbers' renderer (sticky scroll puts its numbers where they are). */
+GtkWidget *folding_line_numbers(Tab *tab);
+
 /* Folds the innermost block around the cursor, or unfolds it (Ctrl+Shift+[ and ]). */
 void fold_at_cursor(Tab *tab);
 void unfold_at_cursor(Tab *tab);

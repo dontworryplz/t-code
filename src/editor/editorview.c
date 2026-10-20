@@ -11,6 +11,7 @@
 #include "editor/folding.h"
 #include "editor/guides.h"
 #include "editor/occurrences.h"
+#include "editor/sticky.h"
 #include "lsp/client.h"
 #include "lsp/completion.h"
 #include "lsp/diagnostics.h"
@@ -193,6 +194,7 @@ void editor_view_apply_settings(Tab *tab)
   gtk_widget_queue_draw(GTK_WIDGET(view)); /* the indent guides, turned off or on */
   if (tab->compare.old_side)               /* a comparison's right side is in no tab list */
     editor_view_apply_settings(tab->compare.old_side);
+  sticky_apply_settings(tab);
   status_show_indent(t);
 }
 
@@ -474,6 +476,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   g_signal_connect_object(v->map, "notify::vadjustment", G_CALLBACK(watch_map_scroll), v->overview, 0);
   watch_map_scroll(G_OBJECT(v->map), NULL, v->overview);
   g_signal_connect_object(buffer, "changed", G_CALLBACK(gtk_widget_queue_draw), v->overview, G_CONNECT_SWAPPED);
+  sticky_attach(tab);    /* over the text's top */
   signature_attach(tab); /* in the overlay */
   editor_view_apply_settings(tab);
 }
@@ -491,6 +494,7 @@ void editor_view_free(EditorView *v)
   findbar_free(v->find);
   diff_gutter_free(v->diff);
   folding_free(v->folding);
+  sticky_free(v->sticky);
   g_free(v->closers);
   for (guint i = 0; i < v->next_waiters->len; i++) {
     SaveWaiter *w = &g_array_index(v->next_waiters, SaveWaiter, i);

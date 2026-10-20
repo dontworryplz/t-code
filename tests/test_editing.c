@@ -944,6 +944,60 @@ static void test_folding(void)
   free_tab(tab);
 }
 
+/* Sticky scroll: the heads of the blocks around the top line stay at the top, outermost first; a
+ * click on one goes to it; the setting turns them off. */
+static void test_sticky(void)
+{
+  GString *text = g_string_new("namespace app {\nint f()\n{\n  for (;;) {\n");
+  GtkWidget *window = gtk_window_new();
+  Tab *tab;
+
+  for (int i = 0; i < 300; i++)
+    g_string_append_printf(text, "    step(%d);\n", i);
+  g_string_append(text, "  }\n}\n}\n");
+  app.settings.sticky_scroll = TRUE;
+  tab = new_tab(text->str);
+  gtk_window_set_default_size(GTK_WINDOW(window), 600, 300);
+  gtk_window_set_child(GTK_WINDOW(window), tab->page);
+  gtk_window_present(GTK_WINDOW(window));
+  for (gint64 until = g_get_monotonic_time() + 3 * G_USEC_PER_SEC;
+       !gtk_widget_get_mapped(GTK_WIDGET(tab->source)) && g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, TRUE);
+  run_for(300);
+  if (!gtk_widget_get_mapped(GTK_WIDGET(tab->source))) {
+    g_test_skip("the window was not shown");
+  } else {
+    Sticky *st = tab->view->sticky;
+    GtkAdjustment *vertical = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(tab->source));
+    g_assert_cmpint(st->count, ==, 0); /* at the top: nothing is above */
+    gtk_adjustment_set_value(vertical, 100 * st->row);
+    run_for(200);
+    g_assert_cmpint(st->count, ==, 3);
+    g_assert_cmpint(st->lines[0], ==, 0); /* namespace app { */
+    g_assert_cmpint(st->lines[1], ==, 1); /* int f(), its brace on the next line */
+    g_assert_cmpint(st->lines[2], ==, 3); /* for (;;) { */
+    g_assert_true(gtk_widget_get_visible(st->area));
+
+    on_sticky_click(NULL, 1, 10, st->row * 1.5, st); /* the second one */
+    run_for(200);
+    GtkTextIter cursor;
+    gtk_text_buffer_get_iter_at_mark(GTK_TEXT_BUFFER(tab->buffer), &cursor,
+                                     gtk_text_buffer_get_insert(GTK_TEXT_BUFFER(tab->buffer)));
+    g_assert_cmpint(gtk_text_iter_get_line(&cursor), ==, 1);
+
+    gtk_adjustment_set_value(vertical, 100 * st->row);
+    app.settings.sticky_scroll = FALSE;
+    editor_view_apply_settings(tab);
+    run_for(200);
+    g_assert_cmpint(st->count, ==, 0);
+    g_assert_false(gtk_widget_get_visible(st->area));
+  }
+  gtk_window_set_child(GTK_WINDOW(window), NULL); /* the tab keeps the page */
+  gtk_window_destroy(GTK_WINDOW(window));
+  free_tab(tab);
+  g_string_free(text, TRUE);
+}
+
 /* The indentation in use: the settings, then the file's own, the config files, the project's
  * choice; a Makefile keeps tabs. */
 static void test_indent_order(void)
@@ -1051,6 +1105,7 @@ int main(int argc, char **argv)
   g_test_add_func("/diff-gutter/comparison-gaps", test_comparison_gaps);
   g_test_add_func("/diff-gutter/wrapped-heights", test_wrapped_heights);
   g_test_add_func("/folding/fold-unfold", test_folding);
+  g_test_add_func("/sticky/heads", test_sticky);
   g_test_add_func("/guides/brackets", test_guide_brackets);
   g_test_add_func("/guides/pair", test_guide_pair);
   g_test_add_func("/guides/pair-in-comment", test_guide_pair_in_comment);

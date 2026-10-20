@@ -568,6 +568,11 @@ void folding_attach(Tab *tab)
   tab->view->folding = f;
 }
 
+GtkWidget *folding_line_numbers(Tab *tab)
+{
+  return tab->view && tab->view->folding ? tab->view->folding->numbers : NULL;
+}
+
 void folding_free(Folding *f)
 {
   if (!f)

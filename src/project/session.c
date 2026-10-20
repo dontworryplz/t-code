@@ -118,6 +118,7 @@ void session_load_settings(App *t)
   char *theme = g_key_file_get_string(kf, "settings", "theme", NULL);
 
   t->settings.minimap = get_bool(kf, "settings", "minimap", TRUE);
+  t->settings.sticky_scroll = get_bool(kf, "settings", "sticky-scroll", TRUE);
   t->settings.reopen_last = get_bool(kf, "settings", "reopen-last-project", TRUE);
   t->settings.autosave = get_bool(kf, "settings", "autosave", TRUE);
   t->settings.tabs_to_spaces = get_bool(kf, "settings", "tabs-to-spaces", TRUE);
@@ -171,6 +172,10 @@ void session_save_settings(App *t)
   explain(kf, "theme", " rounded: the panels as rounded cards on a darker frame; square: flat, lines between them");
   g_key_file_set_boolean(kf, "settings", "minimap", t->settings.minimap);
   explain(kf, "minimap", " A small picture of the file next to the scrollbar");
+  g_key_file_set_boolean(kf, "settings", "sticky-scroll", t->settings.sticky_scroll);
+  explain(kf, "sticky-scroll",
+          " The first lines of the blocks around the editor's top (namespace, function, loop) stay\n"
+          " at its top");
   g_key_file_set_boolean(kf, "settings", "code-coloring", !t->plain);
   explain(kf, "code-coloring", " Syntax colors in the editors (also F7)");
   g_key_file_set_boolean(kf, "settings", "indent-guides", t->settings.guides);

@@ -8,6 +8,7 @@
 #include "editor/blocks.c"
 #include "editor/diffgutter.c"
 #include "editor/folding.c"
+#include "editor/sticky.c"
 #include "git/linediff.c"
 #include "editor/editing.c"
 #include "editor/editorview.c"

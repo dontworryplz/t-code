@@ -34,6 +34,7 @@ struct EditorView {
   struct Semantic *semantic;       /* lsp/semantic.c */
   struct Occurrences *occurrences; /* editor/occurrences.c */
   struct Folding *folding;         /* editor/folding.c */
+  struct Sticky *sticky;           /* editor/sticky.c */
   char *closers;                   /* closing brackets and quotes typed for the user (editing.c), from the
                             * cursor to closers_end: typing one steps over it, Backspace takes the pair */
   GtkTextMark *closers_end;
