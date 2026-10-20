@@ -1409,8 +1409,10 @@ void open_preview(App *t, const char *path)
   p->pictures = g_ptr_array_new();
   p->buffer = gtk_text_buffer_new(NULL);
   PangoFontDescription *font = pango_font_description_from_string(t->settings.font ? t->settings.font : DEFAULT_FONT);
-  create_tags(p->buffer,
-              pango_font_description_get_family(font) ? pango_font_description_get_family(font) : "monospace");
+  const char *family = pango_font_description_get_family(font);
+  char *families = g_strconcat(family ? family : "monospace", ",monospace", NULL); /* when it is not installed */
+  create_tags(p->buffer, families);
+  g_free(families);
   pango_font_description_free(font);
   TcodePreviewView *view = g_object_new(TCODE_TYPE_PREVIEW_VIEW, "buffer", p->buffer, NULL);
   view->preview = p;

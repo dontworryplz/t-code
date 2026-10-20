@@ -16,3 +16,8 @@ char *compile_db_find(const char *file);
  * ("compile-flags.txt", "Compile_Commands.json"), which clangd does not read; NULL when there is
  * none. */
 char *compile_db_misnamed(const char *file, const char *root);
+
+/* Whether the C library's headers (for cxx also the C++ library's, /usr/include/c++) are installed
+ * under sysroot ("/" but in tests). Without them no compile flags make clangd find <stdio.h>: the
+ * compiler's and the C library's development packages are missing. */
+gboolean compile_db_system_headers(const char *sysroot, gboolean cxx);

@@ -2,7 +2,8 @@
  * t-code's look: VS Code Dark Modern colors on rounded panels ("cards") that sit on the darker
  * frame of the title bar and the status bar. GTK's built-in theme is the base, not the desktop's
  * (Yaru, Breeze, ...), so t-code looks the same everywhere. This CSS goes over it, and the panels'
- * own CSS (window/statusbar.c, git/scm.c, popups/picker.c, ...) over this.
+ * own CSS (window/statusbar.c, git/scm.c, popups/picker.c, ...) over this. The square theme goes
+ * over the panels' CSS, and the user's theme.css over everything.
  */
 #include "window/theme.h"
 
@@ -61,8 +62,44 @@ static const char *const css =
     "popover > contents { border-radius: 10px; }"
     "popover modelbutton { border-radius: 6px; }";
 
+/* The square theme: VS Code's flat panels, side by side with a line between them, square tabs with
+ * the accent line on top of the current one, and small corners on the controls. Over the panels'
+ * own CSS, so their corners go too. */
+static const char *const square_css =
+    ".tcode-workspace { margin: 0; }"
+    "paned > separator { min-width: 1px; min-height: 1px; background: #2b2b2b; }"
+    ".tcode-card { border-radius: 0; }"
+    "headerbar { border-bottom: 1px solid #2b2b2b; }"
+    "headerbar button, windowcontrols > button { border-radius: 4px; }"
+    ".tcode-status { border-top: 1px solid #2b2b2b; padding: 0 6px; }"
+    ".tcode-status button { border-radius: 0; padding: 3px 8px; }"
+
+    "notebook > header { padding: 0; box-shadow: inset 0 -1px #2b2b2b; }"
+    "notebook > header > tabs > tab { min-height: 34px; margin: 0; border-radius: 0;"
+    "  box-shadow: inset -1px 0 #2b2b2b, inset 0 -1px #2b2b2b; }"
+    "notebook > header > tabs > tab:hover { background: #1f1f1f; }"
+    "notebook > header > tabs > tab:checked { box-shadow: inset 0 1px #0078d4, inset -1px 0 #2b2b2b; }"
+    "notebook > header > tabs > tab button, notebook > header > arrow { border-radius: 4px; }"
+
+    "button, entry, spinbutton, textview, .tcode-scm .message { border-radius: 2px; }"
+    "tooltip, tooltip.background { border-radius: 2px; }"
+    "popover > contents { border-radius: 4px; }"
+    "popover modelbutton { border-radius: 2px; }"
+    ".tcode-dock-header { background: #181818; }"
+    ".tcode-sidebar stackswitcher button, .tcode-dock-close { border-radius: 4px; }"
+    ".tcode-scm row, .tcode-search row { margin: 0; border-radius: 0; }"
+    ".tcode-search .field, .tcode-search button, .tcode-find entry, .tcode-find button,"
+    ".tcode-keybinds .keys, .tcode-signature { border-radius: 2px; }"
+    ".tcode-find { border-radius: 0; }"
+    ".tcode-picker { border-radius: 4px; }"
+    ".tcode-picker row { border-radius: 2px; }"
+    ".tcode-editor scrollbar slider { border-radius: 0; }";
+
+static GtkCssProvider *square;    /* square_css while the square theme is on */
+static GtkCssProvider *user_look; /* theme.css */
+
 /* Before any window: GTK picks up the theme name when it styles the first one. */
-void load_theme(void)
+void load_theme(App *t)
 {
   GtkCssProvider *provider = gtk_css_provider_new();
 
@@ -73,6 +110,37 @@ void load_theme(void)
   gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION - 1);
   g_object_unref(provider);
+  square = gtk_css_provider_new();
+  gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(square),
+                                             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+  user_look = gtk_css_provider_new();
+  gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(user_look),
+                                             GTK_STYLE_PROVIDER_PRIORITY_USER);
+  apply_theme(t);
+  load_user_theme();
+}
+
+void apply_theme(App *t)
+{
+  if (square)
+    gtk_css_provider_load_from_string(square, t->settings.square ? square_css : "");
+}
+
+char *user_theme_file(void)
+{
+  return g_build_filename(g_get_user_config_dir(), "t-code", "theme.css", NULL);
+}
+
+void load_user_theme(void)
+{
+  char *path = user_theme_file(), *text = NULL;
+
+  if (!user_look)
+    return;
+  g_file_get_contents(path, &text, NULL, NULL); /* none: nothing over t-code's own */
+  gtk_css_provider_load_from_string(user_look, text ? text : "");
+  g_free(text);
+  g_free(path);
 }
 
 /* A rounded panel: its children (terminals, the minimap, the scrollbar) are cut to its corners. */

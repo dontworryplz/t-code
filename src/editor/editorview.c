@@ -73,6 +73,20 @@ static void init_look(App *t)
   editor_view_set_font(t);
   if (t->styles_dir)
     gtk_source_style_scheme_manager_prepend_search_path(schemes, t->styles_dir);
+  char *mine = user_colors_file(), *dir = g_path_get_dirname(mine);
+  gtk_source_style_scheme_manager_prepend_search_path(schemes, dir); /* the user's copy comes first */
+  g_free(dir);
+  g_free(mine);
+}
+
+char *user_colors_file(void)
+{
+  return g_build_filename(g_get_user_config_dir(), "t-code", "styles", "dark-modern.xml", NULL);
+}
+
+void editor_view_reload_colors(void)
+{
+  gtk_source_style_scheme_manager_force_rescan(gtk_source_style_scheme_manager_get_default());
 }
 
 void editor_view_set_font(App *t)
@@ -88,7 +102,7 @@ void editor_view_set_font(App *t)
   /* "11.5", also where the locale writes "11,5" (CSS would reject it) */
   g_ascii_formatd(points, sizeof points, "%.1f", size * t->font_scale);
   rule = g_strdup_printf(
-      ".tcode-editor textview.tcode-source { font-family: \"%s\"; font-size: %spt;"
+      ".tcode-editor textview.tcode-source { font-family: \"%s\", monospace; font-size: %spt;"
       " font-feature-settings: \"calt\" 0, \"liga\" 0; }", /* "->" stays two characters */
       pango_font_description_get_family(desc) ? pango_font_description_get_family(desc) : "monospace", points);
   gtk_css_provider_load_from_string(font_provider, rule);
@@ -167,6 +181,7 @@ void editor_view_apply_settings(Tab *tab)
   gtk_source_view_set_insert_spaces_instead_of_tabs(view, !v->tabs);
   gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), t->settings.word_wrap ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
   gtk_source_buffer_set_highlight_syntax(tab->buffer, !t->plain);
+  gtk_source_buffer_set_style_scheme(tab->buffer, editor_style_scheme(t)); /* a new one after a rescan */
   gtk_widget_set_visible(v->map, t->settings.minimap);
   if (v->overview) /* follows the minimap, or the whole file without it */
     gtk_widget_queue_draw(v->overview);

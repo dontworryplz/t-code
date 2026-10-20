@@ -1,19 +1,24 @@
 /*
  * What t-code remembers between runs, in ~/.config/t-code/session.ini:
- *   [settings]          the Settings window's choices
  *   [window]            size, pane sizes, which panes are shown, text size
  *   [recent]            the last opened project folders
  *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, and
  *                       the indentation chosen for it in the status bar
+ * and the settings, in ~/.config/t-code/settings.ini.
  */
 #pragma once
 
 #include "app.h"
 
-/* Reads [settings] into t->settings (and t->plain); missing values get their defaults. */
+/* ~/.config/t-code/settings.ini (free it). */
+char *settings_file(void);
+
+/* Reads settings.ini into t->settings (and t->plain); missing values get their defaults. Without a
+ * settings.ini yet, the settings session.ini kept before 0.3 move into one. */
 void session_load_settings(App *t);
 
-/* Writes t->settings to [settings]. */
+/* Writes t->settings to settings.ini, each with a comment saying what it does (keeping what was
+ * added by hand), and the text size to session.ini. */
 void session_save_settings(App *t);
 
 /* Gives the window its saved size, pane sizes, visible panes and text size. */

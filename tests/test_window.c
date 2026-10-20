@@ -2,14 +2,16 @@
 /*
  * Tests for how tabs open and close, in a whole t-code window (every module but main.c) on a
  * temporary project with a temporary config: temporary tabs (a click in the Files panel, VS Code's
- * preview editor) and comparisons in one tab. Needs a display; skipped without one.
+ * preview editor), comparisons in one tab, the first run's layout and fonts, the files edited by hand. Needs a display; skipped without one.
  */
 #include "editor/editor.h"
+#include "dialogs/settings.h"
 #include "editor/tabs.h"
 #include "files/fileops.h"
 #include "git/compare.h"
 #include "ipc/socket.h"
 #include "project/session.h"
+#include "project/userfiles.h"
 #include "window/window.h"
 
 #include <glib/gstdio.h>
@@ -277,6 +279,108 @@ static void start_broadway(void)
   g_free(display);
 }
 
+/* The first run (no session.ini yet): Files shows on the left, the shell below the editors. */
+static void test_first_run_layout(void)
+{
+  g_assert_cmpint(panel_dock(&app, "files"), ==, 0);
+  g_assert_cmpstr(gtk_stack_get_visible_child_name(app.dock_stacks[0]), ==, "files");
+  g_assert_cmpint(panel_dock(&app, "shell"), ==, 4);
+}
+
+/* A font that is not installed falls back to monospace, not to a proportional one. */
+static void test_font_fallback(void)
+{
+  const PangoFontDescription *font = vte_terminal_get_font(app.shell);
+
+  g_assert_cmpstr(pango_font_description_get_family(font), ==, "Cascadia Code,monospace");
+}
+
+/* The settings session.ini kept before 0.3 moved into settings.ini, each with its comment. */
+static void test_settings_moved(void)
+{
+  char *path = settings_file(), *text = NULL;
+  char *session = g_build_filename(g_get_user_config_dir(), "t-code", "session.ini", NULL), *old = NULL;
+
+  g_assert_false(app.settings.minimap); /* main() wrote it to session.ini first */
+  g_assert_true(g_file_get_contents(path, &text, NULL, NULL));
+  g_assert_nonnull(strstr(text, "minimap=false"));
+  g_assert_nonnull(strstr(text, "# A small picture of the file next to the scrollbar\nminimap=false"));
+  g_assert_nonnull(strstr(text, "theme=rounded"));
+  g_assert_true(g_file_get_contents(session, &old, NULL, NULL));
+  g_assert_null(strstr(old, "[settings]"));
+  g_free(old);
+  g_free(session);
+  g_free(text);
+  g_free(path);
+}
+
+/* settings.ini edited by another program applies at once; t-code's own saves change nothing. */
+static void test_settings_edited(void)
+{
+  char *path = settings_file(), *text = NULL;
+
+  g_assert_true(g_file_get_contents(path, &text, NULL, NULL));
+  char **parts = g_strsplit(text, "theme=rounded", -1);
+  char *square = g_strjoinv("theme=square", parts);
+  g_assert_true(g_file_set_contents(path, square, -1, NULL));
+  for (int i = 0; i < 100 && !app.settings.square; i++)
+    run(20);
+  g_assert_true(app.settings.square);
+  g_assert_true(app.settings.minimap == FALSE); /* the rest stays */
+
+  app.settings.square = FALSE;
+  session_save_settings(&app);
+  run(400);
+  g_assert_false(app.settings.square);
+  g_strfreev(parts);
+  g_free(square);
+  g_free(text);
+  g_free(path);
+}
+
+/* The files to edit by hand open in tabs: theme.css made with its examples, a copy of the colors. */
+static void test_open_user_files(void)
+{
+  char *theme = g_build_filename(g_get_user_config_dir(), "t-code", "theme.css", NULL), *text = NULL;
+  char *colors = g_build_filename(g_get_user_config_dir(), "t-code", "styles", "dark-modern.xml", NULL);
+
+  open_settings_file(&app);
+  open_user_theme(&app);
+  open_editor_colors(&app);
+  run(100);
+  assert_tabs("settings.ini theme.css dark-modern.xml");
+  g_assert_true(g_file_get_contents(theme, &text, NULL, NULL));
+  g_assert_nonnull(strstr(text, "Saving this file applies it at once"));
+  g_free(text);
+  g_assert_true(g_file_get_contents(colors, &text, NULL, NULL));
+  g_assert_nonnull(strstr(text, "Your copy of t-code's editor colors"));
+  g_assert_nonnull(strstr(text, "id=\"t-code-dark-modern\""));
+  g_free(text);
+  close_everything();
+  g_free(colors);
+  g_free(theme);
+}
+
+/* The Settings window can be made smaller than its rows, which then scroll. */
+static void test_settings_scrolls(void)
+{
+  GtkWindow *settings = NULL;
+
+  show_settings(&app);
+  run(50);
+  for (guint i = 0; i < g_list_model_get_n_items(gtk_window_get_toplevels()); i++) {
+    GtkWindow *window = g_list_model_get_item(gtk_window_get_toplevels(), i);
+    if (g_strcmp0(gtk_window_get_title(window), "Settings") == 0)
+      settings = window;
+    g_object_unref(window);
+  }
+  g_assert_nonnull(settings);
+  g_assert_true(gtk_window_get_resizable(settings));
+  g_assert_true(GTK_IS_SCROLLED_WINDOW(gtk_window_get_child(settings)));
+  gtk_window_destroy(settings);
+  run(50);
+}
+
 static void on_activate(GApplication *gapp, gpointer data G_GNUC_UNUSED)
 {
   int *status = g_object_get_data(G_OBJECT(gapp), "status");
@@ -301,9 +405,20 @@ int main(int argc, char **argv)
   app.root = g_build_filename(home, "project", NULL);
   app.font_scale = 1;
   g_mkdir_with_parents(app.root, 0755);
+  char *session = g_build_filename(config, "t-code", "session.ini", NULL), *dir = g_path_get_dirname(session);
+  g_mkdir_with_parents(dir, 0700);
+  g_assert_true(g_file_set_contents(session, "[settings]\nminimap=false\n", -1, NULL)); /* before 0.3 */
+  g_free(dir);
+  g_free(session);
   session_load_settings(&app);
   app.settings.autosave = FALSE; /* edits stay unsaved for the test to see */
 
+  g_test_add_func("/window/first-run-layout", test_first_run_layout);
+  g_test_add_func("/window/font-fallback", test_font_fallback);
+  g_test_add_func("/window/settings-moved", test_settings_moved);
+  g_test_add_func("/window/settings-edited", test_settings_edited);
+  g_test_add_func("/window/open-user-files", test_open_user_files);
+  g_test_add_func("/window/settings-scrolls", test_settings_scrolls);
   g_test_add_func("/window/temporary-tabs", test_temporary);
   g_test_add_func("/window/temporary-per-group", test_temporary_per_group);
   g_test_add_func("/window/opens-at-left-edge", test_opens_at_left_edge);

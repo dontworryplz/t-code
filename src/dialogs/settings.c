@@ -1,6 +1,6 @@
 /*
  * The Settings window (Ctrl+, or the gear in the title bar). Every change applies at once, to the
- * open editors too, and is saved in session.ini ([settings]).
+ * open editors too, and is saved in settings.ini, which can also be edited by hand.
  */
 #include "dialogs/settings.h"
 
@@ -9,13 +9,17 @@
 #include "editor/tabs.h"
 #include "lsp/client.h"
 #include "project/session.h"
+#include "project/userfiles.h"
 #include "window/terminal.h"
+#include "window/theme.h"
 #include "window/window.h"
 
 static const char *const css = ".tcode-settings { background: #1f1f1f; }"
                                ".tcode-settings .section { font-weight: bold; color: #e7e7e7; margin: 18px 0 6px; }"
                                ".tcode-settings .name { color: #cccccc; }"
                                ".tcode-settings .note { color: #9d9d9d; font-size: smaller; }";
+
+static GtkWidget *window; /* the Settings window while it is open */
 
 /* Applies the settings again to every open editor. */
 static void each_editor(App *t)
@@ -119,6 +123,33 @@ static void on_autosave(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpoin
 
   t->settings.autosave = gtk_switch_get_active(toggle);
   session_save_settings(t);
+}
+
+static void on_theme(GtkDropDown *choice, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+  App *t = app_of(GTK_WIDGET(choice));
+
+  t->settings.square = gtk_drop_down_get_selected(choice) == 1;
+  apply_theme(t);
+  session_save_settings(t);
+}
+
+/* The "Open" buttons: data opens a file to edit by hand, in an editor tab over this window. */
+static void on_open_file(GtkButton *button, gpointer data)
+{
+  App *t = app_of(GTK_WIDGET(button));
+  void (*open)(App *t) = data;
+
+  gtk_window_close(GTK_WINDOW(window));
+  open(t);
+}
+
+static GtkWidget *open_button(void (*open)(App *t))
+{
+  GtkWidget *button = gtk_button_new_with_label("Open");
+
+  g_signal_connect(button, "clicked", G_CALLBACK(on_open_file), open);
+  return button;
 }
 
 static void on_reopen_last(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
@@ -241,9 +272,20 @@ static gboolean on_key(GtkEventControllerKey *controller, guint key, guint code 
   return TRUE;
 }
 
+void settings_changed(App *t, gboolean restart_lsp)
+{
+  if (window) /* its switches show the old values */
+    gtk_window_destroy(GTK_WINDOW(window));
+  each_editor(t);
+  apply_fonts(t);
+  apply_theme(t);
+  if (restart_lsp)
+    lsp_restart(t);
+}
+
 void show_settings(App *t)
 {
-  static GtkWidget *window;
+  static gboolean styled;
   GtkCssProvider *provider;
   GtkWidget *grid;
   GtkEventController *keys;
@@ -253,17 +295,19 @@ void show_settings(App *t)
     gtk_window_present(GTK_WINDOW(window));
     return;
   }
-  provider = gtk_css_provider_new();
-  gtk_css_provider_load_from_string(provider, css);
-  gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
-                                             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-  g_object_unref(provider);
+  if (!styled) {
+    provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(provider, css);
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+    styled = TRUE;
+  }
 
   window = gtk_window_new();
   gtk_window_set_title(GTK_WINDOW(window), "Settings");
   gtk_window_set_transient_for(GTK_WINDOW(window), t->window);
-  gtk_window_set_default_size(GTK_WINDOW(window), 520, -1);
-  gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
+  gtk_window_set_default_size(GTK_WINDOW(window), 560, 640); /* smaller than the settings: they scroll */
   gtk_widget_add_css_class(window, "tcode-settings");
   g_object_set_data(G_OBJECT(window), "t-code-app", t);
   g_object_add_weak_pointer(G_OBJECT(window), (gpointer *)&window);
@@ -302,6 +346,10 @@ void show_settings(App *t)
           switch_for(t->settings.clang_tidy, G_CALLBACK(on_clang_tidy)));
 
   add_heading(GTK_GRID(grid), &row, "Window");
+  GtkWidget *theme = gtk_drop_down_new_from_strings((const char *const[]){ "Rounded", "Square", NULL });
+  gtk_drop_down_set_selected(GTK_DROP_DOWN(theme), t->settings.square ? 1 : 0);
+  g_signal_connect(theme, "notify::selected", G_CALLBACK(on_theme), NULL);
+  add_row(GTK_GRID(grid), &row, "Theme", "Rounded panels on a darker frame, or flat ones with lines between", theme);
   add_row(GTK_GRID(grid), &row, "Editor font", "Editors and the terminal", font_for(&t->settings.font));
   add_row(GTK_GRID(grid), &row, "Files panel font", "File icons need a Nerd Font installed",
           font_for(&t->settings.files_font));
@@ -311,7 +359,18 @@ void show_settings(App *t)
           "When started from the app menu (not from a folder in a terminal)",
           switch_for(t->settings.reopen_last, G_CALLBACK(on_reopen_last)));
 
-  gtk_window_set_child(GTK_WINDOW(window), grid);
+  add_heading(GTK_GRID(grid), &row, "Edit by hand");
+  add_row(GTK_GRID(grid), &row, "Settings file", "settings.ini: these settings, each with a note",
+          open_button(open_settings_file));
+  add_row(GTK_GRID(grid), &row, "Theme CSS", "theme.css: your own CSS over t-code's look (colors, corners, sizes)",
+          open_button(open_user_theme));
+  add_row(GTK_GRID(grid), &row, "Editor colors", "Your copy of the editor's color scheme (dark-modern.xml)",
+          open_button(open_editor_colors));
+
+  GtkWidget *scroll = gtk_scrolled_window_new();
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), grid);
+  gtk_window_set_child(GTK_WINDOW(window), scroll);
   keys = gtk_event_controller_key_new();
   g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key), NULL);
   gtk_widget_add_controller(window, keys);

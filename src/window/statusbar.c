@@ -53,7 +53,13 @@ void update_status(App *t)
   gtk_label_set_text(t->status.problems, text);
   g_free(text);
 
-  text = lsp_flags_hint(t);
+  const char *problem = NULL;
+  text = lsp_flags_hint(t, &problem);
+  if (text) {
+    char *label = g_strdup_printf("⚠ %s", problem);
+    gtk_button_set_label(GTK_BUTTON(t->status.flags), label);
+    g_free(label);
+  }
   gtk_widget_set_tooltip_text(t->status.flags, text);
   gtk_widget_set_visible(t->status.flags, text != NULL);
   g_free(text);
@@ -189,16 +195,19 @@ static void on_flags_answer(GObject *dialog, GAsyncResult *result, gpointer data
     lsp_restart(data);
 }
 
-/* "No compile flags": what clangd lacks and how to give it, with a button that restarts it. */
+/* "No compile flags" / "No C headers": what clangd lacks and how to give it, with a button that
+ * restarts it. */
 static void on_flags(App *t)
 {
-  char *hint = lsp_flags_hint(t);
+  const char *problem = NULL;
+  char *hint = lsp_flags_hint(t, &problem);
   static const char *const buttons[] = { "Close", "Restart clangd", NULL };
   GtkAlertDialog *dialog;
 
   if (!hint)
     return;
-  dialog = gtk_alert_dialog_new("clangd has no compile flags");
+  dialog = gtk_alert_dialog_new(strcmp(problem, "No C headers") == 0 ? "The C library's headers are not installed"
+                                                                     : "clangd has no compile flags");
   gtk_alert_dialog_set_detail(dialog, hint);
   gtk_alert_dialog_set_buttons(dialog, buttons);
   gtk_alert_dialog_set_cancel_button(dialog, 0);

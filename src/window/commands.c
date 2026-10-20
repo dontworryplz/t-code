@@ -21,6 +21,7 @@
 #include "popups/quickopen.h"
 #include "project/project.h"
 #include "project/run.h"
+#include "project/userfiles.h"
 #include "window/statusbar.h"
 #include "window/window.h"
 
@@ -236,6 +237,9 @@ static const Command commands[] = {
   { "Reset Zoom", "<Control>0|<Control>KP_0", "Ctrl+0", zoom_reset, FALSE },
   { "Open Folder…", "<Control><Shift>o", "Ctrl+Shift+O", choose_folder, FALSE },
   { "Settings…", "<Control>comma", "Ctrl+,", show_settings, FALSE },
+  { "Preferences: Open Settings File", NULL, NULL, open_settings_file, FALSE },
+  { "Preferences: Open Theme CSS", NULL, NULL, open_user_theme, FALSE },
+  { "Preferences: Open Editor Colors", NULL, NULL, open_editor_colors, FALSE },
   { "Keyboard Shortcuts", NULL, NULL, show_keybinds, FALSE },
   { "About t-code", NULL, NULL, show_about, FALSE },
 };

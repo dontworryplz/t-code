@@ -88,3 +88,11 @@ GtkSourceLanguage *editor_language(const char *path, const char *text);
 /* The Dark Modern style scheme (styles/dark-modern.xml); the first call also sets up the CSS all
  * editors share. Markdown previews color their code blocks with it too. */
 GtkSourceStyleScheme *editor_style_scheme(App *t);
+
+/* ~/.config/t-code/styles/dark-modern.xml (free it): the user's copy of the editor's colors, used
+ * instead of t-code's when it is there. */
+char *user_colors_file(void);
+
+/* Reads the style schemes again (the user's copy changed); editor_view_apply_settings gives each
+ * editor the new one. */
+void editor_view_reload_colors(void);

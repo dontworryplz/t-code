@@ -501,7 +501,7 @@ static void put(const char *folder, const char *name, const char *text)
 }
 
 /* The compilation database is looked for like clangd does, upwards from the file; a misspelled one
- * is found between the file and the project folder. */
+ * is found between the file and the project folder; the system headers under a sysroot. */
 static void test_compile_db(void)
 {
   char *root = g_dir_make_tmp("t-code-db-XXXXXX", NULL), *file = g_build_filename(root, "src", "main.c", NULL);
@@ -526,30 +526,48 @@ static void test_compile_db(void)
   g_assert_true(g_str_has_suffix(found, "/src/compile_flags.txt"));
   g_free(found);
 
+  g_assert_false(compile_db_system_headers(root, FALSE)); /* no C library there */
+  put(root, "usr/include/stdio.h", "");
+  g_assert_true(compile_db_system_headers(root, FALSE));
+  g_assert_false(compile_db_system_headers(root, TRUE)); /* nor a C++ one */
+  put(root, "usr/include/c++/14/vector", "");
+  g_assert_true(compile_db_system_headers(root, TRUE));
+
   g_free(file);
   g_free(root); /* left in the temporary folder */
 }
 
-/* A header not found with no compile flags shows the hint (naming the misspelled file); a
- * compile_flags.txt hides it; a restart gives the server the open files again. */
+/* A header not found shows a hint: the C library's headers when they are not installed, else no
+ * compile flags (naming the misspelled file); a compile_flags.txt hides it; a restart gives the server the open files again. */
 static void test_flags_hint(void)
 {
   char *root = g_dir_make_tmp("t-code-hint-XXXXXX", NULL), *file = g_build_filename(root, "main.c", NULL);
   char *old_root = app.root, *hint;
   Tab *tab;
 
+  const char *problem = NULL;
+
   put(root, "main.c", "");
   put(root, "compile-flags.txt", "-Iinclude\n");
   app.root = root;
+  sysroot = root; /* no C library headers there */
   tab = new_tab(file, "#include <missing.h>\n");
   lsp_open(tab);
   g_assert_true(server_agrees(tab));
-  hint = lsp_flags_hint(&app);
+  hint = lsp_flags_hint(&app, &problem);
+  g_assert_cmpstr(problem, ==, "No C headers");
+  g_assert_nonnull(strstr(hint, "sudo apt install build-essential"));
+  g_free(hint);
+
+  put(root, "usr/include/stdio.h", "");
+  hint = lsp_flags_hint(&app, &problem);
+  g_assert_cmpstr(problem, ==, "No compile flags");
   g_assert_nonnull(strstr(hint, "\"compile-flags.txt\": rename it to compile_flags.txt"));
   g_free(hint);
 
   put(root, "compile_flags.txt", "-Iinclude\n");
-  g_assert_null(lsp_flags_hint(&app));
+  g_assert_null(lsp_flags_hint(&app, &problem));
+  sysroot = "/";
 
   lsp_restart(&app);
   g_assert_false(lsp_has(tab));

@@ -1085,7 +1085,7 @@ void files_apply_font(App *t)
   double points = (size > 0 ? size / (double)PANGO_SCALE : 11) * t->font_scale;
   char number[G_ASCII_DTOSTR_BUF_SIZE]; /* "11.5", not the locale's "11,5": CSS wants a dot */
   char *css_text =
-      g_strdup_printf(".tcode-files listview, .tcode-files .title { font-family: \"%s\"; font-size: %spt; }",
+      g_strdup_printf(".tcode-files listview, .tcode-files .title { font-family: \"%s\", monospace; font-size: %spt; }",
                       family ? family : "Cascadia Code", g_ascii_formatd(number, sizeof number, "%.1f", points));
 
   if (!files.font_css) {

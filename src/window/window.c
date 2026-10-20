@@ -15,6 +15,7 @@
 #include "popups/picker.h"
 #include "project/project.h"
 #include "project/session.h"
+#include "project/userfiles.h"
 #include "search/search.h"
 #include "window/commands.h"
 #include "window/paths.h"
@@ -1078,7 +1079,8 @@ void build_window(App *t, GtkApplication *app)
   GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0); /* the panes, the status bar */
 
   /* Before the window: the theme, where the helpers are, and the sockets they connect to. */
-  load_theme();
+  load_theme(t);
+  watch_user_files(t); /* settings.ini, theme.css and the editor colors, edited by hand */
   gtk_source_init();
   find_files(t);
   start_socket(t);

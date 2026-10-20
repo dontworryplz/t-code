@@ -1,10 +1,11 @@
 /*
  * Remembers the window between runs, in ~/.config/t-code/session.ini:
- *   [settings]          the Settings window's choices
  *   [window]            size, pane sizes, which panes are shown, text size
  *   [recent]            the last opened project folders
  *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, and
  *                       the indentation chosen for it in the status bar
+ * and the settings in ~/.config/t-code/settings.ini ([settings], with a comment over each one, for
+ * editing by hand). Before 0.3 the settings were in session.ini's [settings].
  */
 #include "project/session.h"
 
@@ -28,26 +29,46 @@ static char *session_file(void)
   return g_build_filename(g_get_user_config_dir(), "t-code", "session.ini", NULL);
 }
 
+char *settings_file(void)
+{
+  return g_build_filename(g_get_user_config_dir(), "t-code", "settings.ini", NULL);
+}
+
+/* A key file as it is now (empty when there is none yet). */
+static GKeyFile *load_from(const char *path)
+{
+  GKeyFile *kf = g_key_file_new();
+
+  g_key_file_load_from_file(kf, path, G_KEY_FILE_KEEP_COMMENTS, NULL);
+  return kf;
+}
+
 /* The session file as it is now (empty when there is none yet). */
 static GKeyFile *load(void)
 {
-  GKeyFile *kf = g_key_file_new();
   char *path = session_file();
+  GKeyFile *kf = load_from(path);
 
-  g_key_file_load_from_file(kf, path, G_KEY_FILE_KEEP_COMMENTS, NULL);
   g_free(path);
   return kf;
 }
 
-/* Writes the session file, making its folder first. */
-static void store(GKeyFile *kf)
+/* Writes a key file, making its folder first. */
+static void store_to(GKeyFile *kf, const char *path)
 {
-  char *path = session_file();
   char *dir = g_path_get_dirname(path);
 
   g_mkdir_with_parents(dir, 0700);
   g_key_file_save_to_file(kf, path, NULL);
   g_free(dir);
+}
+
+/* Writes the session file. */
+static void store(GKeyFile *kf)
+{
+  char *path = session_file();
+
+  store_to(kf, path);
   g_free(path);
 }
 
@@ -89,7 +110,10 @@ static gboolean get_bool(GKeyFile *kf, const char *group, const char *key, gbool
 
 void session_load_settings(App *t)
 {
-  GKeyFile *kf = load();
+  char *path = settings_file();
+  gboolean moved = !g_file_test(path, G_FILE_TEST_EXISTS);
+  GKeyFile *kf = moved ? load() : load_from(path); /* none yet: the ones session.ini kept before 0.3 */
+  char *theme = g_key_file_get_string(kf, "settings", "theme", NULL);
 
   t->settings.minimap = get_bool(kf, "settings", "minimap", TRUE);
   t->settings.reopen_last = get_bool(kf, "settings", "reopen-last-project", TRUE);
@@ -101,6 +125,7 @@ void session_load_settings(App *t)
   t->settings.word_wrap = get_bool(kf, "settings", "word-wrap", FALSE);
   t->settings.clang_tidy = get_bool(kf, "settings", "clang-tidy", FALSE);
   t->settings.format_on_save = get_bool(kf, "settings", "format-on-save", FALSE);
+  t->settings.square = g_strcmp0(theme ? g_strstrip(theme) : NULL, "square") == 0;
   t->plain = !get_bool(kf, "settings", "code-coloring", TRUE);
   g_free(t->settings.font);
   g_free(t->settings.files_font);
@@ -110,29 +135,72 @@ void session_load_settings(App *t)
     g_set_str(&t->settings.font, DEFAULT_FONT);
   if (!t->settings.files_font || !*t->settings.files_font)
     g_set_str(&t->settings.files_font, DEFAULT_FONT);
+  g_free(theme);
   g_key_file_free(kf);
+  if (moved) {
+    GKeyFile *session = load();
+    gboolean had = g_key_file_remove_group(session, "settings", NULL);
+    session_save_settings(t); /* settings.ini, with its comments */
+    if (had)
+      store(session);
+    g_key_file_free(session);
+  }
+  g_free(path);
+}
+
+/* Puts comment over key in [settings] (the file is read and edited by hand). */
+static void explain(GKeyFile *kf, const char *key, const char *comment)
+{
+  g_key_file_set_comment(kf, "settings", key, comment, NULL);
 }
 
 void session_save_settings(App *t)
 {
-  GKeyFile *kf = load();
+  char *path = settings_file();
+  GKeyFile *kf = load_from(path); /* keeps what was added by hand */
+  GKeyFile *session = load();
 
+  g_key_file_set_comment(kf, NULL, NULL,
+                         " t-code's settings, also in the Settings window (Ctrl+,). A change saved here applies at"
+                         " once.\n The look: theme.css next to this file (\"Preferences: Open Theme CSS\"), the"
+                         " editor's colors:\n styles/dark-modern.xml (\"Preferences: Open Editor Colors\").",
+                         NULL);
+  g_key_file_set_string(kf, "settings", "theme", t->settings.square ? "square" : "rounded");
+  explain(kf, "theme", " rounded: the panels as rounded cards on a darker frame; square: flat, lines between them");
   g_key_file_set_boolean(kf, "settings", "minimap", t->settings.minimap);
-  g_key_file_set_boolean(kf, "settings", "reopen-last-project", t->settings.reopen_last);
-  g_key_file_set_boolean(kf, "settings", "autosave", t->settings.autosave);
-  g_key_file_set_boolean(kf, "settings", "tabs-to-spaces", t->settings.tabs_to_spaces);
-  g_key_file_set_integer(kf, "settings", "tab-size", t->settings.tab_size);
-  g_key_file_set_boolean(kf, "settings", "detect-indentation", t->settings.detect_indent);
-  g_key_file_set_boolean(kf, "settings", "indent-guides", t->settings.guides);
-  g_key_file_set_boolean(kf, "settings", "word-wrap", t->settings.word_wrap);
-  g_key_file_set_boolean(kf, "settings", "clang-tidy", t->settings.clang_tidy);
-  g_key_file_set_boolean(kf, "settings", "format-on-save", t->settings.format_on_save);
+  explain(kf, "minimap", " A small picture of the file next to the scrollbar");
   g_key_file_set_boolean(kf, "settings", "code-coloring", !t->plain);
+  explain(kf, "code-coloring", " Syntax colors in the editors (also F7)");
+  g_key_file_set_boolean(kf, "settings", "indent-guides", t->settings.guides);
+  explain(kf, "indent-guides", " Lines at each indentation level; the block around the cursor in color");
+  g_key_file_set_boolean(kf, "settings", "word-wrap", t->settings.word_wrap);
+  explain(kf, "word-wrap", " Lines longer than the editor continue on the next row");
+  g_key_file_set_integer(kf, "settings", "tab-size", t->settings.tab_size);
+  explain(kf, "tab-size",
+          " 1 to 16, for projects without their own: the status bar's choice, .editorconfig or .clang-format come"
+          " first");
+  g_key_file_set_boolean(kf, "settings", "tabs-to-spaces", t->settings.tabs_to_spaces);
+  explain(kf, "tabs-to-spaces", " The Tab key inserts spaces");
+  g_key_file_set_boolean(kf, "settings", "detect-indentation", t->settings.detect_indent);
+  explain(kf, "detect-indentation", " Files indented with tabs or another number of spaces keep it");
+  g_key_file_set_boolean(kf, "settings", "autosave", t->settings.autosave);
+  explain(kf, "autosave", " Save a second after the last change");
+  g_key_file_set_boolean(kf, "settings", "format-on-save", t->settings.format_on_save);
+  explain(kf, "format-on-save", " Ctrl+S formats C and C++ files with clangd first (the project's .clang-format)");
+  g_key_file_set_boolean(kf, "settings", "clang-tidy", t->settings.clang_tidy);
+  explain(kf, "clang-tidy", " clangd also reports what the project's .clang-tidy asks for (more CPU while typing)");
   g_key_file_set_string(kf, "settings", "font", t->settings.font);
+  explain(kf, "font", " Editors and the terminal: a font name and size, like Cascadia Code 11");
   g_key_file_set_string(kf, "settings", "file-manager-font", t->settings.files_font);
-  g_key_file_set_double(kf, "window", "font-scale", t->font_scale);
-  store(kf);
+  explain(kf, "file-manager-font", " The Files panel (its file icons need a Nerd Font)");
+  g_key_file_set_boolean(kf, "settings", "reopen-last-project", t->settings.reopen_last);
+  explain(kf, "reopen-last-project", " When started from the app menu (not from a folder in a terminal)");
+  store_to(kf, path);
+  g_key_file_set_double(session, "window", "font-scale", t->font_scale);
+  store(session);
+  g_key_file_free(session);
   g_key_file_free(kf);
+  g_free(path);
 }
 
 void session_apply_window(App *t)
@@ -166,7 +234,9 @@ void session_apply_window(App *t)
       char key[32];
       g_snprintf(key, sizeof(key), "dock-%s", nm);
       int d = get_int(kf, "window", key, def);
-      if (layout != DOCKS) {
+      /* An older session.ini numbered the docks differently; a default is in today's numbering
+       * (no session.ini yet: the first run) */
+      if (layout != DOCKS && g_key_file_has_key(kf, "window", key, NULL)) {
         if (d == 2)
           d = 4;
         else if (d == 3)
@@ -191,11 +261,11 @@ void session_apply_window(App *t)
   if (gtk_widget_get_visible(t->bottom_bar))
     gtk_widget_set_visible(t->bottom_bar, get_bool(kf, "window", "shell-visible", TRUE));
   char *page = g_key_file_get_string(kf, "window", "sidebar-page", NULL);
-  if (page && *page) {
-    int d = panel_dock(t, page);
-    if (d >= 0)
-      gtk_stack_set_visible_child_name(t->dock_stacks[d], page);
-  }
+  if (!page || !*page)
+    g_set_str(&page, "files"); /* the first run: the panels were moved in, the last one shows */
+  int d = panel_dock(t, page);
+  if (d >= 0)
+    gtk_stack_set_visible_child_name(t->dock_stacks[d], page);
   g_free(page);
   if (!error && scale > 0)
     set_font_scale(t, scale);

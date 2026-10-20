@@ -79,3 +79,14 @@ char *compile_db_misnamed(const char *file, const char *root)
   g_free(folder);
   return found;
 }
+
+gboolean compile_db_system_headers(const char *sysroot, gboolean cxx)
+{
+  char *c = g_build_filename(sysroot, "usr", "include", "stdio.h", NULL);
+  char *cxx_dir = g_build_filename(sysroot, "usr", "include", "c++", NULL);
+  gboolean there = g_file_test(c, G_FILE_TEST_EXISTS) && (!cxx || g_file_test(cxx_dir, G_FILE_TEST_IS_DIR));
+
+  g_free(c);
+  g_free(cxx_dir);
+  return there;
+}

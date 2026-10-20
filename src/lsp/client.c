@@ -42,6 +42,8 @@
 #define TIDY_FLAG /* --clang-tidy or not, from the settings */
 #endif
 static const char *const server_argv[] = { SERVER_ARGV NULL };
+/* Where the system headers are looked for (tests use a folder of their own). */
+static const char *sysroot = "/";
 
 /* An open editor, as the server knows it. */
 typedef struct {
@@ -877,7 +879,16 @@ void lsp_restart(App *t)
   update_status(t);
 }
 
-char *lsp_flags_hint(App *t)
+/* Whether tab is C++ (its system headers are the C++ library's too). */
+static gboolean is_cxx(Tab *tab)
+{
+  GtkSourceLanguage *language = gtk_source_buffer_get_language(tab->buffer);
+  const char *id = language ? gtk_source_language_get_id(language) : "";
+
+  return strcmp(id, "cpp") == 0 || strcmp(id, "cpphdr") == 0;
+}
+
+char *lsp_flags_hint(App *t, const char **problem)
 {
   Lsp *l = t->lsp;
   GHashTableIter iter;
@@ -888,14 +899,31 @@ char *lsp_flags_hint(App *t)
   g_hash_table_iter_init(&iter, l->docs);
   while (g_hash_table_iter_next(&iter, &tab, &doc)) {
     const char *path = ((Tab *)tab)->path;
-    char *database = ((Doc *)doc)->include_missing && path ? compile_db_find(path) : NULL;
-    char *misnamed, *name, *hint;
-    if (!((Doc *)doc)->include_missing || !path || database) {
+    char *database, *misnamed, *name, *hint;
+    if (!((Doc *)doc)->include_missing || !path)
+      continue;
+    name = g_path_get_basename(path);
+    if (!compile_db_system_headers(sysroot, is_cxx(tab))) {
+      *problem = "No C headers";
+      hint = g_strdup_printf("clangd cannot find the headers %s includes: the C library's headers (stdio.h and the "
+                             "others) are not installed. They come with the compiler:\n"
+                             "  • Fedora: sudo dnf install gcc gcc-c++ make\n"
+                             "  • Debian / Ubuntu: sudo apt install build-essential\n"
+                             "  • Arch Linux: sudo pacman -S --needed base-devel\n"
+                             "  • Void Linux: sudo xbps-install base-devel\n\n"
+                             "Then run \"clangd: Restart Language Server\".",
+                             name);
+      g_free(name);
+      return hint;
+    }
+    database = compile_db_find(path);
+    if (database) {
       g_free(database);
+      g_free(name);
       continue;
     }
+    *problem = "No compile flags";
     misnamed = compile_db_misnamed(path, t->root);
-    name = g_path_get_basename(path);
     if (misnamed) {
       char *found = g_path_get_basename(misnamed);
       hint = g_strdup_printf("clangd cannot find the headers %s includes, as it has no compile flags for it.\n\n"

@@ -23,10 +23,15 @@ static const char *const palette_hex[16] = {
 void set_terminal_font(App *t, VteTerminal *term, const char *font)
 {
   PangoFontDescription *desc = pango_font_description_from_string(font ? font : DEFAULT_FONT);
+  const char *family = pango_font_description_get_family(desc);
+  /* a font that is not installed falls back to monospace, not to fontconfig's default (proportional) */
+  char *families = g_strconcat(family ? family : "monospace", ",monospace", NULL);
 
+  pango_font_description_set_family(desc, families);
   vte_terminal_set_font(term, desc);
   vte_terminal_set_font_scale(term, t->font_scale);
   pango_font_description_free(desc);
+  g_free(families);
 }
 
 /* Gives the shell, the editors and the Files panel the fonts the settings choose for them. */

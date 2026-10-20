@@ -112,5 +112,6 @@ struct App {
     gboolean format_on_save; /* Ctrl+S formats the file with clangd first */
     char *font;              /* editors and the shell, a Pango font description */
     char *files_font;        /* the Files panel */
+    gboolean square;         /* the square theme (flat panels, lines between them), not rounded cards */
   } settings;
 };

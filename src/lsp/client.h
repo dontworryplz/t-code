@@ -37,10 +37,11 @@ void lsp_stop(App *t);
  * the compile flags again); one that gave up after crashing or was not found is tried again. */
 void lsp_restart(App *t);
 
-/* Why clangd lacks compile flags, for the status bar: when an open file has an #include clangd
- * cannot find and no compilation database applies to it, what to do about it (naming a misspelled
- * one, like "compile-flags.txt"); else NULL. */
-char *lsp_flags_hint(App *t);
+/* Why clangd cannot find an open file's #include, for the status bar: the C library's headers are
+ * not installed (problem "No C headers"), or no compilation database applies to the file ("No
+ * compile flags", naming a misspelled one like "compile-flags.txt"); what to do about it, else NULL.
+ * problem is set only with a hint. */
+char *lsp_flags_hint(App *t, const char **problem);
 
 /* Whether an editor's file goes to the server (C or C++, not a read-only old version). */
 gboolean lsp_wants(Tab *tab);
