@@ -1,5 +1,5 @@
 /*
- * The control socket scripts and tools send requests to, one per line:
+ * The control socket scripts and tools send requests to, one per line (or ended by a NUL byte):
  *   open <path>, open-side <path>, preview <path>, project <dir>, compare <path>,
  *   history <path>, terminal <dir>, copy <text>
  * Its path is in $TCODE_SOCKET for every program t-code starts.

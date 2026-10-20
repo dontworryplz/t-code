@@ -1,6 +1,7 @@
 /*
  * The control socket, for scripts and tools (tools/headless.sh, packaging/smoke-test.sh); its path
- * is in $TCODE_SOCKET. One request per line:
+ * is in $TCODE_SOCKET. One request per line; a client that ends its requests with NUL bytes instead
+ * (a path may hold a line break: printf 'open %s\0' "$path") ends them all that way:
  *   open <path>        open-side <path>    preview <path>     project <dir>
  *   compare <path>     history <path>      terminal <dir>     copy <text>
  * Paths are absolute. "compare" and "history" are git comparisons (git/compare.c), "terminal"
@@ -43,24 +44,63 @@ static void handle(App *t, const char *command, const char *arg)
     cd_in_shell(t, arg);
 }
 
-/* A line came on a connection: handle it and read the next one; the connection ends at EOF. */
-static void on_line(GObject *source, GAsyncResult *result, gpointer data)
+static void read_request(GDataInputStream *in, App *t);
+
+/* A request came on a connection: handle it and read the next one; the connection ends at EOF. */
+static void on_request(GObject *source, GAsyncResult *result, gpointer data)
 {
   GDataInputStream *in = G_DATA_INPUT_STREAM(source);
   App *t = data;
-  char *line = g_data_input_stream_read_line_finish_utf8(in, result, NULL, NULL);
+  gsize length = 0;
+  char *request = g_data_input_stream_read_upto_finish(in, result, &length, NULL);
+  GError *error = NULL;
 
-  if (!line) { /* closed, or not UTF-8 */
+  /* The end it stopped at is still there; at EOF there is none. */
+  g_data_input_stream_read_byte(in, NULL, &error);
+  if (!request || (error && length == 0)) { /* closed */
+    g_clear_error(&error);
+    g_free(request);
     g_object_unref(in);
     return;
   }
-  char *space = strchr(line, ' ');
-  if (space) {
+  g_clear_error(&error);
+  char *space = strchr(request, ' ');
+  if (space && g_utf8_validate(request, length, NULL)) {
     *space = '\0';
-    handle(t, line, space + 1);
+    handle(t, request, space + 1);
   }
-  g_free(line);
-  g_data_input_stream_read_line_async(in, G_PRIORITY_DEFAULT, NULL, on_line, t);
+  g_free(request);
+  read_request(in, t);
+}
+
+/* Data came: a connection that sends a NUL byte ends its requests with NULs only (a path may hold a
+ * line break), else with line breaks. */
+static void on_filled(GObject *source, GAsyncResult *result, gpointer data)
+{
+  GDataInputStream *in = G_DATA_INPUT_STREAM(source);
+  gssize got = g_buffered_input_stream_fill_finish(G_BUFFERED_INPUT_STREAM(in), result, NULL);
+  gsize size = 0;
+  const char *buffer = g_buffered_input_stream_peek_buffer(G_BUFFERED_INPUT_STREAM(in), &size);
+
+  if (got <= 0 && size == 0) { /* closed */
+    g_object_unref(in);
+    return;
+  }
+  if (memchr(buffer, '\0', size))
+    g_object_set_data(G_OBJECT(in), "nul", GINT_TO_POINTER(TRUE));
+  read_request(in, data);
+}
+
+static void read_request(GDataInputStream *in, App *t)
+{
+  gsize size = 0;
+
+  if (g_object_get_data(G_OBJECT(in), "nul"))
+    g_data_input_stream_read_upto_async(in, "", 1, G_PRIORITY_DEFAULT, NULL, on_request, t); /* up to a NUL */
+  else if (g_buffered_input_stream_peek_buffer(G_BUFFERED_INPUT_STREAM(in), &size) && size > 0)
+    g_data_input_stream_read_upto_async(in, "\n", 1, G_PRIORITY_DEFAULT, NULL, on_request, t);
+  else
+    g_buffered_input_stream_fill_async(G_BUFFERED_INPUT_STREAM(in), -1, G_PRIORITY_DEFAULT, NULL, on_filled, t);
 }
 
 /* A client connected; its lines are read until it closes the connection. */
@@ -70,7 +110,7 @@ static gboolean on_incoming(GSocketService *service G_GNUC_UNUSED, GSocketConnec
   GDataInputStream *in = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
 
   g_object_set_data_full(G_OBJECT(in), "connection", g_object_ref(conn), g_object_unref);
-  g_data_input_stream_read_line_async(in, G_PRIORITY_DEFAULT, NULL, on_line, t);
+  read_request(in, t);
   return TRUE;
 }
 

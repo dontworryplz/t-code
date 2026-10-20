@@ -7,6 +7,7 @@
  */
 #include "editor/editor.h"
 #include "dialogs/settings.h"
+#include "editor/editorview.h"
 #include "editor/tabs.h"
 #include "files/fileops.h"
 #include "git/compare.h"
@@ -15,6 +16,7 @@
 #include "project/userfiles.h"
 #include "window/window.h"
 
+#include <gio/gunixsocketaddress.h>
 #include <glib/gstdio.h>
 #include <signal.h>
 
@@ -35,6 +37,15 @@ static void run(int ms)
   gint64 end = g_get_monotonic_time() + ms * 1000;
 
   while (g_get_monotonic_time() < end)
+    g_main_context_iteration(NULL, FALSE);
+}
+
+/* Runs the main loop until done() says so (git answers, a file loads), for at most 5 seconds. */
+static void run_until(gboolean (*done)(gconstpointer), gconstpointer data)
+{
+  gint64 end = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+
+  while (!done(data) && g_get_monotonic_time() < end)
     g_main_context_iteration(NULL, FALSE);
 }
 
@@ -146,6 +157,22 @@ static gboolean git(const char *const *args)
   return ok;
 }
 
+/* The old version shown next to path in its comparison tab, or NULL. */
+static Tab *old_version_of(const char *path)
+{
+  for (int i = 0; i < tab_count(&app); i++) {
+    Tab *tab = tab_nth(&app, i);
+    if (g_strcmp0(tab->path, path) == 0 && tab->compare.old_side)
+      return tab->compare.old_side;
+  }
+  return NULL;
+}
+
+static gboolean compared(gconstpointer path)
+{
+  return old_version_of(path) != NULL;
+}
+
 /* A comparison is one tab with both sides ("tracked.txt ↔ <commit>"), on the left the working file:
  * Stop Comparing closes the old version and keeps the file; closing the tab closes both. */
 static void test_comparison_one_tab(void)
@@ -164,7 +191,7 @@ static void test_comparison_one_tab(void)
 
   open_temporary("tracked.txt");
   compare_with_head(&app, path);
-  run(50);
+  run_until(compared, path);  /* git answers in the background */
   assert_tabs("tracked.txt"); /* one tab, kept (no longer temporary) */
   tab = tab_nth(&app, 0);
   g_assert_nonnull(tab->compare.old_side);
@@ -179,25 +206,17 @@ static void test_comparison_one_tab(void)
   g_assert_cmpstr(gtk_label_get_text(tab_nth(&app, 0)->label), ==, "tracked.txt");
 
   compare_with_head(&app, path);
-  run(50);
+  run_until(compared, path);
+  stop_comparing(&app);
+  compare_with_head(&app, path);
+  run_until(compared, path);
   compare_with_head(&app, path); /* again: still one comparison */
-  run(50);
+  run(300);
   assert_tabs("tracked.txt");
   quit_editor(tab_nth(&app, 0)); /* closes both */
   run(50);
   assert_tabs("");
   g_free(path);
-}
-
-/* The old version shown next to path in its comparison tab, or NULL. */
-static Tab *old_version_of(const char *path)
-{
-  for (int i = 0; i < tab_count(&app); i++) {
-    Tab *tab = tab_nth(&app, i);
-    if (g_strcmp0(tab->path, path) == 0 && tab->compare.old_side)
-      return tab->compare.old_side;
-  }
-  return NULL;
 }
 
 /* Clicking changed files one after the other in Source Control: each one opens with its old version
@@ -226,7 +245,7 @@ static void test_comparisons_in_a_row(void)
   for (int round = 0; round < 2; round++)
     for (size_t i = 0; i < G_N_ELEMENTS(names); i++) {
       compare_with_head(&app, paths[i]);
-      run(50);
+      run_until(compared, paths[i]);
       if (!old_version_of(paths[i])) {
         char *now = tabs();
         g_test_message("round %d, %s: tabs %s", round, names[i], now);
@@ -237,6 +256,111 @@ static void test_comparisons_in_a_row(void)
   close_everything();
   for (size_t i = 0; i < G_N_ELEMENTS(names); i++)
     g_free(paths[i]);
+}
+
+static gboolean loaded(gconstpointer tab)
+{
+  return !((const Tab *)tab)->view->loading;
+}
+
+static gboolean in_conflict(gconstpointer tab)
+{
+  return editor_in_conflict((Tab *)tab);
+}
+
+static gboolean saved(gconstpointer tab)
+{
+  return !((const Tab *)tab)->modified;
+}
+
+/* A file changed on disk under unsaved changes is not written over by a save: the bar asks, and
+ * Overwrite writes the editor's text; Reload takes the file's. */
+static void test_save_conflict(void)
+{
+  char *path = g_build_filename(app.project.root, "conflict.txt", NULL), *text = NULL;
+  Tab *tab;
+
+  g_assert_true(g_file_set_contents(path, "mine\n", -1, NULL));
+  open_file(&app, path);
+  tab = find_tab(&app, TAB_EDITOR, path);
+  run_until(loaded, tab);
+  g_usleep(10 * 1000);                                                     /* another mtime */
+  g_assert_true(g_file_set_contents(path, "theirs\n", -1, NULL));          /* another program */
+  gtk_text_buffer_insert_at_cursor(GTK_TEXT_BUFFER(tab->buffer), "x", -1); /* unsaved */
+  save_editor(tab);
+  run_until(in_conflict, tab);
+  g_assert_true(editor_in_conflict(tab));
+  g_assert_true(g_file_get_contents(path, &text, NULL, NULL));
+  g_assert_cmpstr(text, ==, "theirs\n"); /* not written over */
+  g_free(text);
+  g_assert_true(tab->modified);
+
+  tab->view->overwrite = TRUE; /* the bar's Overwrite */
+  save_editor(tab);
+  run_until(saved, tab);
+  g_assert_false(editor_in_conflict(tab));
+  g_assert_true(g_file_get_contents(path, &text, NULL, NULL));
+  g_assert_cmpstr(text, ==, "xmine\n");
+  g_free(text);
+
+  /* Changed on disk again while unsaved: the bar shows before any save; Reload takes the disk's. */
+  gtk_text_buffer_insert_at_cursor(GTK_TEXT_BUFFER(tab->buffer), "y", -1);
+  g_usleep(10 * 1000);
+  g_assert_true(g_file_set_contents(path, "again\n", -1, NULL));
+  run_until(in_conflict, tab);
+  g_assert_true(editor_in_conflict(tab));
+  editor_reload(tab);
+  run_until(loaded, tab);
+  g_assert_false(editor_in_conflict(tab));
+  g_assert_false(tab->modified);
+  close_everything();
+  g_free(path);
+}
+
+static gboolean has_tab(gconstpointer path)
+{
+  return find_tab(&app, TAB_EDITOR, path) != NULL;
+}
+
+/* Requests on the control socket may end with NUL bytes instead of line breaks: a path may hold a
+ * line break. */
+static void test_socket_requests(void)
+{
+  char *odd = g_build_filename(app.project.root, "two\nlines.txt", NULL);
+  char *plain = file("plain.txt");
+  char *request = g_strdup_printf("open %s%copen %s", plain, '\0', odd);
+  GSocketClient *client = g_socket_client_new();
+  GSocketAddress *address = g_unix_socket_address_new(app.paths.socket);
+  GSocketConnection *conn;
+
+  g_assert_true(g_file_set_contents(odd, "x\n", -1, NULL));
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_nonnull(conn);
+  /* "open <plain>\0open <odd>\0": the string's own NUL ends the second one */
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), request,
+                                          strlen(plain) + strlen(odd) + 12, NULL, NULL, NULL));
+  run_until(has_tab, odd);
+  g_assert_true(has_tab(plain));
+  g_assert_true(has_tab(odd));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+
+  char *lined = file("lined.txt"), *line = g_strdup_printf("open %s\n", lined); /* tools/headless.sh's way */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), line, strlen(line), NULL,
+                                          NULL, NULL));
+  run_until(has_tab, lined);
+  g_assert_true(has_tab(lined));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  g_free(line);
+  g_free(lined);
+  g_object_unref(address);
+  g_object_unref(client);
+  close_everything();
+  g_free(request);
+  g_free(plain);
+  g_free(odd);
 }
 
 /* A file opens at its left edge, also in a narrow view without word wrap (the cursor's reveal used to
@@ -425,6 +549,8 @@ int main(int argc, char **argv)
   g_test_add_func("/window/opens-at-left-edge", test_opens_at_left_edge);
   g_test_add_func("/window/comparison-one-tab", test_comparison_one_tab);
   g_test_add_func("/window/comparisons-in-a-row", test_comparisons_in_a_row);
+  g_test_add_func("/window/save-conflict", test_save_conflict);
+  g_test_add_func("/window/socket-requests", test_socket_requests);
 
   gapp = gtk_application_new("io.github.tcode.test", G_APPLICATION_NON_UNIQUE);
   g_object_set_data(G_OBJECT(gapp), "status", &status);

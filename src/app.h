@@ -65,6 +65,8 @@ typedef struct Tab {
 
 struct App {
   GtkWindow *window;
+  
+  /* layout */
   struct {
     GtkPaned *hpaned;  /* the left side | the rest */
     GtkPaned *rpaned;  /* the editors and the bottom side | the right side */
@@ -73,6 +75,8 @@ struct App {
     GtkWidget *bottom; /* the bottom side: a horizontal chain holding dock.cards[4..7] */
     GtkWidget *right;  /* the right side: a vertical chain holding dock.cards[8..11] */
   } layout;
+  
+  /* dock */
   struct {
     GtkPaned *paneds[3][3];  /* the 3 paneds per side (left, bottom, right) */
     GtkWidget *cards[DOCKS]; /* the 12 dock cards around the editor */
@@ -81,6 +85,8 @@ struct App {
     int saved_pos[DOCKS];
     GtkStack *scm_stack; /* the dock stack currently holding t->scm */
   } dock;
+  
+  /* editors */
   struct {
     GtkStack *area;
     GtkNotebook *groups[GROUPS];
@@ -88,19 +94,26 @@ struct App {
     GtkPaned *split; /* groups[0] | groups[1] */
     GtkToggleButton *split_button;
   } editors;
+  
+  /* shell */
   struct {
     VteTerminal *term;
     GPid pid;
   } shell; /* the shell pane (window/terminal.c) */
+  
   GtkWidget *scm;
   GtkWidget *files; /* the Files panel (files/files.c) */
   Picker *picker;
   GMenu *recent_menu;
+  
+  /* status */
   struct {
     GtkLabel *branch, *problems, *build, *position;
     GtkWidget *flags;  /* "No compile flags": clangd cannot find a file's headers */
     GtkWidget *indent; /* "Spaces: 4": the current editor's indentation, a click changes it */
   } status;
+  
+  /* project */
   struct {
     char *root;
     char *git_top; /* the work tree root of root's repository; NULL outside one */
@@ -109,17 +122,22 @@ struct App {
       int width; /* 0: none chosen */
     } indent;    /* chosen for this project in the status bar (session.c); beats everything else */
   } project;
+  
+  /* paths */
   struct {
     char *styles; /* the editor's style scheme (Dark Modern) */
     char *icons;  /* desktop/ in the build tree, holding the app icon */
     char *temp;   /* old file versions for comparisons */
     char *socket; /* $TCODE_SOCKET (ipc/socket.c) */
   } paths;
+  
   GSocketService *service;
   Lsp *lsp; /* the language server (clangd), while C or C++ files are open */
   double font_scale;
   gboolean closing;
   gboolean plain; /* syntax coloring off (F7) */
+  
+  /* settings */
   struct {
     gboolean minimap;
     gboolean reopen_last; /* started from the app menu: open the last project */
@@ -135,4 +153,5 @@ struct App {
     char *files_font;        /* the Files panel */
     gboolean square;         /* the square theme (flat panels, lines between them), not rounded cards */
   } settings;
+  
 };
