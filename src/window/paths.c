@@ -39,8 +39,8 @@ void find_files(App *t)
   /* Old file versions for comparisons; the pid keeps two t-code windows apart. */
   char *versions = g_strdup_printf("t-code-%d-versions", getpid());
 
-  t->styles_dir = find_beside_exe(styles);
-  t->icon_dir = find_beside_exe(icons);
-  t->temp_dir = g_build_filename(g_get_user_runtime_dir(), versions, NULL);
+  t->paths.styles = find_beside_exe(styles);
+  t->paths.icons = find_beside_exe(icons);
+  t->paths.temp = g_build_filename(g_get_user_runtime_dir(), versions, NULL);
   g_free(versions);
 }

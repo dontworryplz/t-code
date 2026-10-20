@@ -48,8 +48,8 @@ static void focus_right(App *t) { focus_group(t, 1); }
 static void zoom_in(App *t) { set_font_scale(t, t->font_scale * 1.1); }
 static void zoom_out(App *t) { set_font_scale(t, t->font_scale / 1.1); }
 static void zoom_reset(App *t) { set_font_scale(t, 1.0); }
-static void toggle_files(App *t) { toggle_pane(t, t->sidebar); }
-static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell)); }
+static void toggle_files(App *t) { toggle_pane(t, t->layout.left); }
+static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell.term)); }
 static void show_scm(App *t) { show_sidebar_page(t, "scm"); }
 static void show_search(App *t) { show_sidebar_page(t, "search"); }
 /* clang-format on */
@@ -63,14 +63,14 @@ static void focus_fm(App *t)
 /* Alt+3: the shell, showing it. */
 static void focus_shell(App *t)
 {
-  set_pane_visible(t, GTK_WIDGET(t->shell), TRUE);
-  gtk_widget_grab_focus(GTK_WIDGET(t->shell));
+  set_pane_visible(t, GTK_WIDGET(t->shell.term), TRUE);
+  gtk_widget_grab_focus(GTK_WIDGET(t->shell.term));
 }
 
 /* Ctrl+\: split the editor area, or join it again. */
 static void toggle_split(App *t)
 {
-  set_split(t, !gtk_widget_get_visible(GTK_WIDGET(t->groups[1])));
+  set_split(t, !gtk_widget_get_visible(GTK_WIDGET(t->editors.groups[1])));
   focus_current_tab(t);
 }
 

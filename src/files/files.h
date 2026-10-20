@@ -8,10 +8,10 @@
 
 #include "app.h"
 
-/* Builds the panel for t->root (t->files). */
+/* Builds the panel for t->project.root (t->files). */
 GtkWidget *files_panel(App *t);
 
-/* Shows the tree of t->root after a project switch. */
+/* Shows the tree of t->project.root after a project switch. */
 void files_set_root(App *t);
 
 /* git status changed (git/gitstatus.c): the git colors are read again. */

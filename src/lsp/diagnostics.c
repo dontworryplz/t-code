@@ -89,7 +89,7 @@ void diagnostics_show(Tab *tab, JsonNode *list)
   if (!tab->view->diagnostics)
     tab->view->diagnostics = g_ptr_array_new_with_free_func((GDestroyNotify)diagnostic_free);
   remove_all(tab);
-  tab->errors = tab->warnings = 0;
+  tab->problems.errors = tab->problems.warnings = 0;
   for (guint i = 0; i < n; i++) {
     JsonNode *node = json_array_get_element(array, i);
     Diagnostic *d = g_new0(Diagnostic, 1);
@@ -104,8 +104,8 @@ void diagnostics_show(Tab *tab, JsonNode *list)
     d->end = gtk_text_buffer_create_mark(buffer, NULL, &end, TRUE); /* text typed right after is not in it */
     if (d->severity != SEVERITY_HINT)                               /* VS Code draws hints as faint dots: none here */
       gtk_text_buffer_apply_tag(buffer, tag_for(tab, d->severity), &start, &end);
-    tab->errors += d->severity == SEVERITY_ERROR;
-    tab->warnings += d->severity == SEVERITY_WARNING;
+    tab->problems.errors += d->severity == SEVERITY_ERROR;
+    tab->problems.warnings += d->severity == SEVERITY_WARNING;
     g_ptr_array_add(tab->view->diagnostics, d);
   }
   editor_view_show_problems(tab);

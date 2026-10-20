@@ -245,11 +245,11 @@ static void test_project_switch(void)
   reset_options();
   search_for("foo");
   g_assert_cmpstr(summary(), ==, "4 results in 2 files");
-  app.root = other;
+  app.project.root = other;
   search_reset();
   wait_for_results();
   g_assert_cmpstr(summary(), ==, "1 result in 1 file");
-  app.root = tmp;
+  app.project.root = tmp;
   search_reset();
   wait_for_results();
 }
@@ -297,7 +297,7 @@ int main(int argc, char **argv)
   write_file(other, "x.c", "foo\n");
   g_string_free(many, TRUE);
 
-  app.root = tmp;
+  app.project.root = tmp;
   panel = search_panel(&app);
   window = gtk_window_new();
   gtk_window_set_child(GTK_WINDOW(window), panel);

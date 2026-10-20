@@ -683,7 +683,7 @@ static void server_start(Lsp *l)
   g_ptr_array_add(argv, l->app->settings.clang_tidy ? "--clang-tidy" : "--clang-tidy=false");
 #endif
   g_ptr_array_add(argv, NULL);
-  g_subprocess_launcher_set_cwd(launcher, l->app->root);
+  g_subprocess_launcher_set_cwd(launcher, l->app->project.root);
   set_malloc_arenas(launcher);
   l->process = g_subprocess_launcher_spawnv(launcher, (const char *const *)argv->pdata, &error);
   g_object_unref(launcher);
@@ -694,7 +694,7 @@ static void server_start(Lsp *l)
     g_clear_error(&error);
     return;
   }
-  l->root = g_strdup(l->app->root);
+  l->root = g_strdup(l->app->project.root);
   l->ch = channel_new(g_subprocess_get_stdout_pipe(l->process), g_subprocess_get_stdin_pipe(l->process),
                       G_OBJECT(l->process), l);
   l->ch->message = on_message;
@@ -748,7 +748,7 @@ gboolean lsp_wants(Tab *tab)
   GtkSourceLanguage *language = tab->kind == TAB_EDITOR ? gtk_source_buffer_get_language(tab->buffer) : NULL;
   const char *id = language ? gtk_source_language_get_id(language) : "";
 
-  return !tab->view->readonly && !tab->compare_with &&
+  return !tab->view->readonly && !tab->compare.with &&
          (strcmp(id, "c") == 0 || strcmp(id, "chdr") == 0 || strcmp(id, "cpp") == 0 || strcmp(id, "cpphdr") == 0);
 }
 
@@ -777,7 +777,7 @@ void lsp_open(Tab *tab)
     g_source_remove(l->idle_id);
     l->idle_id = 0;
   }
-  if (l->ch && g_strcmp0(l->root, tab->app->root) != 0) /* another project now */
+  if (l->ch && g_strcmp0(l->root, tab->app->project.root) != 0) /* another project now */
     server_stop(l);
   if (!l->ch)
     server_start(l); /* the file goes once it has answered initialize */
@@ -923,7 +923,7 @@ char *lsp_flags_hint(App *t, const char **problem)
       continue;
     }
     *problem = "No compile flags";
-    misnamed = compile_db_misnamed(path, t->root);
+    misnamed = compile_db_misnamed(path, t->project.root);
     if (misnamed) {
       char *found = g_path_get_basename(misnamed);
       hint = g_strdup_printf("clangd cannot find the headers %s includes, as it has no compile flags for it.\n\n"

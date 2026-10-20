@@ -118,7 +118,7 @@ static void start_waiting(void)
   GitCall *call;
 
   while (!scm.busy && (call = g_queue_pop_head(&scm.waiting)))
-    if (!scm.app->closing && scm.app->git_top)
+    if (!scm.app->closing && scm.app->project.git_top)
       start_git(call);
     else
       git_call_free(call);
@@ -157,7 +157,7 @@ static gboolean start_git(GitCall *call)
 
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE |
                                        (call->input ? G_SUBPROCESS_FLAGS_STDIN_PIPE : 0));
-  g_subprocess_launcher_set_cwd(launcher, scm.app->git_top);
+  g_subprocess_launcher_set_cwd(launcher, scm.app->project.git_top);
   /* No terminal to answer a password prompt in: fail instead of waiting forever. */
   g_subprocess_launcher_setenv(launcher, "GIT_TERMINAL_PROMPT", "0", TRUE);
   proc = g_subprocess_launcher_spawnv(launcher, (const char *const *)call->argv, &error);
@@ -182,7 +182,7 @@ static void run_git(const char *const *args, const char *input, gboolean quiet, 
   GPtrArray *argv = g_ptr_array_new();
   GitCall *call;
 
-  if (!scm.app->git_top)
+  if (!scm.app->project.git_top)
     return;
   g_ptr_array_add(argv, g_strdup("git"));
   for (int i = 0; args[i]; i++)
@@ -285,7 +285,7 @@ static void on_discard_answer(GObject *dialog, GAsyncResult *result, gpointer da
   if (gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(dialog), result, NULL) == 1) {
     if (d->untracked) {
       /* Never in git: to the trash, where it can still be found. */
-      char *full = g_build_filename(scm.app->git_top, d->path, NULL);
+      char *full = g_build_filename(scm.app->project.git_top, d->path, NULL);
       GFile *file = g_file_new_for_path(full);
       GError *error = NULL;
       if (!g_file_trash(file, NULL, &error)) {
@@ -302,7 +302,7 @@ static void on_discard_answer(GObject *dialog, GAsyncResult *result, gpointer da
     } else {
       const char *args[] = { "restore", "--", d->path, NULL };
       set_note(NULL, FALSE);
-      run_git(args, NULL, FALSE, on_discarded, g_build_filename(scm.app->git_top, d->path, NULL));
+      run_git(args, NULL, FALSE, on_discarded, g_build_filename(scm.app->project.git_top, d->path, NULL));
     }
   }
   g_free(d->path);
@@ -569,7 +569,7 @@ static void show_staged(App *t, const Change *c)
  * else next to the last commit (the same then, and the gutter follows new commits). */
 static void show_unstaged(App *t, const Change *c)
 {
-  char *full = g_build_filename(t->git_top, c->path, NULL);
+  char *full = g_build_filename(t->project.git_top, c->path, NULL);
 
   if (c->code == 'D')
     compare_revisions(t, INDEX_REV, c->path, NULL, NULL); /* only the staged version is left */
@@ -587,7 +587,7 @@ static void on_change_activated(GtkListBox *list, GtkListBoxRow *row, gpointer d
 {
   Change *c = g_object_get_data(G_OBJECT(row), "change");
 
-  if (!c || !scm.app->git_top)
+  if (!c || !scm.app->project.git_top)
     return;
   if (list == scm.staged_list)
     show_staged(scm.app, c);
@@ -831,7 +831,7 @@ void scm_update(App *t, const char *out, gsize size)
   gtk_widget_set_sensitive(scm.commit, out != NULL);
   gtk_widget_set_sensitive(scm.push, out != NULL && !scm.initial);
   if (!out)
-    set_note(t->git_top ? NULL : "This folder is not in a git repository.", FALSE);
+    set_note(t->project.git_top ? NULL : "This folder is not in a git repository.", FALSE);
 
   /* Commits are listed again after a commit, a checkout or another project; outside a
      * repository (no HEAD) and before the first commit there are none. */
@@ -866,7 +866,7 @@ static void show_changes(App *t)
   /* The tab shows how many files changed, like VS Code's badge. */
   title = scm.staged->len + scm.changes->len ? g_strdup_printf("SOURCE CONTROL  %u", scm.staged->len + scm.changes->len)
                                              : g_strdup("SOURCE CONTROL");
-  gtk_stack_page_set_title(gtk_stack_get_page(t->sidebar_stack, t->scm), title);
+  gtk_stack_page_set_title(gtk_stack_get_page(t->dock.scm_stack, t->scm), title);
   g_free(title);
 }
 

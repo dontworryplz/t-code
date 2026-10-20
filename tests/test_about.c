@@ -76,7 +76,7 @@ int main(int argc, char **argv)
     return g_test_run();
   }
   app.window = GTK_WINDOW(gtk_window_new());
-  app.styles_dir = "/test/styles";
+  app.paths.styles = "/test/styles";
   g_test_add_func("/about/contents", test_contents);
   g_test_add_func("/about/close-early", test_close_early);
   return g_test_run();

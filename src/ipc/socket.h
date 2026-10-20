@@ -8,7 +8,7 @@
 
 #include "app.h"
 
-/* Listens on $XDG_RUNTIME_DIR/t-code-<pid>.sock (t->socket_path). */
+/* Listens on $XDG_RUNTIME_DIR/t-code-<pid>.sock (t->paths.socket). */
 void start_socket(App *t);
 
 /* Stops listening and removes the socket file. */

@@ -99,14 +99,14 @@ static int rows(int index)
 
 static const char *tab_title(void)
 {
-  return gtk_stack_page_get_title(gtk_stack_get_page(app.sidebar_stack, app.scm));
+  return gtk_stack_page_get_title(gtk_stack_get_page(app.dock.scm_stack, app.scm));
 }
 
 /* Opens a project the way switch_project (project/project.c) does, then waits for git. */
 static void open_project_at(const char *root)
 {
-  g_free(app.root);
-  app.root = g_strdup(root);
+  g_free(app.project.root);
+  app.project.root = g_strdup(root);
   scm_reset();
   watch_git(&app); /* git_top, then git status in 300ms */
 }
@@ -145,7 +145,7 @@ static void test_no_git(void)
   open_with_commits();
   open_project_at(no_git);
   assert_empty(); /* at once, before git answers */
-  g_assert_null(app.git_top);
+  g_assert_null(app.project.git_top);
   runs_for(800);
   assert_empty();
   /* git status runs again every 10 seconds: still nothing. */
@@ -251,10 +251,10 @@ int main(int argc, char **argv)
   no_commits = make_dir("no-commits", "c.txt");
   git(no_commits, (const char *[]){ "init", "-q", NULL });
 
-  app.root = g_strdup(tmp);
-  app.sidebar_stack = GTK_STACK(gtk_stack_new());
+  app.project.root = g_strdup(tmp);
+  app.dock.scm_stack = GTK_STACK(gtk_stack_new());
   app.scm = scm_panel(&app);
-  gtk_stack_add_titled(app.sidebar_stack, app.scm, "scm", "SOURCE CONTROL");
+  gtk_stack_add_titled(app.dock.scm_stack, app.scm, "scm", "SOURCE CONTROL");
 
   g_test_add_func("/scm/repository", test_repository);
   g_test_add_func("/scm/no-git", test_no_git);

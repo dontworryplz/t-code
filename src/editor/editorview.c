@@ -71,8 +71,8 @@ static void init_look(App *t)
   gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(font_provider),
                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   editor_view_set_font(t);
-  if (t->styles_dir)
-    gtk_source_style_scheme_manager_prepend_search_path(schemes, t->styles_dir);
+  if (t->paths.styles)
+    gtk_source_style_scheme_manager_prepend_search_path(schemes, t->paths.styles);
   char *mine = user_colors_file(), *dir = g_path_get_dirname(mine);
   gtk_source_style_scheme_manager_prepend_search_path(schemes, dir); /* the user's copy comes first */
   g_free(dir);
@@ -168,9 +168,9 @@ void editor_view_apply_settings(Tab *tab)
     v->width = v->config.width;
   if (v->config_from)
     v->indent_from = v->config_from;
-  if (t->project_indent.width > 0) {
-    v->tabs = t->project_indent.tabs;
-    v->width = t->project_indent.width;
+  if (t->project.indent.width > 0) {
+    v->tabs = t->project.indent.tabs;
+    v->width = t->project.indent.width;
     v->indent_from = "this project's choice";
   }
   if (language && strcmp(gtk_source_language_get_id(language), "makefile") == 0)
@@ -188,8 +188,8 @@ void editor_view_apply_settings(Tab *tab)
   if (lsp_has(tab))
     semantic_update(tab);                  /* code coloring may have been turned off or on */
   gtk_widget_queue_draw(GTK_WIDGET(view)); /* the indent guides, turned off or on */
-  if (tab->old_side)                       /* a comparison's right side is in no tab list */
-    editor_view_apply_settings(tab->old_side);
+  if (tab->compare.old_side)               /* a comparison's right side is in no tab list */
+    editor_view_apply_settings(tab->compare.old_side);
   status_show_indent(t);
 }
 

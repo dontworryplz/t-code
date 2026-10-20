@@ -37,7 +37,7 @@ void set_terminal_font(App *t, VteTerminal *term, const char *font)
 /* Gives the shell, the editors and the Files panel the fonts the settings choose for them. */
 void apply_fonts(App *t)
 {
-  set_terminal_font(t, t->shell, t->settings.font);
+  set_terminal_font(t, t->shell.term, t->settings.font);
   editor_view_set_font(t);
   files_apply_font(t);
 }
@@ -83,15 +83,15 @@ void spawn(App *t, VteTerminal *term, char **argv, char **extra_env, GPid *pid)
 {
   char **env = g_get_environ();
 
-  env = g_environ_setenv(env, "TCODE_SOCKET", t->socket_path, TRUE);
+  env = g_environ_setenv(env, "TCODE_SOCKET", t->paths.socket, TRUE);
   for (int i = 0; extra_env && extra_env[i]; i++) {
     char **pair = g_strsplit(extra_env[i], "=", 2);
     if (pair[0] && pair[1])
       env = g_environ_setenv(env, pair[0], pair[1], TRUE);
     g_strfreev(pair);
   }
-  vte_terminal_spawn_async(term, VTE_PTY_DEFAULT, t->root, argv, env, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, -1, NULL,
-                           spawn_done, pid);
+  vte_terminal_spawn_async(term, VTE_PTY_DEFAULT, t->project.root, argv, env, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, -1,
+                           NULL, spawn_done, pid);
   g_strfreev(env);
 }
 
@@ -104,15 +104,15 @@ void start_shell_pane(App *t)
   char *shell = env && *env ? g_strdup(env) : vte_get_user_shell();
   char *argv[] = { shell ? shell : "/bin/sh", NULL };
 
-  spawn(t, t->shell, argv, NULL, &t->shell_pid);
+  spawn(t, t->shell.term, argv, NULL, &t->shell.pid);
   g_free(shell);
 }
 
 /* It comes back when it exits, in the current project (see on_shell_exited). */
 void restart_shell_pane(App *t)
 {
-  if (t->shell_pid > 0)
-    kill(t->shell_pid, SIGHUP);
+  if (t->shell.pid > 0)
+    kill(t->shell.pid, SIGHUP);
 }
 
 /* The shell exited (or restart_shell_pane() hung it up): it starts again, in the current project. */
@@ -120,7 +120,7 @@ static void on_shell_exited(VteTerminal *term, int status G_GNUC_UNUSED, App *t)
 {
   if (t->closing)
     return;
-  t->shell_pid = 0; /* gone: nothing may signal its pid until the new one starts */
+  t->shell.pid = 0; /* gone: nothing may signal its pid until the new one starts */
   vte_terminal_reset(term, TRUE, TRUE);
   start_shell_pane(t);
 }
@@ -129,7 +129,7 @@ static void on_shell_exited(VteTerminal *term, int status G_GNUC_UNUSED, App *t)
  * prompt, else the program it runs. 0 when unknown. */
 static pid_t shell_foreground(App *t)
 {
-  VtePty *pty = vte_terminal_get_pty(t->shell);
+  VtePty *pty = vte_terminal_get_pty(t->shell.term);
   pid_t group = pty ? tcgetpgrp(vte_pty_get_fd(pty)) : -1;
 
   return group > 0 ? group : 0;
@@ -147,7 +147,7 @@ static void type_in_shell(App *t, const char *command)
 {
   char *line = g_strdup_printf("\x15%s\r", command);
 
-  vte_terminal_feed_child(t->shell, line, -1);
+  vte_terminal_feed_child(t->shell.term, line, -1);
   g_free(line);
 }
 
@@ -177,7 +177,7 @@ static gboolean run_when_idle(gpointer data)
   ShellRun *run = data;
   App *t = run->app;
   pid_t group = shell_foreground(t);
-  gboolean busy = group && group != t->shell_pid;
+  gboolean busy = group && group != t->shell.pid;
 
   if (busy && !t->closing && ++run->tries < 40)
     return G_SOURCE_CONTINUE;
@@ -197,10 +197,10 @@ static gboolean run_when_idle(gpointer data)
 void run_in_shell(App *t, const char *command)
 {
   pid_t group = shell_foreground(t);
-  gboolean busy = group && group != t->shell_pid;
+  gboolean busy = group && group != t->shell.pid;
 
-  set_pane_visible(t, GTK_WIDGET(t->shell), TRUE);
-  gtk_widget_grab_focus(GTK_WIDGET(t->shell));
+  set_pane_visible(t, GTK_WIDGET(t->shell.term), TRUE);
+  gtk_widget_grab_focus(GTK_WIDGET(t->shell.term));
   if (waiting) {
     /* Build or Run again while the last one waits: one command runs, the newest. */
     g_free(waiting->command);
@@ -241,10 +241,10 @@ static const char *const location_pattern = "(?:[A-Za-z0-9_.~+-]*/)*[A-Za-z0-9_.
 /* Where the shell is now (bash reports it on Fedora), or else the project root. */
 static char *shell_directory(App *t)
 {
-  const char *uri = vte_terminal_get_termprop_string(t->shell, VTE_TERMPROP_CURRENT_DIRECTORY_URI, NULL);
+  const char *uri = vte_terminal_get_termprop_string(t->shell.term, VTE_TERMPROP_CURRENT_DIRECTORY_URI, NULL);
   char *dir = uri ? g_filename_from_uri(uri, NULL, NULL) : NULL;
 
-  return dir ? dir : g_strdup(t->root);
+  return dir ? dir : g_strdup(t->project.root);
 }
 
 /* Opens a "file.c:12:5" location from the shell (relative to the shell's folder or the project). */
@@ -254,7 +254,7 @@ static void open_location(App *t, const char *location)
   char *name = g_strndup(location, colon - location);
   int line = 0, column = 0;
   char *dir = shell_directory(t);
-  const char *const bases[] = { dir, t->root };
+  const char *const bases[] = { dir, t->project.root };
   char *path = NULL;
 
   sscanf(colon + 1, "%d:%d", &line, &column);
@@ -283,7 +283,7 @@ static void on_shell_click(GtkGestureClick *gesture, int n_press G_GNUC_UNUSED, 
 
   if (!(state & GDK_CONTROL_MASK))
     return;
-  match = vte_terminal_check_match_at(t->shell, x, y, NULL);
+  match = vte_terminal_check_match_at(t->shell.term, x, y, NULL);
   if (match) {
     gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
     open_location(t, match);
@@ -303,19 +303,19 @@ static void add_location_links(App *t)
     g_error_free(error);
     return;
   }
-  int tag = vte_terminal_match_add_regex(t->shell, regex, 0);
-  vte_terminal_match_set_cursor_name(t->shell, tag, "pointer");
+  int tag = vte_terminal_match_add_regex(t->shell.term, regex, 0);
+  vte_terminal_match_set_cursor_name(t->shell.term, tag, "pointer");
   vte_regex_unref(regex);
 
   gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
   gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(click), GTK_PHASE_CAPTURE);
   g_signal_connect(click, "pressed", G_CALLBACK(on_shell_click), t);
-  gtk_widget_add_controller(GTK_WIDGET(t->shell), GTK_EVENT_CONTROLLER(click));
+  gtk_widget_add_controller(GTK_WIDGET(t->shell.term), GTK_EVENT_CONTROLLER(click));
 }
 
 void create_shell_pane(App *t)
 {
-  t->shell = new_terminal(t);
-  g_signal_connect(t->shell, "child-exited", G_CALLBACK(on_shell_exited), t);
+  t->shell.term = new_terminal(t);
+  g_signal_connect(t->shell.term, "child-exited", G_CALLBACK(on_shell_exited), t);
   add_location_links(t);
 }

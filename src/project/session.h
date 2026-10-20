@@ -24,10 +24,10 @@ void session_save_settings(App *t);
 /* Gives the window its saved size, pane sizes, visible panes and text size. */
 void session_apply_window(App *t);
 
-/* Reads the indentation chosen for the current project into t->project_indent (none: width 0). */
+/* Reads the indentation chosen for the current project into t->project.indent (none: width 0). */
 void session_load_project_indent(App *t);
 
-/* Writes t->project_indent for the current project (width 0 forgets it). */
+/* Writes t->project.indent for the current project (width 0 forgets it). */
 void session_save_project_indent(App *t);
 
 /* Opens the tabs saved for the current project; returns whether any opened. */

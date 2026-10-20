@@ -1,5 +1,5 @@
 /*
- * The project: the folder t-code works in (t->root). Open Folder, the recent folders menu and
+ * The project: the folder t-code works in (t->project.root). Open Folder, the recent folders menu and
  * "Open Folder as Project" in the file manager all switch it.
  */
 #pragma once

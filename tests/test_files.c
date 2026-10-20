@@ -45,7 +45,7 @@ static GtkWidget *window;
 
 static void write_file(const char *name)
 {
-  char *path = g_build_filename(app.root, name, NULL), *dir = g_path_get_dirname(path);
+  char *path = g_build_filename(app.project.root, name, NULL), *dir = g_path_get_dirname(path);
 
   g_mkdir_with_parents(dir, 0755);
   g_assert_true(g_file_set_contents(path, "", -1, NULL));
@@ -150,7 +150,7 @@ static gboolean selection_is(void)
 
 static void project(void)
 {
-  app.root = g_dir_make_tmp("t-code-files-XXXXXX", NULL);
+  app.project.root = g_dir_make_tmp("t-code-files-XXXXXX", NULL);
   write_file("Makefile");
   write_file("main.c");
   write_file("README.md");
@@ -163,9 +163,9 @@ static void project(void)
 
 static void forget_project(void)
 {
-  g_assert_true(files_delete(app.root, NULL));
-  g_clear_pointer(&app.root, g_free);
-  g_clear_pointer(&app.git_top, g_free);
+  g_assert_true(files_delete(app.project.root, NULL));
+  g_clear_pointer(&app.project.root, g_free);
+  g_clear_pointer(&app.project.git_top, g_free);
   g_clear_pointer(&opened, g_free);
 }
 
@@ -222,7 +222,7 @@ static void test_read_again(void)
   assert_rows("build/ | src/ |  lib/ |  util.c | .clang-format | main.c | Makefile | README.md");
   set_open("lib", TRUE);
   assert_rows("build/ | src/ |  lib/ |   deep.c |  util.c | .clang-format | main.c | Makefile | README.md");
-  reveal(deep = g_build_filename(app.root, "src/lib/deep.c", NULL));
+  reveal(deep = g_build_filename(app.project.root, "src/lib/deep.c", NULL));
   g_free(deep);
   wanted_selection = "deep.c";
   g_assert_true(wait_for(selection_is));
@@ -240,14 +240,14 @@ static void test_create(void)
 
   project();
   assert_rows("build/ | src/ | .clang-format | main.c | Makefile | README.md");
-  dir = g_build_filename(app.root, "src", NULL);
+  dir = g_build_filename(app.project.root, "src", NULL);
   on_new_file(&app, dir, "lib/fresh.c");
   wanted_selection = "fresh.c";
   g_assert_true(wait_for(selection_is));
   assert_rows("build/ | src/ |  lib/ |   deep.c |   fresh.c |  util.c | .clang-format | main.c | Makefile | README.md");
   g_assert_true(g_str_has_prefix(opened, "open ") && g_str_has_suffix(opened, "/src/lib/fresh.c"));
 
-  on_new_folder(&app, app.root, "docs");
+  on_new_folder(&app, app.project.root, "docs");
   wanted_selection = "docs";
   g_assert_true(wait_for(selection_is));
   g_free(dir);
@@ -261,8 +261,8 @@ static void test_cut_paste(void)
 
   project();
   assert_rows("build/ | src/ | .clang-format | main.c | Makefile | README.md");
-  main_c = g_build_filename(app.root, "main.c", NULL);
-  src = g_build_filename(app.root, "src", NULL);
+  main_c = g_build_filename(app.project.root, "main.c", NULL);
+  src = g_build_filename(app.project.root, "src", NULL);
 
   clip(main_c, TRUE);
   paste(src);
@@ -272,7 +272,7 @@ static void test_cut_paste(void)
   assert_rows("build/ | src/ |  lib/ |  main.c |  util.c | .clang-format | Makefile | README.md");
 
   g_free(main_c);
-  main_c = g_build_filename(app.root, "src/main.c", NULL);
+  main_c = g_build_filename(app.project.root, "src/main.c", NULL);
   clip(main_c, FALSE);
   paste(main_c); /* onto a file: into its folder */
   wanted_selection = "main copy.c";
@@ -330,7 +330,7 @@ static void test_double_click(void)
 static void test_dotfiles(void)
 {
   project();
-  g_mkdir(g_build_filename(app.root, ".git", NULL), 0755);
+  g_mkdir(g_build_filename(app.project.root, ".git", NULL), 0755);
   assert_rows("build/ | src/ | .clang-format | main.c | Makefile | README.md");
   files.show_hidden = FALSE;
   gtk_filter_changed(files.filter, GTK_FILTER_CHANGE_DIFFERENT);
@@ -353,21 +353,22 @@ static void test_git(void)
 
   project();
   write_file(".gitignore");
-  g_assert_true(g_file_set_contents((path = g_build_filename(app.root, ".gitignore", NULL)), "build/\n", -1, NULL));
+  g_assert_true(
+      g_file_set_contents((path = g_build_filename(app.project.root, ".gitignore", NULL)), "build/\n", -1, NULL));
   g_free(path);
-  if (!g_spawn_sync(app.root, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL)) {
+  if (!g_spawn_sync(app.project.root, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL)) {
     g_test_skip("no git");
     forget_project();
     return;
   }
-  app.git_top = g_canonicalize_filename(app.root, NULL);
+  app.project.git_top = g_canonicalize_filename(app.project.root, NULL);
   files_git_changed(&app);
   g_assert_true(wait_for(marks_read));
-  path = g_build_filename(app.git_top, "src", NULL);
+  path = g_build_filename(app.project.git_top, "src", NULL);
   g_assert_cmpint(git_marks_state(files.marks, path), ==, 'U');
   g_free(path);
-  path = g_build_filename(app.git_top, "build/main.o", NULL);
+  path = g_build_filename(app.project.git_top, "build/main.o", NULL);
   g_assert_cmpint(git_marks_state(files.marks, path), ==, 'I');
   g_free(path);
   forget_project();
@@ -378,10 +379,10 @@ int main(int argc, char **argv)
   gtk_test_init(&argc, &argv, NULL);
   app.font_scale = 1;
   app.settings.files_font = "Cascadia Code 11";
-  app.root = g_strdup(g_get_tmp_dir());
+  app.project.root = g_strdup(g_get_tmp_dir());
   window = gtk_window_new();
   gtk_window_set_child(GTK_WINDOW(window), files_panel(&app));
-  g_clear_pointer(&app.root, g_free);
+  g_clear_pointer(&app.project.root, g_free);
 
   g_test_add_func("/files/tree", test_tree);
   g_test_add_func("/files/busy-folders", test_busy_folders);

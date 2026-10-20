@@ -24,7 +24,7 @@ const char *comparable_path(App *t)
 
   if (!tab || tab->kind != TAB_EDITOR)
     return NULL;
-  return tab->compare_with ? tab->compare_with : tab->path;
+  return tab->compare.with ? tab->compare.with : tab->path;
 }
 
 /* A message box over the window ("No git history", "Nothing to compare with"). */
@@ -62,9 +62,10 @@ static char *git(const char *dir, const char *const *args)
  * tree (or the project, or else by its full path), so two files with one name never share it. */
 static char *temp_path(App *t, const char *folder, const char *path)
 {
-  GFile *top = g_file_new_for_path(t->git_top ? t->git_top : t->root), *file = g_file_new_for_path(path);
+  GFile *top = g_file_new_for_path(t->project.git_top ? t->project.git_top : t->project.root),
+        *file = g_file_new_for_path(path);
   char *relative = g_file_get_relative_path(top, file);
-  char *result = g_build_filename(t->temp_dir, folder, relative ? relative : path, NULL);
+  char *result = g_build_filename(t->paths.temp, folder, relative ? relative : path, NULL);
 
   g_free(relative);
   g_object_unref(file);
@@ -144,7 +145,7 @@ static void sync_scroll(Tab *left, Tab *right)
 
 void unsync_scroll(Tab *left)
 {
-  Tab *sides[] = { left, left->old_side };
+  Tab *sides[] = { left, left->compare.old_side };
 
   for (gsize i = 0; i < G_N_ELEMENTS(sides); i++) {
     if (!sides[i] || !sides[i]->source)
@@ -171,12 +172,12 @@ static Tab *open_version(App *t, const char *path, const char *label, const char
     Tab *other = tab_nth(t, i);
     if (g_strcmp0(other->path, path) == 0)
       remove_tab(other); /* an old version: nothing to save */
-    else if (other->old_side && g_strcmp0(other->old_side->path, path) == 0)
+    else if (other->compare.old_side && g_strcmp0(other->compare.old_side->path, path) == 0)
       stop_comparing_tab(other);
   }
   tab = open_editor(t, path, 0, 0, TRUE);
-  tab->title = g_strdup_printf("%s @ %s", name, label);
-  tab->compare_with = g_strdup(working);
+  tab->compare.title = g_strdup_printf("%s @ %s", name, label);
+  tab->compare.with = g_strdup(working);
   update_tab_label(tab);
   g_free(name);
   return tab;
@@ -202,7 +203,7 @@ static void compare_working(App *t, const char *path, const char *old_path, cons
     work = open_editor(t, path, 0, 0, FALSE);
   stop_comparing_tab(work); /* one comparison per file at a time */
   keep_tab(work);           /* a click in Files must not replace it while it is compared */
-  t->active = tab_group(work);
+  t->editors.active = tab_group(work);
   old = open_version(t, old_path, label, path);
   if (base_rev && strcmp(base_rev, "HEAD") != 0)
     diff_gutter_compare_rev(work, base_rev);
@@ -278,15 +279,15 @@ static char *write_revision(App *t, const char *rev, const char *rel, char **lab
 {
   gboolean index = strcmp(rev, INDEX_REV) == 0;
   const char *short_args[] = { "rev-parse", "--short", "--verify", "--quiet", rev, NULL };
-  char *short_commit = index ? g_strdup("Index") : git(t->git_top, short_args);
+  char *short_commit = index ? g_strdup("Index") : git(t->project.git_top, short_args);
   char *spec = g_strconcat(rev, ":", rel, NULL);
   const char *show_args[] = { "show", spec, NULL };
-  char *content = short_commit ? git(t->git_top, show_args) : NULL;
+  char *content = short_commit ? git(t->project.git_top, show_args) : NULL;
   char *path = NULL;
 
   if (content) {
     g_strstrip(short_commit);
-    path = g_build_filename(t->temp_dir, index ? "index" : short_commit, rel, NULL);
+    path = g_build_filename(t->paths.temp, index ? "index" : short_commit, rel, NULL);
     store(path, content);
     *label = g_strdup(short_commit);
   }
@@ -303,9 +304,9 @@ static char *write_revision(App *t, const char *rev, const char *rel, char **lab
 void compare_revisions(App *t, const char *old_rev, const char *old_rel, const char *new_rev, const char *new_rel)
 {
   char *old_label = NULL, *new_label = NULL;
-  char *old_path = old_rev && old_rel && t->git_top ? write_revision(t, old_rev, old_rel, &old_label) : NULL;
-  char *new_path = new_rev && new_rel && t->git_top ? write_revision(t, new_rev, new_rel, &new_label) : NULL;
-  char *working = t->git_top ? g_build_filename(t->git_top, new_rel ? new_rel : old_rel, NULL) : NULL;
+  char *old_path = old_rev && old_rel && t->project.git_top ? write_revision(t, old_rev, old_rel, &old_label) : NULL;
+  char *new_path = new_rev && new_rel && t->project.git_top ? write_revision(t, new_rev, new_rel, &new_label) : NULL;
+  char *working = t->project.git_top ? g_build_filename(t->project.git_top, new_rel ? new_rel : old_rel, NULL) : NULL;
   Tab *left = NULL, *right = NULL;
 
   if (!old_path && !new_path) {
@@ -333,10 +334,10 @@ void compare_revisions(App *t, const char *old_rev, const char *old_rel, const c
 
 void stop_comparing_tab(Tab *tab)
 {
-  if (!tab->old_side)
+  if (!tab->compare.old_side)
     return;
   part_tabs(tab);
-  if (!tab->compare_with) { /* the working file: its gutter follows HEAD again */
+  if (!tab->compare.with) { /* the working file: its gutter follows HEAD again */
     diff_gutter_pair(tab, NULL);
     diff_gutter_follow_head(tab);
   }
@@ -349,7 +350,7 @@ void stop_comparing(App *t)
 
   if (!tab || tab->kind != TAB_EDITOR)
     return;
-  if (tab->compare_with) /* two old versions, or one: nothing to keep */
+  if (tab->compare.with) /* two old versions, or one: nothing to keep */
     remove_tab(tab);
   else
     stop_comparing_tab(tab);
@@ -446,6 +447,6 @@ static void delete_tree(const char *path)
 
 void remove_temp_dir(App *t)
 {
-  if (t->temp_dir)
-    delete_tree(t->temp_dir);
+  if (t->paths.temp)
+    delete_tree(t->paths.temp);
 }

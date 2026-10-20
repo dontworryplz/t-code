@@ -6,5 +6,5 @@
 
 #include "app.h"
 
-/* Fills t->styles_dir, t->icon_dir and t->temp_dir. */
+/* Fills t->paths.styles, t->paths.icons and t->paths.temp. */
 void find_files(App *t);

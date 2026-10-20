@@ -43,14 +43,20 @@ typedef struct Tab {
   Preview *preview; /* previews only */
   GtkLabel *label;
   char *path;
-  char *title;          /* shown instead of the file name (an old version in a comparison) */
-  char *compare_with;   /* old versions only: the working file they are compared with */
-  struct Tab *old_side; /* a comparison's left side: the right one, in the same notebook page */
-  gboolean temporary;   /* VS Code's preview editor: a click in Files opens it, the next one replaces it */
+  gboolean temporary; /* VS Code's preview editor: a click in Files opens it, the next one replaces it */
   gboolean modified;
-  int line, column;     /* the cursor (1-based) */
-  int errors, warnings; /* clangd's (lsp/diagnostics.c) */
-  EditorView *view;     /* editors only: loading, saving, the minimap (editor/editorview.h) */
+  EditorView *view; /* editors only: loading, saving, the minimap (editor/editorview.h) */
+  struct {
+    int line, column; /* 1-based */
+  } cursor;
+  struct {
+    int errors, warnings;
+  } problems; /* clangd's (lsp/diagnostics.c) */
+  struct {
+    char *title;          /* shown instead of the file name (an old version) */
+    char *with;           /* old versions only: the working file they are compared with */
+    struct Tab *old_side; /* the left side's: the right one, in the same notebook page */
+  } compare;              /* a comparison's two sides (git/compare.c) */
 } Tab;
 
 /* The editor area holds two tab groups side by side; the second one only while split. */
@@ -59,46 +65,61 @@ typedef struct Tab {
 
 struct App {
   GtkWindow *window;
-  GtkPaned *hpaned, *rpaned, *vpaned, *split;
-  GtkWidget *sidebar;           /* left vertical paned tree holding docks[0..3] */
-  GtkWidget *bottom_bar;        /* bottom horizontal paned tree holding docks[4..7] */
-  GtkWidget *right_sidebar;     /* right vertical paned tree holding docks[8..11] */
-  GtkPaned *dock_paneds[3][3];  /* the 3 paneds per side (left, bottom, right) */
-  GtkWidget *docks[DOCKS];      /* the 12 dock cards around the editor */
-  GtkStack *dock_stacks[DOCKS]; /* the stack of panels in each dock */
-  gboolean dock_collapsed[DOCKS];
-  int dock_saved_pos[DOCKS];
-  GtkStack *sidebar_stack; /* the dock stack currently holding t->scm */
+  struct {
+    GtkPaned *hpaned;  /* the left side | the rest */
+    GtkPaned *rpaned;  /* the editors and the bottom side | the right side */
+    GtkPaned *vpaned;  /* the editors over the bottom side */
+    GtkWidget *left;   /* the left side: a vertical paned chain holding dock.cards[0..3] */
+    GtkWidget *bottom; /* the bottom side: a horizontal chain holding dock.cards[4..7] */
+    GtkWidget *right;  /* the right side: a vertical chain holding dock.cards[8..11] */
+  } layout;
+  struct {
+    GtkPaned *paneds[3][3];  /* the 3 paneds per side (left, bottom, right) */
+    GtkWidget *cards[DOCKS]; /* the 12 dock cards around the editor */
+    GtkStack *stacks[DOCKS]; /* the stack of panels in each dock */
+    gboolean collapsed[DOCKS];
+    int saved_pos[DOCKS];
+    GtkStack *scm_stack; /* the dock stack currently holding t->scm */
+  } dock;
+  struct {
+    GtkStack *area;
+    GtkNotebook *groups[GROUPS];
+    int active;      /* the group new tabs go to */
+    GtkPaned *split; /* groups[0] | groups[1] */
+    GtkToggleButton *split_button;
+  } editors;
+  struct {
+    VteTerminal *term;
+    GPid pid;
+  } shell; /* the shell pane (window/terminal.c) */
   GtkWidget *scm;
-  GtkStack *editor_area;
-  GtkNotebook *groups[GROUPS];
-  int active; /* the group new tabs go to */
-  GtkToggleButton *split_button;
-  GMenu *recent_menu;
   GtkWidget *files; /* the Files panel (files/files.c) */
-  VteTerminal *shell;
-  GPid shell_pid;
   Picker *picker;
+  GMenu *recent_menu;
   struct {
     GtkLabel *branch, *problems, *build, *position;
     GtkWidget *flags;  /* "No compile flags": clangd cannot find a file's headers */
     GtkWidget *indent; /* "Spaces: 4": the current editor's indentation, a click changes it */
   } status;
-  char *root;
-  char *git_top; /* the work tree root of t->root's repository; NULL outside one */
-  char *socket_path;
-  char *styles_dir; /* the editor's style scheme (Dark Modern) */
-  char *icon_dir;   /* desktop/ in the build tree, holding the app icon */
-  char *temp_dir;   /* old file versions for comparisons */
+  struct {
+    char *root;
+    char *git_top; /* the work tree root of root's repository; NULL outside one */
+    struct {
+      gboolean tabs;
+      int width; /* 0: none chosen */
+    } indent;    /* chosen for this project in the status bar (session.c); beats everything else */
+  } project;
+  struct {
+    char *styles; /* the editor's style scheme (Dark Modern) */
+    char *icons;  /* desktop/ in the build tree, holding the app icon */
+    char *temp;   /* old file versions for comparisons */
+    char *socket; /* $TCODE_SOCKET (ipc/socket.c) */
+  } paths;
   GSocketService *service;
   Lsp *lsp; /* the language server (clangd), while C or C++ files are open */
   double font_scale;
   gboolean closing;
   gboolean plain; /* syntax coloring off (F7) */
-  struct {
-    gboolean tabs;
-    int width;      /* 0: none chosen */
-  } project_indent; /* chosen for this project in the status bar (session.c); beats everything else */
   struct {
     gboolean minimap;
     gboolean reopen_last; /* started from the app menu: open the last project */

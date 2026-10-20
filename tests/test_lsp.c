@@ -538,18 +538,19 @@ static void test_compile_db(void)
 }
 
 /* A header not found shows a hint: the C library's headers when they are not installed, else no
- * compile flags (naming the misspelled file); a compile_flags.txt hides it; a restart gives the server the open files again. */
+ * compile flags (naming the misspelled file); a compile_flags.txt hides it; a restart gives the
+ * server the open files again. */
 static void test_flags_hint(void)
 {
   char *root = g_dir_make_tmp("t-code-hint-XXXXXX", NULL), *file = g_build_filename(root, "main.c", NULL);
-  char *old_root = app.root, *hint;
+  char *old_root = app.project.root, *hint;
   Tab *tab;
 
   const char *problem = NULL;
 
   put(root, "main.c", "");
   put(root, "compile-flags.txt", "-Iinclude\n");
-  app.root = root;
+  app.project.root = root;
   sysroot = root; /* no C library headers there */
   tab = new_tab(file, "#include <missing.h>\n");
   lsp_open(tab);
@@ -577,7 +578,7 @@ static void test_flags_hint(void)
 
   lsp_close(tab);
   free_tab(tab);
-  app.root = old_root;
+  app.project.root = old_root;
   g_free(file);
   g_free(root);
 }
@@ -867,10 +868,10 @@ int main(int argc, char **argv)
     return g_test_run();
   }
   gtk_source_init();
-  app.root = g_strdup("/tmp");
+  app.project.root = g_strdup("/tmp");
   app.settings.tab_size = 4;
   app.font_scale = 1.0;
-  app.styles_dir = g_canonicalize_filename("styles", NULL);
+  app.paths.styles = g_canonicalize_filename("styles", NULL);
   g_test_add_func("/lsp/sync-utf8", test_sync_utf8);
   g_test_add_func("/lsp/sync-utf16", test_sync_utf16);
   g_test_add_func("/lsp/reload", test_reload);

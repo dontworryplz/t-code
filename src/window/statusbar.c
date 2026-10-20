@@ -44,9 +44,9 @@ void update_status(App *t)
   n = tab_count(t);
   for (int i = 0; i < n; i++) {
     Tab *each = tab_nth(t, i);
-    if (!each->compare_with) { /* old versions in a comparison do not count */
-      errors += each->errors;
-      warnings += each->warnings;
+    if (!each->compare.with) { /* old versions in a comparison do not count */
+      errors += each->problems.errors;
+      warnings += each->problems.warnings;
     }
   }
   text = g_strdup_printf("⊗ %d  ⚠ %d", errors, warnings);
@@ -105,9 +105,9 @@ static const struct {
 static void indent_query(App *t, const char *text, guint generation)
 {
   for (size_t i = 0; i < G_N_ELEMENTS(indents); i++) {
-    gboolean chosen = t->project_indent.width > 0 && indents[i].payload[0] == (t->project_indent.tabs ? 't' : 's') &&
-                      atoi(indents[i].payload + 1) == t->project_indent.width;
-    gboolean automatic = t->project_indent.width == 0 && strcmp(indents[i].payload, "auto") == 0;
+    gboolean chosen = t->project.indent.width > 0 && indents[i].payload[0] == (t->project.indent.tabs ? 't' : 's') &&
+                      atoi(indents[i].payload + 1) == t->project.indent.width;
+    gboolean automatic = t->project.indent.width == 0 && strcmp(indents[i].payload, "auto") == 0;
     if (!*text || fuzzy_score(text, indents[i].label) >= 0)
       picker_add(t, generation, indents[i].label, chosen || automatic ? "current" : NULL, indents[i].payload);
   }
@@ -118,8 +118,8 @@ static void indent_choose(App *t, const char *payload)
 {
   int n = tab_count(t);
 
-  t->project_indent.tabs = payload[0] == 't';
-  t->project_indent.width = strcmp(payload, "auto") == 0 ? 0 : atoi(payload + 1);
+  t->project.indent.tabs = payload[0] == 't';
+  t->project.indent.width = strcmp(payload, "auto") == 0 ? 0 : atoi(payload + 1);
   session_save_project_indent(t);
   for (int i = 0; i < n; i++)
     if (tab_nth(t, i)->kind == TAB_EDITOR)
@@ -136,8 +136,8 @@ void status_show_position(App *t)
 {
   Tab *tab = current_tab(t);
 
-  if (tab && tab->kind == TAB_EDITOR && tab->line > 0) {
-    char *text = g_strdup_printf("Ln %d, Col %d", tab->line, tab->column);
+  if (tab && tab->kind == TAB_EDITOR && tab->cursor.line > 0) {
+    char *text = g_strdup_printf("Ln %d, Col %d", tab->cursor.line, tab->cursor.column);
     gtk_label_set_text(t->status.position, text);
     g_free(text);
     gtk_widget_set_visible(GTK_WIDGET(t->status.position), TRUE);

@@ -320,10 +320,10 @@ static void start_search(void)
   }
   argv = search_argv(&q, rg != NULL);
   launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
-  g_subprocess_launcher_set_cwd(launcher, t->root);
+  g_subprocess_launcher_set_cwd(launcher, t->project.root);
   run = g_new0(Run, 1);
   run->regex = regex;
-  run->root = g_strdup(t->root);
+  run->root = g_strdup(t->project.root);
   run->proc = g_subprocess_launcher_spawnv(launcher, (const char *const *)argv, &error);
   g_object_unref(launcher);
   g_strfreev(argv);

@@ -51,8 +51,8 @@ static void update_position(Tab *tab)
   GtkTextIter iter;
 
   gtk_text_buffer_get_iter_at_mark(buffer, &iter, gtk_text_buffer_get_insert(buffer));
-  tab->line = gtk_text_iter_get_line(&iter) + 1;
-  tab->column = (int)gtk_source_view_get_visual_column(tab->source, &iter) + 1;
+  tab->cursor.line = gtk_text_iter_get_line(&iter) + 1;
+  tab->cursor.column = (int)gtk_source_view_get_visual_column(tab->source, &iter) + 1;
   if (tab == current_tab(tab->app))
     status_show_position(tab->app);
 }
@@ -382,7 +382,7 @@ static void load(Tab *tab, int line, int column)
   /* The loader replaces the whole text: the old problems' marks would end up around all of it. The
    * server sends the new ones once it has the file again. */
   diagnostics_clear(tab);
-  tab->errors = tab->warnings = 0;
+  tab->problems.errors = tab->problems.warnings = 0;
   editor_view_show_problems(tab);
   update_status(tab->app);
   gtk_text_view_set_editable(GTK_TEXT_VIEW(tab->source), FALSE); /* nothing typed is lost meanwhile */
@@ -393,7 +393,7 @@ static void load(Tab *tab, int line, int column)
 void editor_reload(Tab *tab)
 {
   if (tab->kind == TAB_EDITOR && !tab->view->loading)
-    load(tab, tab->line, tab->column);
+    load(tab, tab->cursor.line, tab->cursor.column);
 }
 
 /* A while after the file changed on disk: unless the change was our own save, or the editor has
@@ -406,7 +406,7 @@ static gboolean check_disk(gpointer data)
 
   v->reload_id = 0;
   if (etag && g_strcmp0(etag, v->etag) != 0 && !tab->modified && !v->saving && !v->loading)
-    load(tab, tab->line, tab->column);
+    load(tab, tab->cursor.line, tab->cursor.column);
   g_free(etag);
   return G_SOURCE_REMOVE;
 }
@@ -495,7 +495,7 @@ void open_file(App *t, const char *path)
 
 void open_file_temporary(App *t, const char *path)
 {
-  int group = t->active;
+  int group = t->editors.active;
   Tab *existing = find_tab(t, TAB_EDITOR, path), *old = temporary_tab(t, group), *tab;
   int position = -1;
 
@@ -505,8 +505,8 @@ void open_file_temporary(App *t, const char *path)
   }
   if (old) { /* replaced, in its place */
     position = tab_position(old);
-    remove_tab(old);   /* temporary tabs have nothing unsaved: an edit keeps them */
-    t->active = group; /* removing it focused another tab, maybe in the other group */
+    remove_tab(old);           /* temporary tabs have nothing unsaved: an edit keeps them */
+    t->editors.active = group; /* removing it focused another tab, maybe in the other group */
   }
   tab = open_editor(t, path, 0, 0, FALSE);
   tab->temporary = TRUE;
@@ -520,7 +520,7 @@ void open_to_side(App *t, const char *path)
   Tab *existing = find_tab(t, TAB_EDITOR, path);
 
   set_split(t, TRUE);
-  t->active = 1;
+  t->editors.active = 1;
   if (existing) {
     move_tab(existing, 1);
     select_tab(existing);

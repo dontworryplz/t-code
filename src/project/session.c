@@ -75,7 +75,7 @@ static void store(GKeyFile *kf)
 /* The group of the current project's tabs: "project <sha1 of the root>". */
 static char *project_group(App *t)
 {
-  char *sum = g_compute_checksum_for_string(G_CHECKSUM_SHA1, t->root, -1);
+  char *sum = g_compute_checksum_for_string(G_CHECKSUM_SHA1, t->project.root, -1);
   char *group = g_strdup_printf("project %s", sum);
 
   g_free(sum);
@@ -249,23 +249,23 @@ void session_apply_window(App *t)
     }
   }
   g_strfreev(order);
-  gtk_paned_set_position(t->hpaned, MAX(get_int(kf, "window", "files-width", 280), 80));
-  gtk_paned_set_position(t->rpaned, CLAMP(get_int(kf, "window", "right-position", 840), 200, 1600));
-  gtk_paned_set_position(t->vpaned, CLAMP(get_int(kf, "window", "editor-height", 620), 120, 1200));
-  gtk_paned_set_position(GTK_PANED(t->sidebar), MAX(get_int(kf, "window", "sidebar-split", 400), 80));
-  gtk_paned_set_position(GTK_PANED(t->right_sidebar), MAX(get_int(kf, "window", "right-split", 400), 80));
-  if (gtk_widget_get_visible(t->sidebar))
-    gtk_widget_set_visible(t->sidebar, get_bool(kf, "window", "files-visible", TRUE));
-  if (gtk_widget_get_visible(t->right_sidebar))
-    gtk_widget_set_visible(t->right_sidebar, get_bool(kf, "window", "right-visible", TRUE));
-  if (gtk_widget_get_visible(t->bottom_bar))
-    gtk_widget_set_visible(t->bottom_bar, get_bool(kf, "window", "shell-visible", TRUE));
+  gtk_paned_set_position(t->layout.hpaned, MAX(get_int(kf, "window", "files-width", 280), 80));
+  gtk_paned_set_position(t->layout.rpaned, CLAMP(get_int(kf, "window", "right-position", 840), 200, 1600));
+  gtk_paned_set_position(t->layout.vpaned, CLAMP(get_int(kf, "window", "editor-height", 620), 120, 1200));
+  gtk_paned_set_position(GTK_PANED(t->layout.left), MAX(get_int(kf, "window", "sidebar-split", 400), 80));
+  gtk_paned_set_position(GTK_PANED(t->layout.right), MAX(get_int(kf, "window", "right-split", 400), 80));
+  if (gtk_widget_get_visible(t->layout.left))
+    gtk_widget_set_visible(t->layout.left, get_bool(kf, "window", "files-visible", TRUE));
+  if (gtk_widget_get_visible(t->layout.right))
+    gtk_widget_set_visible(t->layout.right, get_bool(kf, "window", "right-visible", TRUE));
+  if (gtk_widget_get_visible(t->layout.bottom))
+    gtk_widget_set_visible(t->layout.bottom, get_bool(kf, "window", "shell-visible", TRUE));
   char *page = g_key_file_get_string(kf, "window", "sidebar-page", NULL);
   if (!page || !*page)
     g_set_str(&page, "files"); /* the first run: the panels were moved in, the last one shows */
   int d = panel_dock(t, page);
   if (d >= 0)
-    gtk_stack_set_visible_child_name(t->dock_stacks[d], page);
+    gtk_stack_set_visible_child_name(t->dock.stacks[d], page);
   g_free(page);
   if (!error && scale > 0)
     set_font_scale(t, scale);
@@ -278,8 +278,8 @@ void session_load_project_indent(App *t)
   GKeyFile *kf = load();
   char *group = project_group(t);
 
-  t->project_indent.width = CLAMP(get_int(kf, group, "indent-width", 0), 0, 16);
-  t->project_indent.tabs = get_bool(kf, group, "indent-tabs", FALSE);
+  t->project.indent.width = CLAMP(get_int(kf, group, "indent-width", 0), 0, 16);
+  t->project.indent.tabs = get_bool(kf, group, "indent-tabs", FALSE);
   g_free(group);
   g_key_file_free(kf);
 }
@@ -289,10 +289,10 @@ void session_save_project_indent(App *t)
   GKeyFile *kf = load();
   char *group = project_group(t);
 
-  g_key_file_set_string(kf, group, "root", t->root);
-  if (t->project_indent.width > 0) {
-    g_key_file_set_integer(kf, group, "indent-width", t->project_indent.width);
-    g_key_file_set_boolean(kf, group, "indent-tabs", t->project_indent.tabs);
+  g_key_file_set_string(kf, group, "root", t->project.root);
+  if (t->project.indent.width > 0) {
+    g_key_file_set_integer(kf, group, "indent-width", t->project.indent.width);
+    g_key_file_set_boolean(kf, group, "indent-tabs", t->project.indent.tabs);
   } else {
     g_key_file_remove_key(kf, group, "indent-width", NULL);
     g_key_file_remove_key(kf, group, "indent-tabs", NULL);
@@ -320,7 +320,7 @@ static int restore_group(App *t, GKeyFile *kf, const char *group_name, int g)
     opened++;
   }
   if (opened)
-    gtk_notebook_set_current_page(t->groups[g], MIN(get_int(kf, group_name, active_keys[g], 0), opened - 1));
+    gtk_notebook_set_current_page(t->editors.groups[g], MIN(get_int(kf, group_name, active_keys[g], 0), opened - 1));
   g_strfreev(tabs);
   return opened;
 }
@@ -331,17 +331,17 @@ gboolean session_restore_tabs(App *t)
   char *group = project_group(t);
   int opened;
 
-  t->active = 0;
+  t->editors.active = 0;
   opened = restore_group(t, kf, group, 0);
   if (g_key_file_has_key(kf, group, tab_keys[1], NULL)) {
     char **side = g_key_file_get_string_list(kf, group, tab_keys[1], NULL, NULL);
     if (side && side[0]) {
       set_split(t, TRUE);
-      t->active = 1;
+      t->editors.active = 1;
       if (restore_group(t, kf, group, 1) > 0) {
         int position = get_int(kf, "window", "split-position", 0);
         if (position > 0)
-          gtk_paned_set_position(t->split, position);
+          gtk_paned_set_position(t->editors.split, position);
         opened++;
       } else {
         set_split(t, FALSE);
@@ -349,7 +349,7 @@ gboolean session_restore_tabs(App *t)
     }
     g_strfreev(side);
   }
-  t->active = 0;
+  t->editors.active = 0;
   if (opened)
     focus_current_tab(t);
   g_free(group);
@@ -378,7 +378,7 @@ void session_save(App *t)
     g_key_file_set_integer(kf, "window", key, panel_dock(t, names[i]));
   }
   for (int d = 0; d < DOCKS; d++) {
-    GtkSelectionModel *pages = gtk_stack_get_pages(t->dock_stacks[d]);
+    GtkSelectionModel *pages = gtk_stack_get_pages(t->dock.stacks[d]);
     guint n_items = g_list_model_get_n_items(G_LIST_MODEL(pages));
     for (guint i = 0; i < n_items; i++) {
       GtkStackPage *item = g_list_model_get_item(G_LIST_MODEL(pages), i);
@@ -392,39 +392,39 @@ void session_save(App *t)
   g_key_file_set_string_list(kf, "window", "panel-order", (const char *const *)order, n_order);
   for (int i = 0; i < n_order; i++)
     g_free(order[i]);
-  if (gtk_widget_get_visible(t->sidebar) && gtk_paned_get_position(t->hpaned) >= 48)
-    g_key_file_set_integer(kf, "window", "files-width", gtk_paned_get_position(t->hpaned));
-  if (gtk_widget_get_visible(t->right_sidebar) && gtk_widget_get_width(t->right_sidebar) >= 48)
-    g_key_file_set_integer(kf, "window", "right-position", gtk_paned_get_position(t->rpaned));
-  if (gtk_widget_get_visible(t->bottom_bar) && gtk_widget_get_height(t->bottom_bar) >= 48)
-    g_key_file_set_integer(kf, "window", "editor-height", gtk_paned_get_position(t->vpaned));
-  if (gtk_widget_get_visible(t->docks[0]) && gtk_widget_get_visible(t->docks[1]))
-    g_key_file_set_integer(kf, "window", "sidebar-split", gtk_paned_get_position(GTK_PANED(t->sidebar)));
-  if (gtk_widget_get_visible(t->docks[8]) && gtk_widget_get_visible(t->docks[9]))
-    g_key_file_set_integer(kf, "window", "right-split", gtk_paned_get_position(GTK_PANED(t->right_sidebar)));
-  if (gtk_widget_get_visible(GTK_WIDGET(t->groups[1])))
-    g_key_file_set_integer(kf, "window", "split-position", gtk_paned_get_position(t->split));
-  g_key_file_set_boolean(kf, "window", "files-visible", gtk_widget_get_visible(t->sidebar));
-  g_key_file_set_boolean(kf, "window", "right-visible", gtk_widget_get_visible(t->right_sidebar));
-  g_key_file_set_boolean(kf, "window", "shell-visible", gtk_widget_get_visible(t->bottom_bar));
-  const char *vis = gtk_stack_get_visible_child_name(t->dock_stacks[0]);
+  if (gtk_widget_get_visible(t->layout.left) && gtk_paned_get_position(t->layout.hpaned) >= 48)
+    g_key_file_set_integer(kf, "window", "files-width", gtk_paned_get_position(t->layout.hpaned));
+  if (gtk_widget_get_visible(t->layout.right) && gtk_widget_get_width(t->layout.right) >= 48)
+    g_key_file_set_integer(kf, "window", "right-position", gtk_paned_get_position(t->layout.rpaned));
+  if (gtk_widget_get_visible(t->layout.bottom) && gtk_widget_get_height(t->layout.bottom) >= 48)
+    g_key_file_set_integer(kf, "window", "editor-height", gtk_paned_get_position(t->layout.vpaned));
+  if (gtk_widget_get_visible(t->dock.cards[0]) && gtk_widget_get_visible(t->dock.cards[1]))
+    g_key_file_set_integer(kf, "window", "sidebar-split", gtk_paned_get_position(GTK_PANED(t->layout.left)));
+  if (gtk_widget_get_visible(t->dock.cards[8]) && gtk_widget_get_visible(t->dock.cards[9]))
+    g_key_file_set_integer(kf, "window", "right-split", gtk_paned_get_position(GTK_PANED(t->layout.right)));
+  if (gtk_widget_get_visible(GTK_WIDGET(t->editors.groups[1])))
+    g_key_file_set_integer(kf, "window", "split-position", gtk_paned_get_position(t->editors.split));
+  g_key_file_set_boolean(kf, "window", "files-visible", gtk_widget_get_visible(t->layout.left));
+  g_key_file_set_boolean(kf, "window", "right-visible", gtk_widget_get_visible(t->layout.right));
+  g_key_file_set_boolean(kf, "window", "shell-visible", gtk_widget_get_visible(t->layout.bottom));
+  const char *vis = gtk_stack_get_visible_child_name(t->dock.stacks[0]);
   if (!vis)
-    vis = gtk_stack_get_visible_child_name(t->sidebar_stack);
+    vis = gtk_stack_get_visible_child_name(t->dock.scm_stack);
   if (vis)
     g_key_file_set_string(kf, "window", "sidebar-page", vis);
   g_key_file_set_double(kf, "window", "font-scale", t->font_scale);
 
-  g_key_file_set_string(kf, group, "root", t->root);
+  g_key_file_set_string(kf, group, "root", t->project.root);
   for (int g = 0; g < GROUPS; g++) {
-    GtkNotebook *notebook = t->groups[g];
+    GtkNotebook *notebook = t->editors.groups[g];
     int n = gtk_notebook_get_n_pages(notebook), kept = 0, active = 0;
     int current = gtk_notebook_get_current_page(notebook);
     char **tabs = g_new0(char *, n + 1);
     for (int i = 0; i < n; i++) {
       Tab *tab = g_object_get_data(G_OBJECT(gtk_notebook_get_nth_page(notebook, i)), "t-code-tab");
       if (i == current) /* counted among the kept tabs (an old version: the one before it) */
-        active = MAX(kept - (tab->compare_with ? 1 : 0), 0);
-      if (tab->compare_with) /* old versions in a comparison live in a temp folder */
+        active = MAX(kept - (tab->compare.with ? 1 : 0), 0);
+      if (tab->compare.with) /* old versions in a comparison live in a temp folder */
         continue;
       tabs[kept++] = tab->kind == TAB_PREVIEW ? g_strconcat(PREVIEW_PREFIX, tab->path, NULL) : g_strdup(tab->path);
     }
@@ -454,9 +454,9 @@ void session_add_recent(App *t)
   char **old = g_key_file_get_string_list(kf, "recent", "folders", NULL, NULL);
   GPtrArray *list = g_ptr_array_new();
 
-  g_ptr_array_add(list, t->root);
+  g_ptr_array_add(list, t->project.root);
   for (int i = 0; old && old[i] && list->len < MAX_RECENT; i++)
-    if (strcmp(old[i], t->root) != 0)
+    if (strcmp(old[i], t->project.root) != 0)
       g_ptr_array_add(list, old[i]);
   g_key_file_set_string_list(kf, "recent", "folders", (const char *const *)list->pdata, list->len);
   store(kf);

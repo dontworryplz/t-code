@@ -182,7 +182,7 @@ static void paint_all(void)
 static gboolean is_busy_folder(const char *path)
 {
   static const char *const names[] = { "build", "target", "node_modules", ".git", ".cache" };
-  char **parts = g_strsplit(files_relative(path, files.app->root), "/", -1);
+  char **parts = g_strsplit(files_relative(path, files.app->project.root), "/", -1);
   gboolean busy = FALSE;
 
   for (int i = 0; parts[i] && !busy; i++)
@@ -298,14 +298,14 @@ static void on_tree_changed(GListModel *model G_GNUC_UNUSED, guint position G_GN
     settle_later();
 }
 
-/* A new tree of t->root; open folders stay open, and with keep_selection the selected file selected. */
+/* A new tree of t->project.root; open folders stay open, and with keep_selection the selected file selected. */
 static void build_tree(gboolean keep_selection)
 {
   App *t = files.app;
   char *keep = keep_selection ? selected_path() : NULL;
-  char *name = g_path_get_basename(t->root);
+  char *name = g_path_get_basename(t->project.root);
   GtkTreeListModel *old = files.tree;
-  GListModel *top = folder_model(t->root);
+  GListModel *top = folder_model(t->project.root);
 
   folder_load(entries_of(top));
   files.tree = gtk_tree_list_model_new(top, FALSE, FALSE, create_children, NULL, NULL);
@@ -337,10 +337,10 @@ static void on_git_status(GObject *source, GAsyncResult *result, gpointer data G
   }
   g_clear_object(&files.git_cancel);
   g_clear_pointer(&files.marks, g_hash_table_unref);
-  if (out && g_subprocess_get_successful(G_SUBPROCESS(source)) && files.app->git_top) {
+  if (out && g_subprocess_get_successful(G_SUBPROCESS(source)) && files.app->project.git_top) {
     gsize len;
     const char *text = g_bytes_get_data(out, &len);
-    files.marks = git_marks_parse(files.app->git_top, text, len);
+    files.marks = git_marks_parse(files.app->project.git_top, text, len);
   }
   if (out)
     g_bytes_unref(out);
@@ -351,7 +351,7 @@ static gboolean read_git(gpointer data G_GNUC_UNUSED)
 {
   App *t = files.app;
   const char *argv[] = {
-    "git", "-C", t->root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", NULL
+    "git", "-C", t->project.root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", NULL
   };
   GSubprocess *git;
 
@@ -359,7 +359,7 @@ static gboolean read_git(gpointer data G_GNUC_UNUSED)
   if (files.git_cancel)
     g_cancellable_cancel(files.git_cancel);
   g_clear_object(&files.git_cancel);
-  if (!t->git_top) {
+  if (!t->project.git_top) {
     g_clear_pointer(&files.marks, g_hash_table_unref);
     paint_all();
     return G_SOURCE_REMOVE;
@@ -460,8 +460,8 @@ static void on_new_folder(App *t, const char *dir, const char *name)
 /* New File… / New Folder… in path's folder (NULL: the root). */
 static void create_in(const char *path, gboolean folder)
 {
-  char *dir = path ? folder_of(path) : g_strdup(files.app->root);
-  const char *rel = files_relative(dir, files.app->root);
+  char *dir = path ? folder_of(path) : g_strdup(files.app->project.root);
+  const char *rel = files_relative(dir, files.app->project.root);
   char *question =
       g_strdup_printf("%s in %s/  (a/b.c makes folders)", folder ? "New folder" : "New file", *rel ? rel : ".");
 
@@ -553,7 +553,7 @@ static void put(const char *src, const char *dir, gboolean cut)
 /* Paste into path's folder (NULL: the root). */
 static void paste(const char *path)
 {
-  char *dir = path ? folder_of(path) : g_strdup(files.app->root);
+  char *dir = path ? folder_of(path) : g_strdup(files.app->project.root);
 
   if (!files.clip) {
     say(FALSE, "Nothing to paste: Ctrl+C or Ctrl+X a file first");
@@ -599,7 +599,7 @@ static void on_menu_action(GSimpleAction *action, GVariant *param G_GNUC_UNUSED,
   const char *name = g_action_get_name(G_ACTION(action));
   App *t = files.app;
   char *path = g_strdup(files.menu_path); /* NULL: the root */
-  char *dir = path ? folder_of(path) : g_strdup(t->root);
+  char *dir = path ? folder_of(path) : g_strdup(t->project.root);
 
   if (strcmp(name, "open") == 0) {
     GtkTreeListRow *row = selected_row();
@@ -628,7 +628,7 @@ static void on_menu_action(GSimpleAction *action, GVariant *param G_GNUC_UNUSED,
   } else if (strcmp(name, "copy-path") == 0) {
     copy_text(path);
   } else if (strcmp(name, "copy-relative") == 0) {
-    copy_text(files_relative(path, t->root));
+    copy_text(files_relative(path, t->project.root));
   } else if (strcmp(name, "rename") == 0) {
     rename_path(path);
   } else if (strcmp(name, "delete") == 0) {
@@ -673,7 +673,7 @@ static void show_menu(const char *path, double x, double y)
                                                "preview", NULL });
     else
       add_section(menu, (const char *const[]){ "Open", "open", "Open to the Side", "open-side", NULL });
-    if (files.app->git_top)
+    if (files.app->project.git_top)
       add_section(menu, (const char *const[]){ "Compare with HEAD", "compare", "File History…", "history", NULL });
   }
   add_section(menu, create);
@@ -774,11 +774,11 @@ static gboolean on_drop(GtkDropTarget *target G_GNUC_UNUSED, const GValue *value
                         double y G_GNUC_UNUSED, FileRow *r)
 {
   char *src = g_file_get_path(g_value_get_object(value));
-  char *dir = r ? folder_of(r->path) : g_strdup(files.app->root);
+  char *dir = r ? folder_of(r->path) : g_strdup(files.app->project.root);
   gboolean dropped = src && (!r || strcmp(src, r->path) != 0); /* a row let go on itself: nothing */
 
   if (dropped)
-    put(src, dir, files_inside(src, files.app->root));
+    put(src, dir, files_inside(src, files.app->project.root));
   g_free(src);
   g_free(dir);
   return dropped;

@@ -1,5 +1,5 @@
 /*
- * Editor tabs, in two groups side by side (t->groups[0] and [1], each a GtkNotebook; the second
+ * Editor tabs, in two groups side by side (t->editors.groups[0] and [1], each a GtkNotebook; the second
  * one is shown only while split). A tab is an editor (editor.h) or a Markdown preview
  * (preview.h). A file is never open in both groups at once: two editors would overwrite each
  * other's saves.
@@ -86,7 +86,7 @@ void focus_group(App *t, int group);
 
 /* The groups --------------------------------------------------------------------------------- */
 
-/* Creates both groups and t->editor_area, which shows a hint while no tab is open. */
+/* Creates both groups and t->editors.area, which shows a hint while no tab is open. */
 void create_groups(App *t);
 
 /* Shows the tabs or the hint, whichever fits now. */

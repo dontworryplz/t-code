@@ -65,7 +65,7 @@ static Project find_project(App *t)
   static const char *const make[] = { "Makefile", "makefile", "GNUmakefile", NULL };
   Tab *tab = current_tab(t);
   const char *file = tab && tab->kind == TAB_EDITOR ? tab->path : NULL;
-  char *start = file ? g_path_get_dirname(file) : g_strdup(t->root);
+  char *start = file ? g_path_get_dirname(file) : g_strdup(t->project.root);
   Project p = { PROJECT_NONE, NULL };
   gboolean cxx;
 

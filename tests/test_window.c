@@ -2,7 +2,8 @@
 /*
  * Tests for how tabs open and close, in a whole t-code window (every module but main.c) on a
  * temporary project with a temporary config: temporary tabs (a click in the Files panel, VS Code's
- * preview editor), comparisons in one tab, the first run's layout and fonts, the files edited by hand. Needs a display; skipped without one.
+ * preview editor), comparisons in one tab, the first run's layout and fonts, the files edited by
+ * hand. Needs a display; skipped without one.
  */
 #include "editor/editor.h"
 #include "dialogs/settings.h"
@@ -21,7 +22,7 @@ static App app;
 
 static char *file(const char *name)
 {
-  char *path = g_build_filename(app.root, name, NULL);
+  char *path = g_build_filename(app.project.root, name, NULL);
 
   if (!g_file_test(path, G_FILE_TEST_EXISTS))
     g_assert_true(g_file_set_contents(path, "one\ntwo\n", -1, NULL));
@@ -137,7 +138,7 @@ static gboolean git(const char *const *args)
   for (int i = 0; args[i]; i++)
     g_ptr_array_add(argv, (gpointer)args[i]);
   g_ptr_array_add(argv, NULL);
-  ok = g_spawn_sync(app.root, (char **)argv->pdata, NULL,
+  ok = g_spawn_sync(app.project.root, (char **)argv->pdata, NULL,
                     G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, NULL,
                     NULL, &status, NULL) &&
        g_spawn_check_wait_status(status, NULL);
@@ -159,22 +160,22 @@ static void test_comparison_one_tab(void)
     return;
   }
   g_assert_true(g_file_set_contents(path, "one\nTWO\n", -1, NULL));
-  app.git_top = g_canonicalize_filename(app.root, NULL);
+  app.project.git_top = g_canonicalize_filename(app.project.root, NULL);
 
   open_temporary("tracked.txt");
   compare_with_head(&app, path);
   run(50);
   assert_tabs("tracked.txt"); /* one tab, kept (no longer temporary) */
   tab = tab_nth(&app, 0);
-  g_assert_nonnull(tab->old_side);
-  g_assert_cmpstr(tab->old_side->compare_with, ==, path);
+  g_assert_nonnull(tab->compare.old_side);
+  g_assert_cmpstr(tab->compare.old_side->compare.with, ==, path);
   g_assert_true(g_str_has_prefix(gtk_label_get_text(tab->label), "tracked.txt ↔ "));
-  g_assert_false(gtk_widget_get_visible(GTK_WIDGET(app.groups[1]))); /* no second group */
+  g_assert_false(gtk_widget_get_visible(GTK_WIDGET(app.editors.groups[1]))); /* no second group */
 
   stop_comparing(&app); /* the file stays */
   run(50);
   assert_tabs("tracked.txt");
-  g_assert_null(tab_nth(&app, 0)->old_side);
+  g_assert_null(tab_nth(&app, 0)->compare.old_side);
   g_assert_cmpstr(gtk_label_get_text(tab_nth(&app, 0)->label), ==, "tracked.txt");
 
   compare_with_head(&app, path);
@@ -193,8 +194,8 @@ static Tab *old_version_of(const char *path)
 {
   for (int i = 0; i < tab_count(&app); i++) {
     Tab *tab = tab_nth(&app, i);
-    if (g_strcmp0(tab->path, path) == 0 && tab->old_side)
-      return tab->old_side;
+    if (g_strcmp0(tab->path, path) == 0 && tab->compare.old_side)
+      return tab->compare.old_side;
   }
   return NULL;
 }
@@ -217,8 +218,8 @@ static void test_comparisons_in_a_row(void)
     g_test_skip("no git");
     return;
   }
-  g_set_str(&app.git_top, NULL);
-  app.git_top = g_canonicalize_filename(app.root, NULL);
+  g_set_str(&app.project.git_top, NULL);
+  app.project.git_top = g_canonicalize_filename(app.project.root, NULL);
   for (size_t i = 0; i < G_N_ELEMENTS(names); i++)
     g_assert_true(g_file_set_contents(paths[i], "one\nchanged\n", -1, NULL));
 
@@ -242,7 +243,7 @@ static void test_comparisons_in_a_row(void)
  * scroll sideways by a few pixels, cutting off every line's first letters). */
 static void test_opens_at_left_edge(void)
 {
-  char *path = g_build_filename(app.root, "long.txt", NULL);
+  char *path = g_build_filename(app.project.root, "long.txt", NULL);
   GString *text = g_string_new(NULL);
   gboolean wrap = app.settings.word_wrap;
   GtkAdjustment *sideways;
@@ -283,14 +284,14 @@ static void start_broadway(void)
 static void test_first_run_layout(void)
 {
   g_assert_cmpint(panel_dock(&app, "files"), ==, 0);
-  g_assert_cmpstr(gtk_stack_get_visible_child_name(app.dock_stacks[0]), ==, "files");
+  g_assert_cmpstr(gtk_stack_get_visible_child_name(app.dock.stacks[0]), ==, "files");
   g_assert_cmpint(panel_dock(&app, "shell"), ==, 4);
 }
 
 /* A font that is not installed falls back to monospace, not to a proportional one. */
 static void test_font_fallback(void)
 {
-  const PangoFontDescription *font = vte_terminal_get_font(app.shell);
+  const PangoFontDescription *font = vte_terminal_get_font(app.shell.term);
 
   g_assert_cmpstr(pango_font_description_get_family(font), ==, "Cascadia Code,monospace");
 }
@@ -402,9 +403,9 @@ int main(int argc, char **argv)
   g_setenv("XDG_CONFIG_HOME", config, TRUE); /* not the real session.ini */
   start_broadway();
   gtk_test_init(&argc, &argv, NULL);
-  app.root = g_build_filename(home, "project", NULL);
+  app.project.root = g_build_filename(home, "project", NULL);
   app.font_scale = 1;
-  g_mkdir_with_parents(app.root, 0755);
+  g_mkdir_with_parents(app.project.root, 0755);
   char *session = g_build_filename(config, "t-code", "session.ini", NULL), *dir = g_path_get_dirname(session);
   g_mkdir_with_parents(dir, 0700);
   g_assert_true(g_file_set_contents(session, "[settings]\nminimap=false\n", -1, NULL)); /* before 0.3 */

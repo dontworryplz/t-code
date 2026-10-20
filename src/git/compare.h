@@ -39,5 +39,5 @@ void stop_comparing_tab(Tab *tab);
  * adjustments may outlive them, and would reach a freed view. */
 void unsync_scroll(Tab *left);
 
-/* Deletes the temporary folder of old versions (t->temp_dir), when t-code quits. */
+/* Deletes the temporary folder of old versions (t->paths.temp), when t-code quits. */
 void remove_temp_dir(App *t);

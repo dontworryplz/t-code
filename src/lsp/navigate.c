@@ -45,7 +45,7 @@ static char *at_cursor(Tab *tab, const char *extra)
   return params;
 }
 
-/* The cursor's line and column (1-based, the column in characters: tab->column has tabs
+/* The cursor's line and column (1-based, the column in characters: tab->cursor.column has tabs
  * expanded). */
 static void cursor_place(Tab *tab, int *line, int *column)
 {

@@ -106,7 +106,7 @@ static void query(App *t, const char *text, guint generation)
 /* PickerChoose: opens the picked file. */
 static void choose(App *t, const char *relative)
 {
-  char *path = g_build_filename(t->root, relative, NULL);
+  char *path = g_build_filename(t->project.root, relative, NULL);
 
   open_file(t, path);
   g_free(path);
@@ -156,11 +156,11 @@ static void on_listed(GObject *source G_GNUC_UNUSED, GAsyncResult *result, gpoin
 
 void quick_open_show(App *t)
 {
-  if (!files || g_strcmp0(files_root, t->root) != 0) {
+  if (!files || g_strcmp0(files_root, t->project.root) != 0) {
     g_clear_pointer(&files, g_ptr_array_unref);
     files = g_ptr_array_new_with_free_func(g_free);
     g_free(files_root);
-    files_root = g_strdup(t->root);
+    files_root = g_strdup(t->project.root);
     list_number++;
     listing = FALSE;
   }
@@ -168,7 +168,7 @@ void quick_open_show(App *t)
     GTask *task = g_task_new(NULL, NULL, on_listed, t);
     Listing *l = g_new(Listing, 1);
     l->number = list_number;
-    l->root = g_strdup(t->root);
+    l->root = g_strdup(t->project.root);
     g_task_set_task_data(task, l, (GDestroyNotify)listing_free);
     listing = TRUE;
     g_task_run_in_thread(task, list_files);

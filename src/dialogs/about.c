@@ -122,7 +122,7 @@ static char *libraries(App *t)
 #else
                          "  C library      %s\n",
 #endif
-                         TCODE_VERSION, t->styles_dir,
+                         TCODE_VERSION, t->paths.styles,
                          gtk_get_major_version(), gtk_get_minor_version(), gtk_get_micro_version(),
                          gtk_source_get_major_version(), gtk_source_get_minor_version(), gtk_source_get_micro_version(),
                          vte_get_major_version(), vte_get_minor_version(), vte_get_micro_version(),

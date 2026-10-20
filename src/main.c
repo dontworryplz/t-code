@@ -56,12 +56,12 @@ static void reopen_last_project(App *t)
 
   if (!t->settings.reopen_last) /* turned off in Settings */
     return;
-  if (strcmp(t->root, g_get_home_dir()) != 0) /* started in a folder: that one is meant */
+  if (strcmp(t->project.root, g_get_home_dir()) != 0) /* started in a folder: that one is meant */
     return;
   recent = session_recent();
   if (recent && recent[0] && g_file_test(recent[0], G_FILE_TEST_IS_DIR)) { /* still there */
-    g_free(t->root);
-    t->root = g_strdup(recent[0]);
+    g_free(t->project.root);
+    t->project.root = g_strdup(recent[0]);
   }
   g_strfreev(recent);
 }
@@ -72,7 +72,7 @@ static void reopen_last_project(App *t)
  * (see above), comes back with its tabs. */
 static void on_activate(GApplication *app, App *t)
 {
-  if (already_running() && (new_window || strcmp(t->root, g_get_home_dir()) == 0)) {
+  if (already_running() && (new_window || strcmp(t->project.root, g_get_home_dir()) == 0)) {
     build_window(t, GTK_APPLICATION(app));
     choose_folder(t);
     return;
@@ -90,8 +90,8 @@ static void on_open(GApplication *app, GFile **files, int n, const char *hint G_
 
   for (int i = 0; i < n; i++) {
     if (g_file_query_file_type(files[i], G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_DIRECTORY) {
-      g_free(t->root);
-      t->root = g_file_get_path(files[i]);
+      g_free(t->project.root);
+      t->project.root = g_file_get_path(files[i]);
     }
   }
   build_window(t, GTK_APPLICATION(app));
@@ -165,7 +165,7 @@ static void on_new_window_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *
  * on_open, runs the main loop until the window closes, then calls on_shutdown. */
 int main(int argc, char **argv)
 {
-  App t = { .root = g_get_current_dir(), .font_scale = 1.0 };
+  App t = { .project.root = g_get_current_dir(), .font_scale = 1.0 };
   GtkApplication *app = gtk_application_new("io.github.tcode", G_APPLICATION_HANDLES_OPEN | G_APPLICATION_NON_UNIQUE);
   int status;
 
@@ -186,12 +186,12 @@ int main(int argc, char **argv)
 
   g_object_unref(app);
   g_clear_object(&t.service);
-  g_free(t.socket_path);
-  g_free(t.styles_dir);
-  g_free(t.icon_dir);
-  g_free(t.temp_dir);
-  g_free(t.git_top);
-  g_free(t.root);
+  g_free(t.paths.socket);
+  g_free(t.paths.styles);
+  g_free(t.paths.icons);
+  g_free(t.paths.temp);
+  g_free(t.project.git_top);
+  g_free(t.project.root);
   g_free(t.settings.font);
   g_free(t.settings.files_font);
   return status;

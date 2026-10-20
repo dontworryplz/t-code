@@ -22,7 +22,7 @@ void apply_fonts(App *t);
  * NULL) set; the child's pid goes to *pid. */
 void spawn(App *t, VteTerminal *term, char **argv, char **extra_env, GPid *pid);
 
-/* Creates t->shell (it restarts when the shell exits) ... */
+/* Creates t->shell.term (it restarts when the shell exits) ... */
 void create_shell_pane(App *t);
 /* ... starts the user's shell in it ... */
 void start_shell_pane(App *t);

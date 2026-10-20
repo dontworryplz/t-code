@@ -79,13 +79,13 @@ void start_socket(App *t)
   GSocketAddress *address;
   GError *error = NULL;
 
-  t->socket_path = g_strdup_printf("%s/t-code-%d.sock", g_get_user_runtime_dir(), getpid());
-  unlink(t->socket_path);
-  address = g_unix_socket_address_new(t->socket_path);
+  t->paths.socket = g_strdup_printf("%s/t-code-%d.sock", g_get_user_runtime_dir(), getpid());
+  unlink(t->paths.socket);
+  address = g_unix_socket_address_new(t->paths.socket);
   t->service = g_socket_service_new();
   if (!g_socket_listener_add_address(G_SOCKET_LISTENER(t->service), address, G_SOCKET_TYPE_STREAM,
                                      G_SOCKET_PROTOCOL_DEFAULT, NULL, NULL, &error)) {
-    g_warning("t-code: cannot listen on %s: %s", t->socket_path, error->message);
+    g_warning("t-code: cannot listen on %s: %s", t->paths.socket, error->message);
     g_clear_error(&error);
   }
   g_object_unref(address);
@@ -97,6 +97,6 @@ void stop_socket(App *t)
 {
   if (t->service)
     g_socket_service_stop(t->service);
-  if (t->socket_path)
-    unlink(t->socket_path);
+  if (t->paths.socket)
+    unlink(t->paths.socket);
 }

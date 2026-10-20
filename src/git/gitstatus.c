@@ -32,7 +32,7 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
   char *branch = NULL, *oid = NULL;
   gboolean dirty = FALSE;
   /* Started before another project opened: that project's status, not this one's. */
-  gboolean stale = g_strcmp0(g_object_get_data(source, "root"), t->root) != 0;
+  gboolean stale = g_strcmp0(g_object_get_data(source, "root"), t->project.root) != 0;
 
   branch_busy = FALSE;
   if ((branch_again || stale) && !t->closing) {
@@ -69,12 +69,12 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
     status_show_branch(t, branch, dirty);
   /* A new commit (also on a branch, where .git/HEAD itself stays the same) or a checkout: the diff
    * gutters compare with the new HEAD. Staging does not move it, and asks nothing. */
-  if (oid && head && g_strcmp0(head_root, t->root) == 0 && strcmp(oid, head) != 0 && !t->closing)
+  if (oid && head && g_strcmp0(head_root, t->project.root) == 0 && strcmp(oid, head) != 0 && !t->closing)
     diff_gutter_head_moved(t);
   if (ok) {
     g_free(head);
     head = g_steal_pointer(&oid);
-    g_set_str(&head_root, t->root);
+    g_set_str(&head_root, t->project.root);
   }
   g_free(oid);
   g_free(branch);
@@ -96,9 +96,9 @@ static gboolean poll_branch(gpointer data)
     return G_SOURCE_CONTINUE;
   }
   proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL, "git", "-C",
-                          t->root, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", NULL);
+                          t->project.root, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", NULL);
   if (proc) {
-    g_object_set_data_full(G_OBJECT(proc), "root", g_strdup(t->root), g_free);
+    g_object_set_data_full(G_OBJECT(proc), "root", g_strdup(t->project.root), g_free);
     branch_busy = TRUE;
     g_subprocess_communicate_async(proc, NULL, NULL, on_branch, t);
     g_object_unref(proc);
@@ -141,7 +141,7 @@ static void on_git_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file, GFi
 
 void watch_git(App *t)
 {
-  char *argv[] = { "git", "-C", t->root, "rev-parse", "--absolute-git-dir", "--show-toplevel", NULL };
+  char *argv[] = { "git", "-C", t->project.root, "rev-parse", "--absolute-git-dir", "--show-toplevel", NULL };
   char *out = NULL;
   int status = 0;
 
@@ -154,15 +154,15 @@ void watch_git(App *t)
       g_spawn_check_wait_status(status, NULL)) {
     char **lines = g_strsplit(out, "\n", 3);
     GFile *dir = g_file_new_for_path(lines[0]);
-    g_free(t->git_top);
-    t->git_top = lines[1] && *lines[1] ? g_strdup(lines[1]) : NULL;
+    g_free(t->project.git_top);
+    t->project.git_top = lines[1] && *lines[1] ? g_strdup(lines[1]) : NULL;
     g_strfreev(lines);
     git_monitor = g_file_monitor_directory(dir, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
     if (git_monitor)
       g_signal_connect(git_monitor, "changed", G_CALLBACK(on_git_changed), t);
     g_object_unref(dir);
   } else {
-    g_clear_pointer(&t->git_top, g_free);
+    g_clear_pointer(&t->project.git_top, g_free);
   }
   g_free(out);
   refresh_branch(t);

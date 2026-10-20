@@ -851,8 +851,8 @@ static void test_indent_order(void)
   g_assert_cmpstr(v->indent_from, ==, ".editorconfig");
   g_assert_false(gtk_source_view_get_insert_spaces_instead_of_tabs(tab->source));
 
-  app.project_indent.tabs = FALSE;
-  app.project_indent.width = 8;
+  app.project.indent.tabs = FALSE;
+  app.project.indent.width = 8;
   editor_view_apply_settings(tab);
   g_assert_false(v->tabs);
   g_assert_cmpint(gtk_source_view_get_tab_width(tab->source), ==, 8);
@@ -864,7 +864,7 @@ static void test_indent_order(void)
   g_assert_true(v->tabs);
   g_assert_cmpint(v->width, ==, 8);
 
-  app.project_indent.width = 0;
+  app.project.indent.width = 0;
   free_tab(tab);
 }
 
@@ -900,7 +900,7 @@ int main(int argc, char **argv)
   app.settings.tab_size = 4;
   app.settings.tabs_to_spaces = TRUE;
   app.font_scale = 1.0;
-  app.styles_dir = g_canonicalize_filename("styles", NULL); /* run from the repository (make test) */
+  app.paths.styles = g_canonicalize_filename("styles", NULL); /* run from the repository (make test) */
   g_test_add_func("/editing/comment-lines", test_comment_lines);
   g_test_add_func("/editing/enter-after-open", test_enter_after_open);
   g_test_add_func("/editing/double-click", test_double_click);

@@ -71,7 +71,7 @@ void unless_unsaved(App *t, const char *question, const char *button, ConfirmedF
 /* Like VS Code: the folder's name, then the program's. */
 void update_title(App *t)
 {
-  char *name = g_path_get_basename(t->root);
+  char *name = g_path_get_basename(t->project.root);
   char *title = g_strdup_printf("%s - t-code", name);
 
   gtk_window_set_title(t->window, title);
@@ -97,7 +97,7 @@ void rebuild_recent_menu(App *t)
 
   g_menu_remove_all(t->recent_menu);
   for (int i = 0; recent && recent[i]; i++) {
-    if (strcmp(recent[i], t->root) == 0 || !g_file_test(recent[i], G_FILE_TEST_IS_DIR))
+    if (strcmp(recent[i], t->project.root) == 0 || !g_file_test(recent[i], G_FILE_TEST_IS_DIR))
       continue;
     char *label = home_relative(recent[i]);
     GMenuItem *item = g_menu_item_new(label, NULL);
@@ -116,7 +116,7 @@ void rebuild_recent_menu(App *t)
  * restarts there, the panels empty, and root's tabs from last time come back. */
 static void switch_project(App *t, const char *root)
 {
-  if (strcmp(root, t->root) == 0)
+  if (strcmp(root, t->project.root) == 0)
     return;
   session_save(t);
   close_all_tabs(t);
@@ -126,8 +126,8 @@ static void switch_project(App *t, const char *root)
   malloc_trim(0); /* the old project's tabs are gone: give their memory back */
 #endif
 
-  g_free(t->root);
-  t->root = g_strdup(root);
+  g_free(t->project.root);
+  t->project.root = g_strdup(root);
   session_load_project_indent(t);
   update_title(t);
   session_add_recent(t);
@@ -135,7 +135,7 @@ static void switch_project(App *t, const char *root)
   restart_shell_pane(t);
   scm_reset();
   search_reset();
-  watch_git(t); /* t->git_top for the Files panel's git colors */
+  watch_git(t); /* t->project.git_top for the Files panel's git colors */
   files_set_root(t);
 
   session_restore_tabs(t);
@@ -168,7 +168,7 @@ static void on_folder_chosen(GObject *source, GAsyncResult *result, gpointer dat
 void choose_folder(App *t)
 {
   GtkFileDialog *dialog = gtk_file_dialog_new();
-  GFile *start = g_file_new_for_path(t->root);
+  GFile *start = g_file_new_for_path(t->project.root);
 
   gtk_file_dialog_set_title(dialog, "Open Folder");
   gtk_file_dialog_set_initial_folder(dialog, start);

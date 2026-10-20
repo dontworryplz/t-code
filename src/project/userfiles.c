@@ -162,7 +162,7 @@ void open_user_theme(App *t)
 void open_editor_colors(App *t)
 {
   char *path = user_colors_file(), *dir = g_path_get_dirname(path);
-  char *ours = g_build_filename(t->styles_dir, "dark-modern.xml", NULL), *text = NULL;
+  char *ours = g_build_filename(t->paths.styles, "dark-modern.xml", NULL), *text = NULL;
 
   if (!g_file_test(path, G_FILE_TEST_EXISTS) && g_file_get_contents(ours, &text, NULL, NULL)) {
     const char *after = strstr(text, "?>"); /* below the XML declaration */
