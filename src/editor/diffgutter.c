@@ -280,6 +280,17 @@ static void apply_side_gaps(DiffGutter *g, GArray *gaps)
   gtk_widget_queue_draw(GTK_WIDGET(g->tab->source));
 }
 
+/* The width view wraps its lines at: its text area without the margins, and without the pixel
+ * GtkTextView keeps for the cursor at the end of a row (SPACE_FOR_CURSOR). Without that pixel, a line
+ * that just fits was one row here and two in the view, and every line below it out of step. */
+static int wrap_width(GtkTextView *view)
+{
+  GdkRectangle visible;
+
+  gtk_text_view_get_visible_rect(view, &visible);
+  return visible.width - 1 - gtk_text_view_get_left_margin(view) - gtk_text_view_get_right_margin(view);
+}
+
 /* The height in pixels each line of text takes in tab's view, as the view lays it out: with word
  * wrap at its width, font and tab stops (a line's height is rounded once, for all its rows: three
  * rows are not three times one). *width_out: the wrap width (0: no wrap). */
@@ -291,10 +302,8 @@ static int *line_heights(Tab *tab, const char *text, int *width_out)
   guint n = line_count(text), i = 0;
   int *heights = g_new(int, MAX(n, 1)), width, one;
   PangoTabArray *tabs;
-  GdkRectangle visible;
 
-  gtk_text_view_get_visible_rect(view, &visible);
-  width = visible.width - gtk_text_view_get_left_margin(view) - gtk_text_view_get_right_margin(view);
+  width = wrap_width(view);
   *width_out = mode == GTK_WRAP_NONE ? 0 : MAX(width, 0);
   pango_layout_get_size(layout, NULL, &one);
   one = PANGO_PIXELS(one);
@@ -475,14 +484,12 @@ void diff_gutter_check_width(Tab *tab)
 {
   DiffGutter *g = tab && tab->view ? tab->view->diff : NULL;
   GtkTextView *view;
-  GdkRectangle visible;
   int width;
 
   if (!g || !g->partner || g->relayout_id)
     return;
   view = GTK_TEXT_VIEW(tab->source);
-  gtk_text_view_get_visible_rect(view, &visible);
-  width = visible.width - gtk_text_view_get_left_margin(view) - gtk_text_view_get_right_margin(view);
+  width = wrap_width(view);
   if (gtk_text_view_get_wrap_mode(view) == GTK_WRAP_NONE)
     width = 0;
   if (width != g->wrap_width)

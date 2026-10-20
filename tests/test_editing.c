@@ -825,6 +825,58 @@ static void test_comparison_gaps(void)
   free_tab(new_side);
 }
 
+/* With word wrap, the gaps are worked out from each line's height as the view lays it out: also for
+ * lines that just fit, or just do not (the view keeps a pixel for the cursor), else every line below
+ * one of them was out of step with the other side. */
+static void test_wrapped_heights(void)
+{
+  GString *text = g_string_new(NULL);
+  GtkWidget *window = gtk_window_new();
+  Tab *tab;
+
+  for (int length = 1; length <= 60; length++) { /* lines of every length, wrapped anywhere */
+    for (int i = 0; i < length; i++)
+      g_string_append_c(text, 'x');
+    g_string_append_c(text, '\n');
+  }
+  app.settings.word_wrap = TRUE;
+  tab = new_tab(text->str);
+  editor_view_apply_settings(tab);
+  gtk_window_set_default_size(GTK_WINDOW(window), 400, 300);
+  gtk_window_set_child(GTK_WINDOW(window), tab->page);
+  gtk_window_present(GTK_WINDOW(window));
+  for (gint64 until = g_get_monotonic_time() + 3 * G_USEC_PER_SEC;
+       !gtk_widget_get_mapped(GTK_WIDGET(tab->source)) && g_get_monotonic_time() < until;)
+    g_main_context_iteration(NULL, TRUE);
+  run_for(300);
+  if (!gtk_widget_get_mapped(GTK_WIDGET(tab->source)))
+    g_test_skip("the window was not shown");
+  /* A letter is ~9 pixels wide: one of ten widths in a row is where a line just fits, or not. */
+  for (int margin = 2; margin < 12 && gtk_widget_get_mapped(GTK_WIDGET(tab->source)); margin++) {
+    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(tab->source), margin);
+    run_for(100);
+    int wrap, *heights = line_heights(tab, text->str, &wrap);
+    GtkAdjustment *vertical = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(tab->source));
+    for (int line = 0; line < 60; line++) {
+      GtkTextIter iter;
+      int y, h;
+      gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(tab->buffer), &iter, line);
+      gtk_text_view_get_line_yrange(GTK_TEXT_VIEW(tab->source), &iter, &y, &h);
+      gtk_adjustment_set_value(vertical, y); /* laid out for real, not estimated */
+      run_for(10);
+      gtk_text_view_get_line_yrange(GTK_TEXT_VIEW(tab->source), &iter, &y, &h);
+      g_assert_cmpint(h, ==, heights[line]);
+    }
+    g_assert_cmpint(heights[59], >, heights[0]); /* the longest line wraps */
+    g_free(heights);
+  }
+  gtk_window_set_child(GTK_WINDOW(window), NULL); /* the tab keeps the page */
+  gtk_window_destroy(GTK_WINDOW(window));
+  free_tab(tab);
+  app.settings.word_wrap = FALSE;
+  g_string_free(text, TRUE);
+}
+
 /* The indentation in use: the settings, then the file's own, the config files, the project's
  * choice; a Makefile keeps tabs. */
 static void test_indent_order(void)
@@ -930,6 +982,7 @@ int main(int argc, char **argv)
   g_test_add_func("/diff-gutter/marks", test_diff_gutter);
   g_test_add_func("/diff-gutter/trailing-newline", test_trailing_newline);
   g_test_add_func("/diff-gutter/comparison-gaps", test_comparison_gaps);
+  g_test_add_func("/diff-gutter/wrapped-heights", test_wrapped_heights);
   g_test_add_func("/guides/brackets", test_guide_brackets);
   g_test_add_func("/guides/pair", test_guide_pair);
   g_test_add_func("/guides/pair-in-comment", test_guide_pair_in_comment);

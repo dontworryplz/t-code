@@ -58,8 +58,8 @@ build/test-detect: tests/test_detect.c src/editor/detect.c src/editor/detect.h s
 # The editor page's files (with the language server client) are included by the tests through
 # tests/editor_page.h, to reach their static functions. test-lsp runs itself with --fake-server as
 # the language server.
-PAGE_SRC := $(wildcard src/editor/editing.c src/editor/findbar.c src/editor/editorview.c src/editor/detect.c \
-              src/lsp/*.c) tests/editor_page.h
+PAGE_SRC := $(filter-out src/editor/tabs.c src/editor/editor.c src/editor/preview.c,$(wildcard src/editor/*.c)) \
+            $(wildcard src/lsp/*.c) src/git/linediff.c tests/editor_page.h
 build/test-editing: tests/test_editing.c $(PAGE_SRC) $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_editing.c $(shell pkg-config --libs $(PKGS))
 
