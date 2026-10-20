@@ -80,7 +80,10 @@ static const char *const square_css =
     "notebook > header > tabs > tab { min-height: 37px; margin: 0; border-radius: 0;"
     "  box-shadow: inset -1px 0 #2b2b2b, inset 0 -1px #2b2b2b; }"
     "notebook > header > tabs > tab:hover { background: #1f1f1f; }"
-    "notebook > header > tabs > tab:checked { box-shadow: inset 0 1px #0078d4, inset -1px 0 #2b2b2b; }"
+    /* The current tab keeps the line under the tabs too: flowing into the editor (VS Code's way), it
+     * looked a pixel or two taller than the others. */
+    "notebook > header > tabs > tab:checked { box-shadow: inset 0 1px #0078d4, inset -1px 0 #2b2b2b,"
+    "  inset 0 -1px #2b2b2b; }"
     "notebook > header > tabs > tab button, notebook > header > arrow { border-radius: 4px; }"
 
     "button, entry, spinbutton, textview, .tcode-scm .message { border-radius: 2px; }"
