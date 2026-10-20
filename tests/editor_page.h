@@ -13,6 +13,7 @@
 #include "editor/guides.c"
 #include "lsp/channel.c"
 #include "lsp/client.c"
+#include "lsp/compiledb.c"
 #include "lsp/completion.c"
 #include "lsp/diagnostics.c"
 #include "lsp/edits.c"

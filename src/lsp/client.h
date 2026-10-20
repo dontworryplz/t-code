@@ -33,8 +33,14 @@ gboolean lsp_has(Tab *tab);
 /* Stops the window's server (t-code quits). */
 void lsp_stop(App *t);
 
-/* Starts the server again with the open files (its settings changed). */
+/* Starts the server again with the open files (its settings changed, or the user asked: it reads
+ * the compile flags again); one that gave up after crashing or was not found is tried again. */
 void lsp_restart(App *t);
+
+/* Why clangd lacks compile flags, for the status bar: when an open file has an #include clangd
+ * cannot find and no compilation database applies to it, what to do about it (naming a misspelled
+ * one, like "compile-flags.txt"); else NULL. */
+char *lsp_flags_hint(App *t);
 
 /* Whether an editor's file goes to the server (C or C++, not a read-only old version). */
 gboolean lsp_wants(Tab *tab);

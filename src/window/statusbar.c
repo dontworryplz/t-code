@@ -1,7 +1,7 @@
 /*
  * The status bar at the bottom, like VS Code's:
  *   left   git branch ("*" when there are changes), clangd errors and warnings in the open files,
- *          Build and Run buttons and what they would build
+ *          a warning when clangd has no compile flags, Build and Run buttons and what they would build
  *   right  cursor line and column, and the Keybinds button
  */
 #include "window/statusbar.h"
@@ -9,6 +9,7 @@
 #include "dialogs/keybinds.h"
 #include "editor/tabs.h"
 #include "git/gitstatus.h"
+#include "lsp/client.h"
 #include "project/run.h"
 
 static const char *const css =
@@ -18,7 +19,8 @@ static const char *const css =
     "  box-shadow: none; border: none; color: #cccccc; }"
     ".tcode-status button:hover { background: rgba(255, 255, 255, .12); }"
     ".tcode-status label { color: #cccccc; padding: 0 8px; }"
-    ".tcode-status label.dim { color: #9d9d9d; }";
+    ".tcode-status label.dim { color: #9d9d9d; }"
+    ".tcode-status button.warning { color: #cca700; }";
 
 void update_status(App *t)
 {
@@ -42,6 +44,11 @@ void update_status(App *t)
   }
   text = g_strdup_printf("⊗ %d  ⚠ %d", errors, warnings);
   gtk_label_set_text(t->status.problems, text);
+  g_free(text);
+
+  text = lsp_flags_hint(t);
+  gtk_widget_set_tooltip_text(t->status.flags, text);
+  gtk_widget_set_visible(t->status.flags, text != NULL);
   g_free(text);
 
   status_show_position(t);
@@ -92,7 +99,7 @@ static GtkLabel *status_label(GtkWidget *bar, gboolean dim)
 }
 
 /* A flat button on the bar that calls clicked(t). */
-static void status_button(GtkWidget *bar, const char *text, const char *tooltip, GCallback clicked, App *t)
+static GtkWidget *status_button(GtkWidget *bar, const char *text, const char *tooltip, GCallback clicked, App *t)
 {
   GtkWidget *button = gtk_button_new_with_label(text);
 
@@ -101,6 +108,32 @@ static void status_button(GtkWidget *bar, const char *text, const char *tooltip,
   gtk_widget_set_tooltip_text(button, tooltip);
   g_signal_connect_swapped(button, "clicked", clicked, t);
   gtk_box_append(GTK_BOX(bar), button);
+  return button;
+}
+
+static void on_flags_answer(GObject *dialog, GAsyncResult *result, gpointer data)
+{
+  if (gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(dialog), result, NULL) == 1)
+    lsp_restart(data);
+}
+
+/* "No compile flags": what clangd lacks and how to give it, with a button that restarts it. */
+static void on_flags(App *t)
+{
+  char *hint = lsp_flags_hint(t);
+  static const char *const buttons[] = { "Close", "Restart clangd", NULL };
+  GtkAlertDialog *dialog;
+
+  if (!hint)
+    return;
+  dialog = gtk_alert_dialog_new("clangd has no compile flags");
+  gtk_alert_dialog_set_detail(dialog, hint);
+  gtk_alert_dialog_set_buttons(dialog, buttons);
+  gtk_alert_dialog_set_cancel_button(dialog, 0);
+  gtk_alert_dialog_set_default_button(dialog, 1);
+  gtk_alert_dialog_choose(dialog, t->window, NULL, on_flags_answer, t);
+  g_object_unref(dialog);
+  g_free(hint);
 }
 
 /* The Build and Run buttons. */
@@ -130,6 +163,9 @@ GtkWidget *status_bar(App *t)
   gtk_widget_set_visible(GTK_WIDGET(t->status.branch), FALSE);
   t->status.problems = status_label(bar, FALSE);
   gtk_widget_set_tooltip_text(GTK_WIDGET(t->status.problems), "clangd errors and warnings in the open files");
+  t->status.flags = status_button(bar, "⚠ No compile flags", NULL, G_CALLBACK(on_flags), t);
+  gtk_widget_add_css_class(t->status.flags, "warning");
+  gtk_widget_set_visible(t->status.flags, FALSE);
   status_button(bar, "⚙ Build", "Build (Ctrl+Shift+B)", G_CALLBACK(on_build), t);
   status_button(bar, "▶ Run", "Build and run (F5)", G_CALLBACK(on_run), t);
   t->status.build = status_label(bar, TRUE);

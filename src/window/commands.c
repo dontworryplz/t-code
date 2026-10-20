@@ -12,6 +12,7 @@
 #include "editor/findbar.h"
 #include "editor/preview.h"
 #include "editor/tabs.h"
+#include "lsp/client.h"
 #include "lsp/completion.h"
 #include "lsp/navigate.h"
 #include "lsp/signature.h"
@@ -227,6 +228,7 @@ static const Command commands[] = {
   { "Toggle Shell", "<Control>j", "Ctrl+J", toggle_shell, FALSE },
   { "Source Control", "<Control><Shift>g", "Ctrl+Shift+G", show_scm, FALSE },
   { "Toggle Code Coloring", "F7", "F7", toggle_syntax, FALSE },
+  { "clangd: Restart Language Server", NULL, NULL, lsp_restart, FALSE },
   { "Zoom In", "<Control>equal|<Control>plus|<Control>KP_Add", "Ctrl+=", zoom_in, FALSE },
   { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out, FALSE },
   { "Reset Zoom", "<Control>0|<Control>KP_0", "Ctrl+0", zoom_reset, FALSE },

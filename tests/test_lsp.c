@@ -82,7 +82,8 @@ static void fake_position(const char *text, gsize offset, int *line, int *charac
     *character += g_utf8_get_char(p) >= 0x10000 ? 2 : 1;
 }
 
-/* The diagnostic that tells the test what the server has. */
+/* The diagnostic that tells the test what the server has; with clangd's code for a header not
+ * found when the text includes <missing.h>. */
 static void fake_publish(const char *uri, GString *text)
 {
   char *quoted_uri = json_quote(uri), *quoted_text = json_quote(text->str), *body;
@@ -93,8 +94,9 @@ static void fake_publish(const char *uri, GString *text)
     fake_position(text->str, x - text->str, &line, &character);
   body = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":"
                          "{\"uri\":%s,\"diagnostics\":[{\"range\":{\"start\":{\"line\":%d,\"character\":%d},"
-                         "\"end\":{\"line\":%d,\"character\":%d}},\"severity\":1,\"message\":%s}]}}",
-                         quoted_uri, line, character, line, character + (x ? 1 : 0), quoted_text);
+                         "\"end\":{\"line\":%d,\"character\":%d}},\"severity\":1,%s\"message\":%s}]}}",
+                         quoted_uri, line, character, line, character + (x ? 1 : 0),
+                         strstr(text->str, "<missing.h>") ? "\"code\":\"pp_file_not_found\"," : "", quoted_text);
   fake_send(body);
   g_free(body);
   g_free(quoted_text);
@@ -487,6 +489,81 @@ static void test_crash(void)
   free_tab(tab);
 }
 
+/* A file with text in a folder. */
+static void put(const char *folder, const char *name, const char *text)
+{
+  char *path = g_build_filename(folder, name, NULL), *parent = g_path_get_dirname(path);
+
+  g_mkdir_with_parents(parent, 0700);
+  g_assert_true(g_file_set_contents(path, text, -1, NULL));
+  g_free(parent);
+  g_free(path);
+}
+
+/* The compilation database is looked for like clangd does, upwards from the file; a misspelled one
+ * is found between the file and the project folder. */
+static void test_compile_db(void)
+{
+  char *root = g_dir_make_tmp("t-code-db-XXXXXX", NULL), *file = g_build_filename(root, "src", "main.c", NULL);
+  char *found;
+
+  put(root, "src/main.c", "int main(void) {}\n");
+  g_assert_null(compile_db_find(file));
+  g_assert_null(compile_db_misnamed(file, root));
+
+  put(root, "compile-flags.txt", "-I/usr/include/glib-2.0\n");
+  g_assert_null(compile_db_find(file));
+  found = compile_db_misnamed(file, root);
+  g_assert_true(g_str_has_suffix(found, "/compile-flags.txt"));
+  g_free(found);
+
+  put(root, "build/compile_commands.json", "[]\n");
+  found = compile_db_find(file);
+  g_assert_true(g_str_has_suffix(found, "/build/compile_commands.json"));
+  g_free(found);
+  put(root, "src/compile_flags.txt", "-Wall\n"); /* nearer to the file */
+  found = compile_db_find(file);
+  g_assert_true(g_str_has_suffix(found, "/src/compile_flags.txt"));
+  g_free(found);
+
+  g_free(file);
+  g_free(root); /* left in the temporary folder */
+}
+
+/* A header not found with no compile flags shows the hint (naming the misspelled file); a
+ * compile_flags.txt hides it; a restart gives the server the open files again. */
+static void test_flags_hint(void)
+{
+  char *root = g_dir_make_tmp("t-code-hint-XXXXXX", NULL), *file = g_build_filename(root, "main.c", NULL);
+  char *old_root = app.root, *hint;
+  Tab *tab;
+
+  put(root, "main.c", "");
+  put(root, "compile-flags.txt", "-Iinclude\n");
+  app.root = root;
+  tab = new_tab(file, "#include <missing.h>\n");
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  hint = lsp_flags_hint(&app);
+  g_assert_nonnull(strstr(hint, "\"compile-flags.txt\": rename it to compile_flags.txt"));
+  g_free(hint);
+
+  put(root, "compile_flags.txt", "-Iinclude\n");
+  g_assert_null(lsp_flags_hint(&app));
+
+  lsp_restart(&app);
+  g_assert_false(lsp_has(tab));
+  diagnostics_clear(tab);
+  g_assert_true(server_agrees(tab)); /* the new server got the file */
+  g_assert_true(lsp_has(tab));
+
+  lsp_close(tab);
+  free_tab(tab);
+  app.root = old_root;
+  g_free(file);
+  g_free(root);
+}
+
 /* Opening and closing a file many times leaves nothing behind. */
 static void test_churn(void)
 {
@@ -786,6 +863,8 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/lru-pool", test_lru_pool);
   g_test_add_func("/lsp/crash", test_crash);
   g_test_add_func("/lsp/churn", test_churn);
+  g_test_add_func("/lsp/compile-db", test_compile_db);
+  g_test_add_func("/lsp/flags-hint", test_flags_hint);
   g_test_add_func("/lsp/signature-position", test_signature_position);
   g_test_add_func("/lsp/column-in", test_column_in);
   g_test_add_func("/lsp/snippet-text", test_snippet_text);

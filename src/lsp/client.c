@@ -13,8 +13,10 @@
 
 #include "editor/editorview.h"
 #include "lsp/channel.h"
+#include "lsp/compiledb.h"
 #include "lsp/diagnostics.h"
 #include "lsp/semantic.h"
+#include "window/statusbar.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -50,6 +52,7 @@ typedef struct {
   gboolean opened;  /* didOpen went to the running server */
   GString *changes; /* contentChanges not sent yet, comma separated */
   guint flush_id;
+  gboolean include_missing; /* clangd's last diagnostics had an #include it cannot find */
 } Doc;
 
 /* A request waiting for its answer. */
@@ -605,6 +608,17 @@ static Tab *tab_of_uri(Lsp *l, const char *uri)
   return found;
 }
 
+/* Whether diagnostics has an #include not found (clangd's code "pp_file_not_found"). */
+static gboolean include_not_found(JsonNode *diagnostics)
+{
+  JsonArray *array = diagnostics && JSON_NODE_HOLDS_ARRAY(diagnostics) ? json_node_get_array(diagnostics) : NULL;
+
+  for (guint i = 0; array && i < json_array_get_length(array); i++)
+    if (g_strcmp0(json_string_at(json_array_get_element(array, i), "code"), "pp_file_not_found") == 0)
+      return TRUE;
+  return FALSE;
+}
+
 /* A message from the server: an answer, one of its own requests, or a notification. */
 static void on_message(gpointer owner, const char *body)
 {
@@ -623,8 +637,10 @@ static void on_message(gpointer owner, const char *body)
     answer_server(l, message);
   } else if (g_strcmp0(method, "textDocument/publishDiagnostics") == 0) {
     Tab *tab = tab_of_uri(l, json_string_at(message, "params.uri"));
-    if (tab)
-      diagnostics_show(tab, json_at(message, "params.diagnostics"));
+    if (tab) {
+      doc_of(tab)->include_missing = include_not_found(json_at(message, "params.diagnostics"));
+      diagnostics_show(tab, json_at(message, "params.diagnostics")); /* updates the status bar */
+    }
   } else if (!method && id && JSON_NODE_HOLDS_VALUE(id)) {
     gint64 number = json_node_get_int(id);
     Pending *p = g_hash_table_lookup(l->pending, &number);
@@ -840,13 +856,69 @@ void lsp_stop(App *t)
 void lsp_restart(App *t)
 {
   Lsp *l = t->lsp;
+  GHashTableIter iter;
+  gpointer doc;
 
-  if (!l || !l->ch)
-    return; /* the next file starts it with the new settings */
+  if (!l)
+    return; /* no C or C++ file was opened yet: the next one starts it */
+  if (l->idle_id)
+    g_source_remove(l->idle_id);
+  if (l->restart_id)
+    g_source_remove(l->restart_id);
+  l->idle_id = l->restart_id = 0;
   server_stop(l);
   l->crashes = 0;
+  l->missing = FALSE; /* it may have been installed meanwhile */
+  g_hash_table_iter_init(&iter, l->docs);
+  while (g_hash_table_iter_next(&iter, NULL, &doc))
+    ((Doc *)doc)->include_missing = FALSE;
   if (g_hash_table_size(l->docs) > 0)
-    server_start(l);
+    server_start(l); /* else the next file starts it */
+  update_status(t);
+}
+
+char *lsp_flags_hint(App *t)
+{
+  Lsp *l = t->lsp;
+  GHashTableIter iter;
+  gpointer tab, doc;
+
+  if (!l)
+    return NULL;
+  g_hash_table_iter_init(&iter, l->docs);
+  while (g_hash_table_iter_next(&iter, &tab, &doc)) {
+    const char *path = ((Tab *)tab)->path;
+    char *database = ((Doc *)doc)->include_missing && path ? compile_db_find(path) : NULL;
+    char *misnamed, *name, *hint;
+    if (!((Doc *)doc)->include_missing || !path || database) {
+      g_free(database);
+      continue;
+    }
+    misnamed = compile_db_misnamed(path, t->root);
+    name = g_path_get_basename(path);
+    if (misnamed) {
+      char *found = g_path_get_basename(misnamed);
+      hint = g_strdup_printf("clangd cannot find the headers %s includes, as it has no compile flags for it.\n\n"
+                             "clangd does not read \"%s\": rename it to %s, then run "
+                             "\"clangd: Restart Language Server\".",
+                             name, found,
+                             g_str_has_suffix(found, ".json") ? "compile_commands.json" : "compile_flags.txt");
+      g_free(found);
+    } else {
+      hint = g_strdup_printf("clangd cannot find the headers %s includes, as it has no compile flags for it.\n\n"
+                             "clangd reads them from compile_commands.json, build/compile_commands.json or "
+                             "compile_flags.txt in the file's folder or above it:\n"
+                             "  • make: bear -- make (writes compile_commands.json)\n"
+                             "  • CMake: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n"
+                             "  • or compile_flags.txt with one flag per line (-I/usr/include/glib-2.0)\n\n"
+                             "Then run \"clangd: Restart Language Server\".",
+                             name);
+    }
+    g_free(name);
+    g_free(misnamed);
+    return hint;
+  }
+  return NULL;
 }
 
 void lsp_request(Tab *tab, const char *method, const char *params, GCancellable *cancel, LspReply reply, gpointer data)

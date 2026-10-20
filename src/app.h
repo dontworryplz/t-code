@@ -81,6 +81,7 @@ struct App {
   Picker *picker;
   struct {
     GtkLabel *branch, *problems, *build, *position;
+    GtkWidget *flags; /* "No compile flags": clangd cannot find a file's headers */
   } status;
   char *root;
   char *git_top; /* the work tree root of t->root's repository; NULL outside one */
