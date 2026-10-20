@@ -877,6 +877,73 @@ static void test_wrapped_heights(void)
   g_string_free(text, TRUE);
 }
 
+/* Folding ---------------------------------------------------------------------------------- */
+
+static void place_cursor(Tab *tab, int line)
+{
+  GtkTextIter at;
+
+  gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(tab->buffer), &at, line);
+  gtk_text_buffer_place_cursor(GTK_TEXT_BUFFER(tab->buffer), &at);
+}
+
+/* "h" for each folded-away line, "." for each shown one: "..hh.". */
+static char *hidden_lines(Tab *tab)
+{
+  GString *out = g_string_new(NULL);
+
+  for (int line = 0; line < gtk_text_buffer_get_line_count(GTK_TEXT_BUFFER(tab->buffer)); line++)
+    g_string_append_c(out, line_hidden(tab->view->folding, line) ? 'h' : '.');
+  return g_string_free(out, FALSE);
+}
+
+static void assert_hidden(Tab *tab, const char *want)
+{
+  char *now = hidden_lines(tab);
+
+  g_assert_cmpstr(now, ==, want);
+  g_free(now);
+}
+
+/* A block folds to its head and closing line, the head of an Allman block being the line above its
+ * brace; the cursor going into it unfolds it, and so does deleting its brace. */
+static void test_folding(void)
+{
+  Tab *tab = new_tab("void f()\n{\n  a();\n}\nint g() {\n  if (x) {\n    y();\n  }\n}\n");
+  Folding *f = tab->view->folding;
+
+  g_assert_nonnull(block_at(tab, 0));
+  g_assert_null(block_at(tab, 1)); /* f's arrow is on its head, "void f()" */
+  toggle(f, 0);
+  assert_hidden(tab, ".hh.......");
+  toggle(f, 0);
+  assert_hidden(tab, "..........");
+
+  place_cursor(tab, 6); /* in the if */
+  fold_at_cursor(tab);
+  assert_hidden(tab, "......h...");
+  place_cursor(tab, 6); /* into it: it opens */
+  assert_hidden(tab, "..........");
+
+  fold_all(tab);
+  assert_hidden(tab, ".hh..hhh..");
+  unfold_all(tab);
+  assert_hidden(tab, "..........");
+
+  /* g's brace goes: its fold opens a moment later. */
+  toggle(f, 4);
+  assert_hidden(tab, ".....hhh..");
+  GtkTextIter brace, after;
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(tab->buffer), &brace, 4, 8);
+  after = brace;
+  gtk_text_iter_forward_char(&after);
+  gtk_text_buffer_delete(GTK_TEXT_BUFFER(tab->buffer), &brace, &after);
+  tab->view->changes++; /* editor.c counts them in t-code */
+  run_for(CHECK_MS + 200);
+  assert_hidden(tab, "..........");
+  free_tab(tab);
+}
+
 /* The indentation in use: the settings, then the file's own, the config files, the project's
  * choice; a Makefile keeps tabs. */
 static void test_indent_order(void)
@@ -983,6 +1050,7 @@ int main(int argc, char **argv)
   g_test_add_func("/diff-gutter/trailing-newline", test_trailing_newline);
   g_test_add_func("/diff-gutter/comparison-gaps", test_comparison_gaps);
   g_test_add_func("/diff-gutter/wrapped-heights", test_wrapped_heights);
+  g_test_add_func("/folding/fold-unfold", test_folding);
   g_test_add_func("/guides/brackets", test_guide_brackets);
   g_test_add_func("/guides/pair", test_guide_pair);
   g_test_add_func("/guides/pair-in-comment", test_guide_pair_in_comment);

@@ -10,6 +10,7 @@
 #include "editor/editing.h"
 #include "editor/editor.h"
 #include "editor/findbar.h"
+#include "editor/folding.h"
 #include "editor/preview.h"
 #include "editor/tabs.h"
 #include "lsp/client.h"
@@ -113,6 +114,10 @@ static void find_next(App *t) { Tab *tab = current_editor(t); if (tab) findbar_n
 static void find_previous(App *t) { Tab *tab = current_editor(t); if (tab) findbar_next(tab, TRUE); }
 static void comment(App *t) { Tab *tab = current_editor(t); if (tab) editor_toggle_comment(tab); }
 static void duplicate(App *t) { Tab *tab = current_editor(t); if (tab) editor_duplicate_lines(tab); }
+static void fold(App *t) { Tab *tab = current_editor(t); if (tab) fold_at_cursor(tab); }
+static void unfold(App *t) { Tab *tab = current_editor(t); if (tab) unfold_at_cursor(tab); }
+static void fold_everything(App *t) { Tab *tab = current_editor(t); if (tab) fold_all(tab); }
+static void unfold_everything(App *t) { Tab *tab = current_editor(t); if (tab) unfold_all(tab); }
 static void line_up(App *t) { Tab *tab = current_editor(t); if (tab) editor_move_lines(tab, FALSE); }
 static void line_down(App *t) { Tab *tab = current_editor(t); if (tab) editor_move_lines(tab, TRUE); }
 static void delete_line(App *t) { Tab *tab = current_editor(t); if (tab) editor_delete_lines(tab); }
@@ -206,6 +211,10 @@ static const Command commands[] = {
   { "Duplicate Line", "<Control>d|<Shift><Alt>Down", "Ctrl+D", duplicate, TRUE, FALSE },
   { "Move Line Up", "<Alt>Up", "Alt+↑", line_up, TRUE, FALSE },
   { "Move Line Down", "<Alt>Down", "Alt+↓", line_down, TRUE, FALSE },
+  { "Fold", "<Control><Shift>bracketleft|<Control><Shift>braceleft", "Ctrl+Shift+[", fold, TRUE, FALSE },
+  { "Unfold", "<Control><Shift>bracketright|<Control><Shift>braceright", "Ctrl+Shift+]", unfold, TRUE, FALSE },
+  { "Fold All", NULL, NULL, fold_everything, TRUE, FALSE },
+  { "Unfold All", NULL, NULL, unfold_everything, TRUE, FALSE },
   { "Delete Line", "<Control><Shift>k", "Ctrl+Shift+K", delete_line, TRUE, FALSE },
   { "Redo", "<Control>y", "Ctrl+Y, Ctrl+Shift+Z", redo, TRUE, FALSE },
   { "Go to Definition", "F12|<Alt>d", "F12, Ctrl+Click", definition, TRUE, FALSE },

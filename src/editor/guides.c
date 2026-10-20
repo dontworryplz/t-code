@@ -8,6 +8,7 @@
 
 #include "editor/diffgutter.h"
 #include "editor/editorview.h"
+#include "editor/folding.h"
 #include "lsp/diagnostics.h"
 
 #include <string.h>
@@ -327,6 +328,7 @@ static void snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapsho
     if (self->tab->app->settings.guides)
       draw_guides(self, snapshot);
     diagnostics_draw(self->tab, view, snapshot);
+    folding_draw(self->tab, view, snapshot);
   }
 }
 

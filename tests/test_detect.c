@@ -1,7 +1,9 @@
 /*
- * Tests for src/editor/detect.c (a file's own indentation, whether a header is C++) and
- * src/editor/indentconf.c (what .editorconfig and .clang-format say about it).
+ * Tests for src/editor/detect.c (a file's own indentation, whether a header is C++),
+ * src/editor/indentconf.c (what .editorconfig and .clang-format say about it) and
+ * src/editor/blocks.c (the { } blocks folding and sticky scroll use).
  */
+#include "editor/blocks.h"
 #include "editor/detect.h"
 #include "editor/indentconf.h"
 
@@ -157,6 +159,41 @@ static void test_clang_format(void)
   g_free(root);
 }
 
+/* "head open close" of each block, in order: "0 0 3, 1 2 4". */
+static char *blocks(const char *text)
+{
+  GArray *found = blocks_of(text);
+  GString *out = g_string_new(NULL);
+
+  for (guint i = 0; i < found->len; i++) {
+    Block *b = &g_array_index(found, Block, i);
+    g_string_append_printf(out, "%s%d %d %d", i ? ", " : "", b->head, b->open_line, b->close_line);
+  }
+  g_array_free(found, TRUE);
+  return g_string_free(out, FALSE);
+}
+
+static void assert_blocks(const char *text, const char *want)
+{
+  char *now = blocks(text);
+
+  g_assert_cmpstr(now, ==, want);
+  g_free(now);
+}
+
+/* A block's head is its '{' line, or the line before a '{' that starts its own line; braces in
+ * strings, characters and comments do not count; unclosed blocks are left out. */
+static void test_blocks(void)
+{
+  assert_blocks("int f(void) {\n  if (x) {\n    y();\n  }\n}\n", "0 0 4, 1 1 3");
+  assert_blocks("void f()\n{\n  a();\n}\n", "0 1 3");                   /* Allman */
+  assert_blocks("int a;\n{\n  b();\n}\n", "1 1 3");                     /* a bare block */
+  assert_blocks("\n{\n}\n", "1 1 2");                                   /* nothing above */
+  assert_blocks("s = \"{\"; c = '}'; // {\n/* { */ x {\n}\n", "1 1 2"); /* not the quoted ones */
+  assert_blocks("namespace a {\nvoid f() {\n", "");                     /* never closed */
+  assert_blocks("struct S {\n  int x;\n};\n", "0 0 2");
+}
+
 int main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
@@ -167,5 +204,6 @@ int main(int argc, char **argv)
   g_test_add_func("/detect/cxx-headers", test_cxx_headers);
   g_test_add_func("/detect/editorconfig", test_editorconfig);
   g_test_add_func("/detect/clang-format", test_clang_format);
+  g_test_add_func("/blocks/heads", test_blocks);
   return g_test_run();
 }

@@ -8,6 +8,7 @@
 #include "editor/diffgutter.h"
 #include "editor/editing.h"
 #include "editor/findbar.h"
+#include "editor/folding.h"
 #include "editor/guides.h"
 #include "editor/occurrences.h"
 #include "lsp/client.h"
@@ -425,6 +426,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   editing_attach(tab);
   occurrences_attach(tab);
   diff_gutter_attach(tab);
+  folding_attach(tab);
   hover_attach(tab);
   completion_attach(tab);
   navigate_attach(tab);
@@ -434,7 +436,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   gtk_text_view_set_editable(GTK_TEXT_VIEW(view), !readonly);
   gtk_text_view_set_left_margin(GTK_TEXT_VIEW(view), 4);
   gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(view), 200); /* the last line can come up from the bottom */
-  gtk_source_view_set_show_line_numbers(view, TRUE);
+  gtk_source_view_set_show_line_numbers(view, FALSE);        /* folding.c's: they leave folded lines out */
   gtk_source_view_set_highlight_current_line(view, TRUE);
   gtk_source_view_set_auto_indent(view, TRUE);
   gtk_source_view_set_indent_on_tab(view, TRUE);
@@ -488,6 +490,7 @@ void editor_view_free(EditorView *v)
   occurrences_free(v->occurrences);
   findbar_free(v->find);
   diff_gutter_free(v->diff);
+  folding_free(v->folding);
   g_free(v->closers);
   for (guint i = 0; i < v->next_waiters->len; i++) {
     SaveWaiter *w = &g_array_index(v->next_waiters, SaveWaiter, i);

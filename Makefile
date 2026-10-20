@@ -50,9 +50,9 @@ build/test-linediff: tests/test_linediff.c src/git/linediff.c src/git/linediff.h
 	  $(shell pkg-config --libs glib-2.0)
 
 build/test-detect: tests/test_detect.c src/editor/detect.c src/editor/detect.h src/editor/indentconf.c \
-                   src/editor/indentconf.h | build
+                   src/editor/indentconf.h src/editor/blocks.c src/editor/blocks.h | build
 	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags glib-2.0) -o $@ tests/test_detect.c src/editor/detect.c \
-	  src/editor/indentconf.c \
+	  src/editor/indentconf.c src/editor/blocks.c \
 	  $(shell pkg-config --libs glib-2.0)
 
 # The editor page's files (with the language server client) are included by the tests through
@@ -113,7 +113,8 @@ test-asan: | build
 	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gio-2.0) -o build/asan/test-searchmatch \
 	  tests/test_searchmatch.c src/search/searchmatch.c $(shell pkg-config --libs gio-2.0)
 	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags glib-2.0) -o build/asan/test-detect \
-	  tests/test_detect.c src/editor/detect.c src/editor/indentconf.c $(shell pkg-config --libs glib-2.0)
+	  tests/test_detect.c src/editor/detect.c src/editor/indentconf.c src/editor/blocks.c \
+	  $(shell pkg-config --libs glib-2.0)
 	$(ASAN_ENV) build/asan/test-searchmatch
 	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags glib-2.0) -o build/asan/test-linediff \
 	  tests/test_linediff.c src/git/linediff.c $(shell pkg-config --libs glib-2.0)

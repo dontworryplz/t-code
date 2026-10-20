@@ -8,6 +8,7 @@
 #include "editor/detect.h"
 #include "editor/diffgutter.h"
 #include "editor/editorview.h"
+#include "editor/folding.h"
 #include "editor/tabs.h"
 #include "git/compare.h"
 #include "git/gitstatus.h"
@@ -453,6 +454,7 @@ static void load(Tab *tab, int line, int column)
   v->goto_line = line;
   v->goto_column = column;
   v->loading = TRUE;
+  folding_reset(tab); /* the folded lines may not be there any more */
   /* The loader replaces the whole text: the old problems' marks would end up around all of it. The
    * server sends the new ones once it has the file again. */
   diagnostics_clear(tab);
