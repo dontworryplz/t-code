@@ -24,8 +24,8 @@ G_DEFINE_FINAL_TYPE_WITH_CODE(TcodeHover, tcode_hover, G_TYPE_OBJECT,
 
 static const char *const hover_css =
     ".tcode-hover { padding: 4px 6px; }"
-    ".tcode-hover label.symbol { font-family: 'Cascadia Code', monospace; font-size: 0.95em; color: #cccccc; }"
-    ".tcode-hover separator { margin: 6px 0; background: #454545; }";
+    ".tcode-hover label.symbol { font-family: 'Cascadia Code', monospace; font-size: 0.95em; color: var(--tc-fg); }"
+    ".tcode-hover separator { margin: 6px 0; background: var(--tc-border-strong); }";
 
 /* One hover being filled. */
 typedef struct {

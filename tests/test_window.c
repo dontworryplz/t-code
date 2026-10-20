@@ -656,19 +656,19 @@ static void test_settings_edited(void)
 static void test_open_user_files(void)
 {
   char *theme = g_build_filename(g_get_user_config_dir(), "t-code", "theme.css", NULL), *text = NULL;
-  char *colors = g_build_filename(g_get_user_config_dir(), "t-code", "styles", "dark-modern.xml", NULL);
+  char *colors = g_build_filename(g_get_user_config_dir(), "t-code", "styles", "dark-classic.xml", NULL);
 
   open_settings_file(&app);
   open_user_theme(&app);
   open_editor_colors(&app);
   run(100);
-  assert_tabs("settings.ini theme.css dark-modern.xml");
+  assert_tabs("settings.ini theme.css dark-classic.xml");
   g_assert_true(g_file_get_contents(theme, &text, NULL, NULL));
   g_assert_nonnull(strstr(text, "Saving this file applies it at once"));
   g_free(text);
   g_assert_true(g_file_get_contents(colors, &text, NULL, NULL));
   g_assert_nonnull(strstr(text, "Your copy of t-code's editor colors"));
-  g_assert_nonnull(strstr(text, "id=\"t-code-dark-modern\""));
+  g_assert_nonnull(strstr(text, "id=\"t-code-dark-classic\""));
   g_free(text);
   close_everything();
   g_free(colors);

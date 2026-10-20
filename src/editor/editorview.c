@@ -21,10 +21,9 @@
 #include "lsp/signature.h"
 #include "window/statusbar.h"
 #include "window/terminal.h"
+#include "window/palette.h"
 
 #include <string.h>
-
-#define SCHEME "t-code-dark-modern" /* styles/dark-modern.xml */
 
 static const char *const css =
     ".tcode-editor scrollbar { background: none; border: none; }"
@@ -33,29 +32,29 @@ static const char *const css =
     /* Long lines without word wrap: a bar as easy to see and grab as the vertical one. */
     ".tcode-editor scrollbar.horizontal slider { min-height: 8px; min-width: 24px; }"
     ".tcode-editor scrollbar slider:hover { background: rgba(100, 100, 100, .7); }"
-    ".tcode-editor textview, .tcode-editor textview text { background: #1f1f1f; }"
-    ".tcode-editor textview border.left gutter { background: #1f1f1f; padding-right: 12px; }"
-    ".tcode-editor .tcode-minimap { border-left: 1px solid #2b2b2b; }"
-    ".tcode-editor .tcode-overview { border-left: 1px solid #2b2b2b; }"
-    ".tcode-conflict { background: #3a2f12; color: #cccccc; padding: 4px 8px; border-bottom: 1px solid #5c4a1a; }"
+    ".tcode-editor textview, .tcode-editor textview text { background: var(--tc-panel); }"
+    ".tcode-editor textview border.left gutter { background: var(--tc-panel); padding-right: 12px; }"
+    ".tcode-editor .tcode-minimap { border-left: 1px solid var(--tc-border); }"
+    ".tcode-editor .tcode-overview { border-left: 1px solid var(--tc-border); }"
+    ".tcode-conflict { background: var(--tc-warning-bg); color: var(--tc-fg); padding: 4px 8px; border-bottom: 1px solid var(--tc-warning-border); }"
     ".tcode-conflict button { padding: 2px 10px; min-height: 0; }"
     /* Completion: square and compact like VS Code's suggest widget, not GtkSourceView's rounded
      * list of 28px rows. */
-    "GtkSourceAssistant.completion { border-radius: 0; background: #202020;"
-    "  box-shadow: 0 0 0 1px #454545, 0 2px 8px rgba(0, 0, 0, .36); outline: none; }"
-    "GtkSourceAssistant.completion.above-line { box-shadow: 0 0 0 1px #454545, 0 -2px 8px rgba(0, 0, 0, .36); }"
+    "GtkSourceAssistant.completion { border-radius: 0; background: var(--tc-raised);"
+    "  box-shadow: 0 0 0 1px var(--tc-border-strong), 0 2px 8px rgba(0, 0, 0, .36); outline: none; }"
+    "GtkSourceAssistant.completion.above-line { box-shadow: 0 0 0 1px var(--tc-border-strong), 0 -2px 8px rgba(0, 0, 0, .36); }"
     "GtkSourceAssistant.completion list, GtkSourceAssistant.completion list row,"
     "GtkSourceAssistant.completion scrollbar.vertical, GtkSourceAssistant.completion box.details"
     "  { border-radius: 0; }"
-    "GtkSourceAssistant.completion list row { min-height: 0; padding: 0; color: #cccccc; }"
-    "GtkSourceAssistant.completion list row:hover:not(:selected) { background: #2a2d2e; }"
+    "GtkSourceAssistant.completion list row { min-height: 0; padding: 0; color: var(--tc-fg); }"
+    "GtkSourceAssistant.completion list row:hover:not(:selected) { background: var(--tc-hover); }"
     "GtkSourceAssistant.completion list row:selected, GtkSourceAssistant.completion list row:selected:backdrop"
-    "  { background: #04395e; color: #ffffff; box-shadow: inset 0 0 0 1px #0078d4; }"
+    "  { background: var(--tc-selection); color: var(--tc-fg-strong); box-shadow: inset 0 0 0 1px var(--tc-accent); }"
     "GtkSourceAssistant.completion list row cell.icon { padding: 2px 4px 2px 6px; min-width: 14px; min-height: 14px;"
     "  -gtk-icon-size: 14px; }"
     "GtkSourceAssistant.completion list row cell.typed-text { min-height: 20px; margin: 0 4px; }"
     "GtkSourceAssistant.completion list row cell.after { margin: 0 8px 0 24px; opacity: .6; }"
-    "GtkSourceAssistant.completion box.details { background: #252526; border-top: 1px solid #454545; }";
+    "GtkSourceAssistant.completion box.details { background: var(--tc-raised); border-top: 1px solid var(--tc-border-strong); }";
 
 #define OVERVIEW_WIDTH 8 /* pixels, like VS Code's overview ruler */
 
@@ -85,7 +84,7 @@ static void init_look(App *t)
 
 char *user_colors_file(void)
 {
-  return g_build_filename(g_get_user_config_dir(), "t-code", "styles", "dark-modern.xml", NULL);
+  return g_build_filename(g_get_user_config_dir(), "t-code", "styles", "dark-classic.xml", NULL);
 }
 
 void editor_view_reload_colors(void)
@@ -186,6 +185,9 @@ void editor_view_apply_settings(Tab *tab)
   gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), t->settings.word_wrap ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
   gtk_source_buffer_set_highlight_syntax(tab->buffer, !t->plain);
   gtk_source_buffer_set_style_scheme(tab->buffer, editor_style_scheme(t)); /* a new one after a rescan */
+  occurrences_recolor(tab);
+  gtk_widget_queue_draw(
+      GTK_WIDGET(gtk_source_view_get_gutter(view, GTK_TEXT_WINDOW_LEFT))); /* the line numbers, arrows */
   gtk_widget_set_visible(v->map, t->settings.minimap);
   if (v->overview) /* follows the minimap, or the whole file without it */
     gtk_widget_queue_draw(v->overview);
@@ -250,12 +252,12 @@ static void draw_overview(GtkDrawingArea *area G_GNUC_UNUSED, cairo_t *cr, int w
   Tab *tab = data;
   GArray *lines[3] = { g_array_new(FALSE, FALSE, sizeof(int)), g_array_new(FALSE, FALSE, sizeof(int)),
                        g_array_new(FALSE, FALSE, sizeof(int)) };
-  static const double rgb[3][3] = { { 0.63, 0.63, 0.63 }, { 0.80, 0.65, 0.0 }, { 0.95, 0.30, 0.30 } };
+  static const PalColor inks[3] = { PAL_FG_DIM, PAL_WARNING, PAL_ERROR };
 
   occurrences_lines(tab, lines[0]);
   diagnostics_lines(tab, lines[2], lines[1]);
   for (int k = 0; k < 3; k++) {
-    cairo_set_source_rgb(cr, rgb[k][0], rgb[k][1], rgb[k][2]);
+    gdk_cairo_set_source_rgba(cr, palette_rgba(inks[k]));
     for (guint i = 0; i < lines[k]->len; i++)
       cairo_rectangle(cr, 1, strip_y(tab, g_array_index(lines[k], int, i), height), width - 1, MARK_HEIGHT);
     cairo_fill(cr);
@@ -326,11 +328,10 @@ static void tcode_map_snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, 
     gboolean *seen = g_new0(gboolean, total_lines + 1);
     float map_w = (float)gtk_widget_get_width(GTK_WIDGET(view));
 
-    static const GdkRGBA bg_rgba[2] = {
-      { 0.80f, 0.65f, 0.00f, 0.35f }, /* warning */
-      { 0.95f, 0.30f, 0.30f, 0.40f }  /* error */
-    };
-    static const GdkRGBA edge_rgba[2] = { { 0.80f, 0.65f, 0.00f, 1.0f }, { 0.95f, 0.30f, 0.30f, 1.0f } };
+    GdkRGBA edge_rgba[2] = { *palette_rgba(PAL_WARNING), *palette_rgba(PAL_ERROR) };
+    GdkRGBA bg_rgba[2] = { edge_rgba[0], edge_rgba[1] };
+    bg_rgba[0].alpha = 0.35f;
+    bg_rgba[1].alpha = 0.40f;
 
     /* Draw errors first (k=1) then warnings (k=0), so error colors take precedence on the same line */
     for (int k = 1; k >= 0; k--) {
@@ -395,7 +396,7 @@ GtkSourceStyleScheme *editor_style_scheme(App *t)
     init_look(t);
     styled = TRUE;
   }
-  return gtk_source_style_scheme_manager_get_scheme(gtk_source_style_scheme_manager_get_default(), SCHEME);
+  return palette_scheme(t);
 }
 
 void editor_view_init(Tab *tab, gboolean readonly)

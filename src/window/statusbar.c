@@ -21,13 +21,13 @@
 
 static const char *const css =
     /* The title bar is in window/theme.c. */
-    ".tcode-status { background: #181818; padding: 3px 6px; }"
+    ".tcode-status { background: var(--tc-frame); padding: 3px 6px; }"
     ".tcode-status button { min-height: 0; padding: 1px 8px; border-radius: 6px; background: none;"
-    "  box-shadow: none; border: none; color: #cccccc; }"
-    ".tcode-status button:hover { background: rgba(255, 255, 255, .12); }"
-    ".tcode-status label { color: #cccccc; padding: 0 8px; }"
-    ".tcode-status label.dim { color: #9d9d9d; }"
-    ".tcode-status button.warning { color: #cca700; }";
+    "  box-shadow: none; border: none; color: var(--tc-fg); }"
+    ".tcode-status button:hover { background: color-mix(in srgb, var(--tc-fg) 12%, transparent); }"
+    ".tcode-status label { color: var(--tc-fg); padding: 0 8px; }"
+    ".tcode-status label.dim { color: var(--tc-fg-dim); }"
+    ".tcode-status button.warning { color: var(--tc-warning); }";
 
 void update_status(App *t)
 {

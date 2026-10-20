@@ -16,5 +16,8 @@ void open_preview(App *t, const char *path);
 /* The preview's zoom for the window's text size. */
 void preview_set_zoom(Tab *tab, double scale);
 
+/* The color theme changed: the preview is shown again in its colors. */
+void preview_restyle(Tab *tab);
+
 /* Frees a preview; its tab is going. */
 void preview_free(Preview *preview);

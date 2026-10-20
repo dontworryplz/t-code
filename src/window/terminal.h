@@ -8,7 +8,7 @@
 
 #define DEFAULT_FONT "Cascadia Code 11"
 
-/* A new terminal in the editor font with the Dark Modern colors. */
+/* A new terminal in the editor font in the color theme's colors. */
 VteTerminal *new_terminal(App *t);
 
 /* Sets a terminal's font (a Pango description like "Cascadia Code 11"; NULL: DEFAULT_FONT) at the
@@ -36,3 +36,6 @@ void run_in_shell(App *t, const char *command);
 
 /* cd into dir in the shell pane (kept out of the shell's history). */
 void cd_in_shell(App *t, const char *dir);
+
+/* The color theme changed: the shell takes its colors. */
+void terminal_apply_colors(App *t);

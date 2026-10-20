@@ -8,6 +8,7 @@
 
 #include "editor/editorview.h"
 #include "lsp/client.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -32,36 +33,56 @@ struct TokensRequest {
   guint changes; /* the buffer's change count when it was asked */
 };
 
-/* VS Code Dark Modern's token_colors for clangd's token types; a readonly variable is a constant. */
+/* The kinds of colored tokens: a tag each ("semantic-function", ...), in the color theme's color. */
+typedef enum { KIND_FUNCTION, KIND_TYPE, KIND_MACRO, KIND_CONSTANT, KIND_VARIABLE, KINDS } Kind;
+
+static const char *const kind_names[KINDS] = { "function", "type", "macro", "constant", "variable" };
+static const PalColor kind_colors[KINDS] = { PAL_FUNCTION, PAL_TYPE, PAL_KEYWORD, PAL_CONSTANT, PAL_VARIABLE };
+
+/* clangd's token types, VS Code's way; a readonly variable is a constant. */
 typedef struct {
-  const char *type, *color;
-} TokenColor;
+  const char *type;
+  Kind kind;
+} TokenKind;
 
 /* clang-format off */
-static const TokenColor token_colors[] = {
-  { "function", "#DCDCAA" }, { "method", "#DCDCAA" },
-  { "type", "#4EC9B0" }, { "class", "#4EC9B0" }, { "struct", "#4EC9B0" }, { "enum", "#4EC9B0" },
-  { "interface", "#4EC9B0" }, { "typeParameter", "#4EC9B0" }, { "concept", "#4EC9B0" }, { "namespace", "#4EC9B0" },
-  { "macro", "#569CD6" },
-  { "enumMember", "#4FC1FF" },
-  { "variable", "#9CDCFE" }, { "parameter", "#9CDCFE" }, { "property", "#9CDCFE" },
+static const TokenKind token_kinds[] = {
+  { "function", KIND_FUNCTION }, { "method", KIND_FUNCTION },
+  { "type", KIND_TYPE }, { "class", KIND_TYPE }, { "struct", KIND_TYPE }, { "enum", KIND_TYPE },
+  { "interface", KIND_TYPE }, { "typeParameter", KIND_TYPE }, { "concept", KIND_TYPE }, { "namespace", KIND_TYPE },
+  { "macro", KIND_MACRO },
+  { "enumMember", KIND_CONSTANT },
+  { "variable", KIND_VARIABLE }, { "parameter", KIND_VARIABLE }, { "property", KIND_VARIABLE },
 };
 /* clang-format on */
 
-#define CONSTANT_COLOR "#4FC1FF"
 #define TAG_PREFIX "semantic-"
 
-/* The tag for a color, made the first time. */
-static GtkTextTag *token_tag(Tab *tab, const char *color)
+/* The tag for a kind, made the first time. */
+static GtkTextTag *token_tag(Tab *tab, Kind kind)
 {
   GtkTextTagTable *table = gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer));
-  char *name = g_strconcat(TAG_PREFIX, color, NULL);
+  char *name = g_strconcat(TAG_PREFIX, kind_names[kind], NULL);
   GtkTextTag *tag = gtk_text_tag_table_lookup(table, name);
 
   if (!tag)
-    tag = gtk_text_buffer_create_tag(GTK_TEXT_BUFFER(tab->buffer), name, "foreground", color, NULL);
+    tag = gtk_text_buffer_create_tag(GTK_TEXT_BUFFER(tab->buffer), name, "foreground", palette_hex(kind_colors[kind]),
+                                     NULL);
   g_free(name);
   return tag;
+}
+
+void semantic_recolor(Tab *tab)
+{
+  GtkTextTagTable *table = gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer));
+
+  for (int k = 0; k < KINDS; k++) {
+    char *name = g_strconcat(TAG_PREFIX, kind_names[k], NULL);
+    GtkTextTag *tag = gtk_text_tag_table_lookup(table, name);
+    if (tag)
+      g_object_set(tag, "foreground", palette_hex(kind_colors[k]), NULL);
+    g_free(name);
+  }
 }
 
 /* GtkTextTagTableForeach: collects the semantic tags. */
@@ -110,13 +131,13 @@ static void remove_colors(Tab *tab)
   g_ptr_array_free(tags, TRUE);
 }
 
-/* The color for a token type name, or NULL. */
-static const char *color_of(const char *type)
+/* The kind of a token type name, or -1 (not colored). */
+static int kind_of(const char *type)
 {
-  for (size_t i = 0; type && i < G_N_ELEMENTS(token_colors); i++)
-    if (strcmp(token_colors[i].type, type) == 0)
-      return token_colors[i].color;
-  return NULL;
+  for (size_t i = 0; type && i < G_N_ELEMENTS(token_kinds); i++)
+    if (strcmp(token_kinds[i].type, type) == 0)
+      return token_kinds[i].kind;
+  return -1;
 }
 
 /* The tags for the server's token types, from its legend, and which types are variables (a readonly
@@ -137,12 +158,12 @@ static void legend_init(Legend *legend, Tab *tab)
   legend->n_types = types && JSON_NODE_HOLDS_ARRAY(types) ? json_array_get_length(json_node_get_array(types)) : 0;
   legend->tags = g_new0(GtkTextTag *, MAX(legend->n_types, 1));
   legend->variable = g_new0(gboolean, MAX(legend->n_types, 1));
-  legend->constant = token_tag(tab, CONSTANT_COLOR);
+  legend->constant = token_tag(tab, KIND_CONSTANT);
   legend->readonly = 0;
   for (guint k = 0; k < legend->n_types; k++) {
     const char *type = json_array_get_string_element(json_node_get_array(types), k);
-    const char *color = color_of(type);
-    legend->tags[k] = color ? token_tag(tab, color) : NULL;
+    int kind = kind_of(type);
+    legend->tags[k] = kind >= 0 ? token_tag(tab, kind) : NULL;
     legend->variable[k] = g_strcmp0(type, "variable") == 0 || g_strcmp0(type, "property") == 0;
   }
   for (guint bit = 0; modifiers && JSON_NODE_HOLDS_ARRAY(modifiers) &&

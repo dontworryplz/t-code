@@ -20,20 +20,20 @@ static struct {
 } open_tabs;
 
 static const char *const css =
-    ".tcode-opentabs .section { font-size: 0.8em; font-weight: bold; color: #cccccc; padding: 4px 10px 4px 2px; }"
+    ".tcode-opentabs .section { font-size: 0.8em; font-weight: bold; color: var(--tc-fg); padding: 4px 10px 4px 2px; }"
     ".tcode-opentabs .section .chevron { -gtk-icon-size: 12px; margin-right: 4px; }"
-    ".tcode-opentabs .group { font-size: 0.75em; font-weight: bold; color: #8b8b8b; padding: 4px 0 0 20px; }"
+    ".tcode-opentabs .group { font-size: 0.75em; font-weight: bold; color: var(--tc-fg-faint); padding: 4px 0 0 20px; }"
     ".tcode-opentabs list { background: transparent; }"
-    ".tcode-opentabs list row { min-height: 22px; padding: 0 6px 0 20px; color: #cccccc; }"
-    ".tcode-opentabs list row:hover { background: #2a2d2e; }"
-    ".tcode-opentabs list row:selected { background: #37373d; }"
-    ".tcode-opentabs .dir { color: #8b8b8b; font-size: 0.9em; margin-left: 6px; }"
+    ".tcode-opentabs list row { min-height: 22px; padding: 0 6px 0 20px; color: var(--tc-fg); }"
+    ".tcode-opentabs list row:hover { background: var(--tc-hover); }"
+    ".tcode-opentabs list row:selected { background: var(--tc-inactive-selection); }"
+    ".tcode-opentabs .dir { color: var(--tc-fg-faint); font-size: 0.9em; margin-left: 6px; }"
     ".tcode-opentabs label.temporary { font-style: italic; }"
     ".tcode-opentabs .close { min-height: 0; min-width: 0; padding: 0 4px; background: none; box-shadow: none;"
     "  opacity: 0; }"
     ".tcode-opentabs row:hover .close, .tcode-opentabs .close.modified { opacity: 1; }"
-    ".tcode-opentabs .close:hover { background: rgba(255, 255, 255, .12); }"
-    ".tcode-opentabs { border-bottom: 1px solid #2b2b2b; padding-bottom: 2px; }";
+    ".tcode-opentabs .close:hover { background: color-mix(in srgb, var(--tc-fg) 12%, transparent); }"
+    ".tcode-opentabs { border-bottom: 1px solid var(--tc-border); padding-bottom: 2px; }";
 
 /* Whether tab is still open (a click may come before the list follows a close). */
 static gboolean is_open(Tab *tab)

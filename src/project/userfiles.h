@@ -1,6 +1,6 @@
 /*
  * The files in ~/.config/t-code made to be edited by hand: settings.ini (the settings), theme.css
- * (the user's CSS over t-code's look) and styles/dark-modern.xml (the user's copy of the editor's
+ * (the user's CSS over t-code's look) and styles/dark-classic.xml (the user's copy of the editor's
  * colors). Each opens in an editor tab, made first when it is not there, and a change saved to it
  * (from t-code or any other program) applies at once.
  */
@@ -20,3 +20,6 @@ void open_user_theme(App *t);
 /* Opens the user's copy of the editor's colors in an editor tab; the first time it is copied from
  * t-code's. */
 void open_editor_colors(App *t);
+
+/* Moves the user's copy of the editor's colors from its name before 0.3 (dark-modern.xml), at start. */
+void move_old_colors(void);

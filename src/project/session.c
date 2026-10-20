@@ -130,6 +130,10 @@ void session_load_settings(App *t)
   t->settings.clang_tidy = get_bool(kf, "settings", "clang-tidy", FALSE);
   t->settings.format_on_save = get_bool(kf, "settings", "format-on-save", FALSE);
   t->settings.square = g_strcmp0(theme ? g_strstrip(theme) : NULL, "square") == 0;
+  g_free(t->settings.color_theme);
+  t->settings.color_theme = g_key_file_get_string(kf, "settings", "color-theme", NULL);
+  if (!t->settings.color_theme || !*g_strstrip(t->settings.color_theme))
+    g_set_str(&t->settings.color_theme, "dark-classic");
   t->plain = !get_bool(kf, "settings", "code-coloring", TRUE);
   g_free(t->settings.font);
   g_free(t->settings.files_font);
@@ -167,10 +171,15 @@ void session_save_settings(App *t)
   g_key_file_set_comment(kf, NULL, NULL,
                          " t-code's settings, also in the Settings window (Ctrl+,). A change saved here applies at"
                          " once.\n The look: theme.css next to this file (\"Preferences: Open Theme CSS\"), the"
-                         " editor's colors:\n styles/dark-modern.xml (\"Preferences: Open Editor Colors\").",
+                         " editor's colors:\n styles/dark-classic.xml (\"Preferences: Open Editor Colors\").",
                          NULL);
   g_key_file_set_string(kf, "settings", "theme", t->settings.square ? "square" : "rounded");
   explain(kf, "theme", " rounded: the panels as rounded cards on a darker frame; square: flat, lines between them");
+  g_key_file_set_string(kf, "settings", "color-theme",
+                        t->settings.color_theme ? t->settings.color_theme : "dark-classic");
+  explain(kf, "color-theme",
+          " dark-classic, light-classic, monokai, dracula, one-dark, github-dark, tokyo-night, catppuccin-mocha,\n"
+          " nord, gruvbox-dark, solarized-dark, solarized-light; and matrix, barbie, hotdog-stand");
   g_key_file_set_boolean(kf, "settings", "minimap", t->settings.minimap);
   explain(kf, "minimap", " A small picture of the file next to the scrollbar");
   g_key_file_set_boolean(kf, "settings", "sticky-scroll", t->settings.sticky_scroll);

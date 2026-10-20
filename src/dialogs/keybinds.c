@@ -41,11 +41,11 @@ static const KeyHelp editor_keys[] = {
 };
 
 static const char *const css =
-    ".tcode-keybinds { background: #1f1f1f; }"
-    ".tcode-keybinds .section { font-weight: bold; color: #e7e7e7; margin: 18px 0 6px; }"
-    ".tcode-keybinds .action { color: #cccccc; }"
-    ".tcode-keybinds .keys { font-family: 'Cascadia Code', monospace; font-size: smaller; color: #cccccc;"
-    "  background: #313131; border: 1px solid #454545; border-radius: 4px; padding: 1px 6px; }";
+    ".tcode-keybinds { background: var(--tc-panel); }"
+    ".tcode-keybinds .section { font-weight: bold; color: var(--tc-fg-bright); margin: 18px 0 6px; }"
+    ".tcode-keybinds .action { color: var(--tc-fg); }"
+    ".tcode-keybinds .keys { font-family: 'Cascadia Code', monospace; font-size: smaller; color: var(--tc-fg);"
+    "  background: var(--tc-input); border: 1px solid var(--tc-border-strong); border-radius: 4px; padding: 1px 6px; }";
 
 /* A heading, then one row per shortcut: what it does on the left, the keys on the right. */
 static void add_section(GtkGrid *grid, int *row, const char *title, const KeyHelp *keys, int n)

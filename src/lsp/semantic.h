@@ -15,3 +15,6 @@ void semantic_update(Tab *tab);
 
 /* Frees an editor's semantic state. NULL is fine. */
 void semantic_free(Semantic *semantic);
+
+/* The color theme changed: the semantic colors follow it. */
+void semantic_recolor(Tab *tab);

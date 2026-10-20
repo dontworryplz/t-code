@@ -961,13 +961,13 @@ static GtkWidget *build_side_chain(App *t, int side, GtkOrientation orient, int 
 static void create_docks(App *t)
 {
   static const char *const css =
-      ".tcode-dock-header { border-bottom: 1px solid #2b2b2b; padding: 0 2px; }"
+      ".tcode-dock-header { border-bottom: 1px solid var(--tc-border); padding: 0 2px; }"
       ".tcode-sidebar stackswitcher { padding: 4px 2px; border-spacing: 4px; }"
       ".tcode-sidebar stackswitcher button, .tcode-dock-close { min-height: 24px; min-width: 24px;"
-      "  padding: 2px 5px; border-radius: 7px; background: none; box-shadow: none; border: none; color: #9d9d9d; }"
-      ".tcode-sidebar stackswitcher button:checked { color: #e7e7e7; background: rgba(255, 255, 255, .10); }"
+      "  padding: 2px 5px; border-radius: 7px; background: none; box-shadow: none; border: none; color: var(--tc-fg-dim); }"
+      ".tcode-sidebar stackswitcher button:checked { color: var(--tc-fg-bright); background: color-mix(in srgb, var(--tc-fg) 10%, transparent); }"
       ".tcode-sidebar stackswitcher button:hover, .tcode-dock-close:hover {"
-      "  color: #e7e7e7; background: rgba(255, 255, 255, .05); }"
+      "  color: var(--tc-fg-bright); background: color-mix(in srgb, var(--tc-fg) 5%, transparent); }"
       ".tcode-scm-badge { font-size: 0.78em; font-weight: bold; }";
   GtkCssProvider *provider = gtk_css_provider_new();
   GtkDropTarget *ed_drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_MOVE | GDK_ACTION_COPY);

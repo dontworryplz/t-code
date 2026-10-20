@@ -41,8 +41,10 @@ build/test-searchmatch: tests/test_searchmatch.c src/search/searchmatch.c src/se
 	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags gio-2.0) -o $@ tests/test_searchmatch.c src/search/searchmatch.c \
 	  $(shell pkg-config --libs gio-2.0)
 
-build/test-search-panel: tests/test_search_panel.c src/search/search.c src/search/searchmatch.c $(APP_HDR) | build
+build/test-search-panel: tests/test_search_panel.c src/search/search.c src/search/searchmatch.c src/window/palette.c \
+                         $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_search_panel.c src/search/search.c src/search/searchmatch.c \
+	  src/window/palette.c \
 	  $(shell pkg-config --libs $(PKGS))
 
 build/test-linediff: tests/test_linediff.c src/git/linediff.c src/git/linediff.h | build
@@ -59,7 +61,7 @@ build/test-detect: tests/test_detect.c src/editor/detect.c src/editor/detect.h s
 # tests/editor_page.h, to reach their static functions. test-lsp runs itself with --fake-server as
 # the language server.
 PAGE_SRC := $(filter-out src/editor/tabs.c src/editor/editor.c src/editor/preview.c,$(wildcard src/editor/*.c)) \
-            $(wildcard src/lsp/*.c) src/git/linediff.c tests/editor_page.h
+            $(wildcard src/lsp/*.c) src/git/linediff.c src/window/palette.c tests/editor_page.h
 build/test-editing: tests/test_editing.c $(PAGE_SRC) $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_editing.c $(shell pkg-config --libs $(PKGS))
 
@@ -75,8 +77,9 @@ build/test-fileops: tests/test_fileops.c $(FILES_GIO) $(FILES_GIO:.c=.h) | build
 	  $(shell pkg-config --libs gio-2.0)
 
 # The Files panel; tests/test_files.c includes src/files/files.c for its static functions.
-build/test-files: tests/test_files.c $(wildcard src/files/*.c) $(APP_HDR) | build
-	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_files.c $(FILES_GIO) $(shell pkg-config --libs $(PKGS))
+build/test-files: tests/test_files.c $(wildcard src/files/*.c) src/window/palette.c $(APP_HDR) | build
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_files.c $(FILES_GIO) src/window/palette.c \
+	  $(shell pkg-config --libs $(PKGS))
 
 # A whole window (every module but main.c): how tabs open and close.
 build/test-window: tests/test_window.c $(APP_SRC) $(APP_HDR) build/license.h | build
@@ -127,7 +130,7 @@ test-asan: | build
 # System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).
 install: build/t-code
 	install -Dm755 build/t-code $(DESTDIR)$(BINDIR)/t-code
-	install -Dm644 styles/dark-modern.xml $(DESTDIR)$(DATADIR)/t-code/styles/dark-modern.xml
+	install -Dm644 styles/dark-classic.xml $(DESTDIR)$(DATADIR)/t-code/styles/dark-classic.xml
 	install -Dm644 desktop/io.github.tcode.svg \
 	  $(DESTDIR)$(DATADIR)/icons/hicolor/scalable/apps/io.github.tcode.svg
 	install -d $(DESTDIR)$(DATADIR)/applications

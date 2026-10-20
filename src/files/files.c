@@ -17,6 +17,7 @@
 #include "files/opentabs.h"
 #include "window/secondwindow.h"
 #include "window/terminal.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -155,6 +156,20 @@ static void set_colored(GtkWidget *label, const char *text, const char *color)
   g_free(markup);
 }
 
+/* A git state's color in the color theme (gitmarks.c has VS Code's Dark Classic ones). */
+static const char *git_color(char state)
+{
+  switch (state) {
+    case 'M': return palette_hex(PAL_GIT_MODIFIED);
+    case 'A': return palette_hex(PAL_GIT_ADDED);
+    case 'U': return palette_hex(PAL_GIT_UNTRACKED);
+    case 'D': return palette_hex(PAL_GIT_DELETED);
+    case 'C': return palette_hex(PAL_GIT_CONFLICT);
+    case 'I': return palette_hex(PAL_GIT_IGNORED);
+    default: return palette_hex(PAL_FG);
+  }
+}
+
 /* Icon, name in its git color (dimmed when cut) and the git letter of a file. */
 static void paint(FileRow *r)
 {
@@ -165,11 +180,11 @@ static void paint(FileRow *r)
   const FileIcon *icon = file_icon(name, r->dir, open);
   const char *badge = r->dir ? NULL : git_marks_badge(state);
 
-  set_colored(r->icon, icon->glyph, cut ? "#808080" : icon->color);
-  set_colored(r->name, name, cut ? "#808080" : git_marks_color(state));
+  set_colored(r->icon, icon->glyph, cut ? palette_hex(PAL_FG_FAINT) : icon->color);
+  set_colored(r->name, name, cut ? palette_hex(PAL_FG_FAINT) : git_color(state));
   gtk_widget_set_visible(r->badge, badge != NULL);
   if (badge)
-    set_colored(r->badge, badge, git_marks_color(state));
+    set_colored(r->badge, badge, git_color(state));
 }
 
 static void paint_all(void)
@@ -945,19 +960,20 @@ static void on_space_click(GtkGestureClick *gesture, int n_press G_GNUC_UNUSED, 
     show_menu(NULL, at.x, at.y);
 }
 
-static const char *const css = ".tcode-files { background: #181818; }"
-                               ".tcode-files .title { font-weight: bold; color: #cccccc; padding: 4px 12px 4px 20px; }"
-                               ".tcode-files listview { background: transparent; }"
-                               ".tcode-files listview row { min-height: 22px; padding: 0 8px 0 4px; border-radius: 0; }"
-                               ".tcode-files listview row:hover { background: #2a2d2e; }"
-                               ".tcode-files listview row:selected { background: #37373d; }"
-                               ".tcode-files listview:focus-within row:selected { background: #04395e; }"
-                               ".tcode-files treeexpander indent { -gtk-icon-size: 8px; }"
-                               ".tcode-files treeexpander expander { -gtk-icon-size: 12px; color: #c5c5c5; }"
-                               ".tcode-files treeexpander:drop(active) { background: #383838; box-shadow: none; }"
-                               ".tcode-files .badge { margin-right: 4px; }"
-                               ".tcode-files .message { padding: 4px 12px; color: #cccccc; }"
-                               ".tcode-files .message.error { color: #f14c4c; }";
+static const char *const css =
+    ".tcode-files { background: var(--tc-frame); }"
+    ".tcode-files .title { font-weight: bold; color: var(--tc-fg); padding: 4px 12px 4px 20px; }"
+    ".tcode-files listview { background: transparent; }"
+    ".tcode-files listview row { min-height: 22px; padding: 0 8px 0 4px; border-radius: 0; }"
+    ".tcode-files listview row:hover { background: var(--tc-hover); }"
+    ".tcode-files listview row:selected { background: var(--tc-inactive-selection); }"
+    ".tcode-files listview:focus-within row:selected { background: var(--tc-selection); }"
+    ".tcode-files treeexpander indent { -gtk-icon-size: 8px; }"
+    ".tcode-files treeexpander expander { -gtk-icon-size: 12px; color: var(--tc-fg); }"
+    ".tcode-files treeexpander:drop(active) { background: var(--tc-hover); box-shadow: none; }"
+    ".tcode-files .badge { margin-right: 4px; }"
+    ".tcode-files .message { padding: 4px 12px; color: var(--tc-fg); }"
+    ".tcode-files .message.error { color: var(--tc-error); }";
 
 static GtkPopover *build_ask(void)
 {
@@ -1103,6 +1119,11 @@ void files_apply_font(App *t)
   gtk_css_provider_load_from_string(files.font_css, css_text);
   g_free(css_text);
   pango_font_description_free(desc);
+}
+
+void files_restyle(App *t G_GNUC_UNUSED)
+{
+  paint_all();
 }
 
 void files_stop(App *t G_GNUC_UNUSED)

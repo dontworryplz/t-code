@@ -26,6 +26,8 @@
 #include "window/secondwindow.h"
 #include "window/statusbar.h"
 #include "window/window.h"
+#include "window/palette.h"
+#include "window/theme.h"
 
 #include <stdlib.h>
 
@@ -250,6 +252,7 @@ static const Command commands[] = {
   { "Reset Zoom", "<Control>0|<Control>KP_0", "Ctrl+0", zoom_reset, FALSE, TRUE },
   { "Open Folder…", "<Control><Shift>o", "Ctrl+Shift+O", choose_folder, FALSE, FALSE },
   { "Settings…", "<Control>comma", "Ctrl+,", show_settings, FALSE, FALSE },
+  { "Preferences: Color Theme…", NULL, NULL, color_theme_pick, FALSE, FALSE },
   { "Preferences: Open Settings File", NULL, NULL, open_settings_file, FALSE, FALSE },
   { "Preferences: Open Theme CSS", NULL, NULL, open_user_theme, FALSE, FALSE },
   { "Preferences: Open Editor Colors", NULL, NULL, open_editor_colors, FALSE, FALSE },

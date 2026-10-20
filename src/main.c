@@ -196,5 +196,6 @@ int main(int argc, char **argv)
   g_free(t.project.root);
   g_free(t.settings.font);
   g_free(t.settings.files_font);
+  g_free(t.settings.color_theme);
   return status;
 }

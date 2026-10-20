@@ -13,6 +13,7 @@
 #include "editor/editorview.h"
 #include "editor/tabs.h"
 #include "window/terminal.h"
+#include "window/palette.h"
 
 #include <md4c.h>
 #include <stdlib.h>
@@ -82,12 +83,13 @@ typedef struct {
   gboolean html_block; /* inside an HTML block: its lines flow like a paragraph's */
 } Render;
 
-static const char *const css = ".tcode-preview, .tcode-preview text { background: #1f1f1f; color: #cccccc; }"
-                               ".tcode-preview-table { border: 1px solid #3c3c3c; }"
-                               ".tcode-preview-table label { padding: 6px 10px; color: #cccccc; }"
-                               ".tcode-preview-table label.head { background: #2b2b2b; color: #ffffff; }"
-                               ".tcode-preview-table label.odd { background: #242424; }"
-                               ".tcode-preview-table label link { color: #4daafc; }";
+static const char *const css =
+    ".tcode-preview, .tcode-preview text { background: var(--tc-panel); color: var(--tc-fg); }"
+    ".tcode-preview-table { border: 1px solid var(--tc-border-strong); }"
+    ".tcode-preview-table label { padding: 6px 10px; color: var(--tc-fg); }"
+    ".tcode-preview-table label.head { background: var(--tc-border); color: var(--tc-fg-strong); }"
+    ".tcode-preview-table label.odd { background: var(--tc-hover); }"
+    ".tcode-preview-table label link { color: var(--tc-link); }";
 
 gboolean is_markdown(const char *path)
 {
@@ -102,6 +104,39 @@ gboolean is_markdown(const char *path)
 
 /* Tags -------------------------------------------------------------------------------------- */
 
+/* The tags' colors, from the color theme (again when it changes). */
+static void color_tags(GtkTextBuffer *b)
+{
+  static const struct {
+    const char *tag, *property;
+    PalColor color;
+  } colors[] = {
+    { "base", "foreground", PAL_FG },
+    { "quote", "foreground", PAL_FG_DIM },
+    { "quote", "paragraph-background", PAL_RAISED },
+    { "h1", "foreground", PAL_FG_STRONG },
+    { "h2", "foreground", PAL_FG_STRONG },
+    { "h3", "foreground", PAL_FG_BRIGHT },
+    { "h4", "foreground", PAL_FG_BRIGHT },
+    { "h5", "foreground", PAL_FG_BRIGHT },
+    { "h6", "foreground", PAL_FG_DIM },
+    { "bold", "foreground", PAL_FG_STRONG },
+    { "code", "foreground", PAL_FG_STRONG },
+    { "pre", "paragraph-background", PAL_FRAME },
+    { "hr", "paragraph-background", PAL_BORDER_STRONG },
+    { "dim", "foreground", PAL_FG_DIM },
+    { "error", "foreground", PAL_ERROR },
+    { "link", "foreground", PAL_LINK },
+  };
+  GtkTextTagTable *table = gtk_text_buffer_get_tag_table(b);
+
+  for (size_t i = 0; i < G_N_ELEMENTS(colors); i++) {
+    GtkTextTag *tag = gtk_text_tag_table_lookup(table, colors[i].tag);
+    if (tag)
+      g_object_set(tag, colors[i].property, palette_hex(colors[i].color), NULL);
+  }
+}
+
 /* The tags every rendering uses, made with the buffer. Later tags win where they set the same
  * thing, so the order matters: the base first, deeper indents after shallower ones. */
 static void create_tags(GtkTextBuffer *b, const char *mono)
@@ -109,7 +144,7 @@ static void create_tags(GtkTextBuffer *b, const char *mono)
   static const double heading_scale[] = { 1.85, 1.45, 1.25, 1.1, 1.0, 0.9 };
   char name[16];
 
-  gtk_text_buffer_create_tag(b, "base", "foreground", "#cccccc", NULL);
+  gtk_text_buffer_create_tag(b, "base", NULL);
   gtk_text_buffer_create_tag(b, "indent0", "indent", 0, NULL);
   for (int i = 1; i <= MAX_LEVEL; i++) {
     g_snprintf(name, sizeof name, "indent%d", i);
@@ -122,32 +157,25 @@ static void create_tags(GtkTextBuffer *b, const char *mono)
   gtk_text_buffer_create_tag(b, "tight", "pixels-below-lines", 3, NULL);
   gtk_text_buffer_create_tag(b, "gap", "pixels-below-lines", 12, NULL);
   gtk_text_buffer_create_tag(b, "spacer", "size-points", 4.0, NULL);
-  gtk_text_buffer_create_tag(b, "quote", "foreground", "#b4b4b4", "paragraph-background", "#252525", "style",
-                             PANGO_STYLE_ITALIC, NULL);
+  gtk_text_buffer_create_tag(b, "quote", "style", PANGO_STYLE_ITALIC, NULL);
   for (int i = 0; i < 6; i++) {
     g_snprintf(name, sizeof name, "h%d", i + 1);
     gtk_text_buffer_create_tag(b, name, "weight", PANGO_WEIGHT_BOLD, "scale", heading_scale[i], "pixels-above-lines",
                                i < 2 ? 24 : 16, "pixels-below-lines", i < 2 ? 12 : 8, NULL);
   }
-  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h1"), "foreground", "#ffffff", NULL);
-  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h2"), "foreground", "#ffffff", NULL);
-  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h3"), "foreground", "#f0f0f0", NULL);
-  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h4"), "foreground", "#e6edf3", NULL);
-  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h5"), "foreground", "#e0e0e0", NULL);
-  g_object_set(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "h6"), "foreground", "#9d9d9d", NULL);
-  gtk_text_buffer_create_tag(b, "bold", "weight", PANGO_WEIGHT_BOLD, "foreground", "#ffffff", NULL);
+  gtk_text_buffer_create_tag(b, "bold", "weight", PANGO_WEIGHT_BOLD, NULL);
   gtk_text_buffer_create_tag(b, "italic", "style", PANGO_STYLE_ITALIC, NULL);
   gtk_text_buffer_create_tag(b, "strike", "strikethrough", TRUE, NULL);
   gtk_text_buffer_create_tag(b, "underline", "underline", PANGO_UNDERLINE_SINGLE, NULL);
-  gtk_text_buffer_create_tag(b, "code", "family", mono, "scale", 0.90, "foreground", "#ffffff", NULL);
-  gtk_text_buffer_create_tag(b, "pre", "family", mono, "scale", 0.92, "paragraph-background", "#181818", "wrap-mode",
-                             GTK_WRAP_NONE, NULL);
+  gtk_text_buffer_create_tag(b, "code", "family", mono, "scale", 0.90, NULL);
+  gtk_text_buffer_create_tag(b, "pre", "family", mono, "scale", 0.92, "wrap-mode", GTK_WRAP_NONE, NULL);
   gtk_text_buffer_create_tag(b, "pre-top", "pixels-above-lines", 12, NULL);
   gtk_text_buffer_create_tag(b, "pre-bottom", "pixels-below-lines", 12, NULL);
-  gtk_text_buffer_create_tag(b, "hr", "size-points", 1.0, "paragraph-background", "#474747", NULL);
-  gtk_text_buffer_create_tag(b, "dim", "foreground", "#9d9d9d", "style", PANGO_STYLE_ITALIC, NULL);
-  gtk_text_buffer_create_tag(b, "error", "foreground", "#f14c4c", NULL);
-  gtk_text_buffer_create_tag(b, "link", "foreground", "#4daafc", "underline", PANGO_UNDERLINE_SINGLE, NULL);
+  gtk_text_buffer_create_tag(b, "hr", "size-points", 1.0, NULL);
+  gtk_text_buffer_create_tag(b, "dim", "style", PANGO_STYLE_ITALIC, NULL);
+  gtk_text_buffer_create_tag(b, "error", NULL);
+  gtk_text_buffer_create_tag(b, "link", "underline", PANGO_UNDERLINE_SINGLE, NULL);
+  color_tags(b);
 }
 
 /* Appending ---------------------------------------------------------------------------------- */
@@ -415,8 +443,9 @@ static void tcode_preview_view_snapshot_layer(GtkTextView *view, GtkTextViewLaye
     gtk_text_view_get_line_at_y(view, &line_iter, visible.y + visible.height, NULL);
     int last_line = gtk_text_iter_get_line(&line_iter);
 
-    static const GdkRGBA bg = { 0.235f, 0.235f, 0.235f, 1.0f };   /* #3c3c3c */
-    static const GdkRGBA border = { 0.36f, 0.36f, 0.36f, 0.85f }; /* subtle outline #5c5c5c */
+    GdkRGBA bg = *palette_rgba(PAL_BORDER_STRONG), border = *palette_rgba(PAL_BORDER_STRONG);
+    border.alpha = 0.85f;
+    bg.alpha = 0.75f;
 
     for (guint i = 0; i < p->code_spans->len; i++) {
       const CodeSpan *span = &g_array_index(p->code_spans, CodeSpan, i);
@@ -802,7 +831,9 @@ static void cell_span(Render *r, MD_SPANTYPE type, void *detail)
     case MD_SPAN_CODE:
     case MD_SPAN_LATEXMATH:
     case MD_SPAN_LATEXMATH_DISPLAY:
-      open = "<span font_family=\"monospace\" background=\"#3c3c3c\" foreground=\"#ffffff\">";
+      link = g_strdup_printf("<span font_family=\"monospace\" background=\"%s\" foreground=\"%s\">",
+                             palette_hex(PAL_BORDER_STRONG), palette_hex(PAL_FG_STRONG));
+      open = link;
       close = "</span>";
       break;
     case MD_SPAN_A: {
@@ -813,7 +844,10 @@ static void cell_span(Render *r, MD_SPANTYPE type, void *detail)
       open = link, close = "</a>";
       break;
     }
-    case MD_SPAN_IMG: open = "<span foreground=\"#9d9d9d\">", close = "</span>"; break; /* its alt text */
+    case MD_SPAN_IMG: /* its alt text */
+      link = g_strdup_printf("<span foreground=\"%s\">", palette_hex(PAL_FG_DIM));
+      open = link, close = "</span>";
+      break;
     default: break;
   }
   g_string_append(r->markup, open);
@@ -1366,6 +1400,14 @@ void preview_free(Preview *p)
   g_ptr_array_free(p->tables, TRUE);
   g_ptr_array_free(p->pictures, TRUE);
   g_free(p);
+}
+
+void preview_restyle(Tab *tab)
+{
+  if (!tab->preview)
+    return;
+  color_tags(tab->preview->buffer);
+  reload(tab->preview); /* code blocks colored with the new scheme */
 }
 
 void preview_set_zoom(Tab *tab, double scale)

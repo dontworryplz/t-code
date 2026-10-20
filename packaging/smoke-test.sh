@@ -17,7 +17,7 @@ share=/usr/share/t-code
 
 echo "Installed files"
 check "t-code --version prints 't-code $VERSION'" test "$(t-code --version)" = "t-code $VERSION"
-check "the editor's style scheme in $share/styles" test -f "$share/styles/dark-modern.xml"
+check "the editor's style scheme in $share/styles" test -f "$share/styles/dark-classic.xml"
 check "desktop entry is valid" desktop-file-validate /usr/share/applications/io.github.tcode.desktop
 check "icon installed" test -f /usr/share/icons/hicolor/scalable/apps/io.github.tcode.svg
 for cmd in clangd git; do

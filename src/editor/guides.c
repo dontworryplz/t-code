@@ -10,6 +10,7 @@
 #include "editor/editorview.h"
 #include "editor/folding.h"
 #include "lsp/diagnostics.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -31,10 +32,8 @@ struct _TcodeView {
 G_DECLARE_FINAL_TYPE(TcodeView, tcode_view, TCODE, VIEW, GtkSourceView)
 G_DEFINE_FINAL_TYPE(TcodeView, tcode_view, GTK_SOURCE_TYPE_VIEW)
 
-/* Dark Modern: editorIndentGuide.background1, .activeBackground1 (without code coloring) and
+/* Dark Classic: editorIndentGuide.background1, .activeBackground1 (without code coloring) and
  * editorBracketHighlight.foreground1..3, the bracket pair colors by depth. */
-static const GdkRGBA guide_ink = { 0.25, 0.25, 0.25, 1 }, active_ink = { 0.44, 0.44, 0.44, 1 };
-static const GdkRGBA pair_inks[3] = { { 1.0, 0.84, 0.0, 1 }, { 0.85, 0.44, 0.84, 1 }, { 0.09, 0.62, 1.0, 1 } };
 
 /* Brackets ----------------------------------------------------------------------------------- */
 
@@ -219,9 +218,18 @@ static void draw_gap(GtkSnapshot *snapshot, const GdkRGBA *fill, const GdkRGBA *
  * the old side black where lines were added. */
 static void draw_diff_gaps(TcodeView *self, GtkSnapshot *snapshot)
 {
-  static const GdkRGBA deleted_fill = { 0.90f, 0.20f, 0.18f, 0.22f }, deleted_edge = { 0.97f, 0.32f, 0.29f, 0.45f };
-  static const GdkRGBA added_fill = { 0, 0, 0, 0.45f }, added_edge = { 0, 0, 0, 0.70f };
-  static const GdkRGBA inserted_line = { 0.61f, 0.73f, 0.33f, 0.13f }, removed_line = { 1, 0, 0, 0.13f };
+  GdkRGBA deleted_fill = *palette_rgba(PAL_DIFF_DELETED), deleted_edge = deleted_fill;
+  GdkRGBA added_fill = { 0, 0, 0, 0.45f }, added_edge = { 0, 0, 0, 0.70f };
+  GdkRGBA inserted_line = *palette_rgba(PAL_DIFF_ADDED), removed_line = *palette_rgba(PAL_DIFF_DELETED);
+
+  deleted_fill.alpha = 0.22f;
+  deleted_edge.alpha = 0.45f;
+  inserted_line.alpha = 0.13f;
+  removed_line.alpha = 0.13f;
+  if (palette_light()) { /* black gaps would be holes in a light editor */
+    added_fill = *palette_rgba(PAL_GUIDE);
+    added_edge = *palette_rgba(PAL_GUIDE_ACTIVE);
+  }
   GtkTextView *view = GTK_TEXT_VIEW(self);
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(self->tab->buffer);
   GdkRectangle visible;
@@ -299,12 +307,12 @@ static void draw_guides(TcodeView *self, GtkSnapshot *snapshot)
     gtk_text_view_get_line_yrange(view, &iter, &y, &height);
     int ty = y + above_px, th = MAX(height - above_px - below_px, 0);
     for (int k = 0; k < count; k++)
-      draw_guide(snapshot, &guide_ink, left + k * ts * cw, ty, th);
+      draw_guide(snapshot, palette_rgba(PAL_GUIDE), left + k * ts * cw, ty, th);
   }
   if (cursor_pair(self, &open, &close)) {
     int column = MIN(indent_of(buffer, open, ts) < 0 ? G_MAXINT : indent_of(buffer, open, ts),
                      indent_of(buffer, close, ts) < 0 ? G_MAXINT : indent_of(buffer, close, ts));
-    const GdkRGBA *ink = self->tab->app->plain ? &active_ink : &pair_inks[column / ts % 3];
+    const GdkRGBA *ink = palette_rgba(self->tab->app->plain ? PAL_GUIDE_ACTIVE : PAL_PAIR1 + column / ts % 3);
     for (int line = MAX(open + 1, first); column != G_MAXINT && line < close && line <= last; line++) {
       int y, height, above_px = 0, below_px = 0, indent = indent_of(buffer, line, ts);
       if (indent >= 0 && indent <= column)

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "editor/detect.c"
+#include "window/palette.c"
 #include "editor/blocks.c"
 #include "editor/diffgutter.c"
 #include "editor/folding.c"

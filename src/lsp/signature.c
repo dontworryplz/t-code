@@ -7,6 +7,7 @@
 
 #include "editor/editorview.h"
 #include "lsp/client.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -36,9 +37,9 @@ struct Asking {
 };
 
 static const char *const signature_css =
-    ".tcode-signature { background: #252526; border: 1px solid #454545; border-radius: 4px;"
+    ".tcode-signature { background: var(--tc-raised); border: 1px solid var(--tc-border-strong); border-radius: 4px;"
     "  padding: 4px 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, .36); }"
-    ".tcode-signature label { font-family: 'Cascadia Code', monospace; font-size: 0.95em; color: #cccccc; }";
+    ".tcode-signature label { font-family: 'Cascadia Code', monospace; font-size: 0.95em; color: var(--tc-fg); }";
 
 static void hide_hint(SignatureHelp *h)
 {
@@ -96,7 +97,8 @@ static void append_note(GString *markup, const char *text, gboolean small)
   if (!text || !*text)
     return;
   escaped = g_markup_escape_text(text, -1);
-  g_string_append_printf(markup, "\n<span foreground=\"#9d9d9d\"%s>%s</span>", small ? " size=\"small\"" : "", escaped);
+  g_string_append_printf(markup, "\n<span foreground=\"%s\"%s>%s</span>", palette_hex(PAL_FG_DIM),
+                         small ? " size=\"small\"" : "", escaped);
   g_free(escaped);
 }
 
@@ -122,7 +124,8 @@ static char *hint_markup(JsonNode *result)
     return NULL;
   markup = g_string_new(NULL);
   if (count > 1)
-    g_string_append_printf(markup, "<span foreground=\"#9d9d9d\">%" G_GINT64_FORMAT "/%u</span>  ", active + 1, count);
+    g_string_append_printf(markup, "<span foreground=\"%s\">%" G_GINT64_FORMAT "/%u</span>  ", palette_hex(PAL_FG_DIM),
+                           active + 1, count);
   index = json_int_at(signature, "activeParameter", json_int_at(result, "activeParameter", 0));
   path = g_strdup_printf("parameters.%" G_GINT64_FORMAT, index);
   parameter = json_at(signature, path);
@@ -130,7 +133,8 @@ static char *hint_markup(JsonNode *result)
   if (parameter && parameter_span(label, parameter, &start, &end)) {
     char *before = g_markup_escape_text(label, start), *inside = g_markup_escape_text(label + start, end - start);
     char *after = g_markup_escape_text(label + end, -1);
-    g_string_append_printf(markup, "%s<b><span foreground=\"#2aaaff\">%s</span></b>%s", before, inside, after);
+    g_string_append_printf(markup, "%s<b><span foreground=\"%s\">%s</span></b>%s", before, palette_hex(PAL_INFO),
+                           inside, after);
     g_free(after);
     g_free(inside);
     g_free(before);

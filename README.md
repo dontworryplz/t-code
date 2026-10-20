@@ -1,6 +1,6 @@
 # <img src="desktop/io.github.tcode.svg" alt="" width="48" align="top"> t-code
 
-A light C/C++ IDE for Linux in one GTK4 window, with VS Code's Dark Modern look.
+A light C/C++ IDE for Linux in one GTK4 window, with VS Code's dark look (Dark Classic) and other color themes.
 
 > **Since 0.2 the editor is GtkSourceView.** The editor tabs are no longer terminals running
 > [micro](https://micro-editor.github.io): they are [GtkSourceView 5](https://gitlab.gnome.org/GNOME/gtksourceview)
@@ -39,7 +39,7 @@ the mouse. On top of that, like VS Code:
   the project's `.clang-format`).
 - **Colors by meaning**: clangd tells functions (yellow), types (teal), macros (blue), constants and
   enum members (bright blue) and variables (light blue) apart; GtkSourceView colors keywords,
-  strings, comments and the rest from VS Code's own theme (`styles/dark-modern.xml`). `.h` files
+  strings, comments and the rest from VS Code's own theme (`styles/dark-classic.xml`). `.h` files
   open as C++ when they contain C++.
 - Find and replace (`Ctrl+F`, `Ctrl+H`; case, whole word, regular expressions), go to line
   (`Ctrl+G`), comment lines (`Ctrl+/`), duplicate (`Ctrl+D`), move (`Alt+↑` / `Alt+↓`) and delete
@@ -372,7 +372,7 @@ src/                 t-code, the window (src/app.h: the shared types and a map o
   files/             the Files panel (files.c): a folder's entries read and watched (folder.c), file
                      operations (fileops.c), git colors (gitmarks.c), file icons (icons.c)
   ipc/               requests from scripts and tools over $TCODE_SOCKET (socket.c)
-styles/              the editor's colors: VS Code Dark Modern as a GtkSourceView style scheme
+styles/              the editor's colors: Dark Classic (VS Code's dark) as a GtkSourceView style scheme
 tests/               make test: editing and the find bar, the language server client (with a fake
                      server), detect.c and indentconf.c, linediff.c, searchmatch.c, the Files panel
                      and its GIO half, the Search panel, Source Control, tabs in a whole window and

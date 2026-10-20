@@ -8,6 +8,9 @@
 
 #include "app.h"
 
+/* The color theme changed: the rows are painted again. */
+void files_restyle(App *t);
+
 /* Builds the panel for t->project.root (t->files). */
 GtkWidget *files_panel(App *t);
 

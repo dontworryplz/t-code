@@ -17,3 +17,6 @@ void occurrences_lines(Tab *tab, GArray *lines);
 
 /* Stops following the buffer and frees the state (NULL is fine). */
 void occurrences_free(Occurrences *o);
+
+/* The highlight in the color theme's colors (again when it changes). */
+void occurrences_recolor(Tab *tab);

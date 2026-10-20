@@ -11,6 +11,7 @@
 
 #include "editor/editor.h"
 #include "search/searchmatch.h"
+#include "window/palette.h"
 
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -44,32 +45,32 @@ static struct {
 } search;
 
 static const char *const css =
-    ".tcode-search { background: #1f1f1f; }"
-    ".tcode-search .field { background: #313131; border: 1px solid #3c3c3c; border-radius: 6px; margin: 8px 10px 0; }"
-    ".tcode-search .field:focus-within { border-color: #0078d4; }"
-    ".tcode-search .field entry { background: none; border: none; box-shadow: none; outline: none; color: #cccccc;"
+    ".tcode-search { background: var(--tc-panel); }"
+    ".tcode-search .field { background: var(--tc-input); border: 1px solid var(--tc-border-strong); border-radius: 6px; margin: 8px 10px 0; }"
+    ".tcode-search .field:focus-within { border-color: var(--tc-accent); }"
+    ".tcode-search .field entry { background: none; border: none; box-shadow: none; outline: none; color: var(--tc-fg);"
     "  min-height: 24px; padding: 0 6px; }"
     ".tcode-search .field button.option { min-height: 0; min-width: 0; padding: 0 4px; margin: 3px 2px;"
-    "  border-radius: 4px; border: 1px solid transparent; background: none; box-shadow: none; color: #cccccc;"
+    "  border-radius: 4px; border: 1px solid transparent; background: none; box-shadow: none; color: var(--tc-fg);"
     "  font-family: 'Cascadia Code', monospace; font-size: 0.85em; }"
-    ".tcode-search .field button.option:hover { background: rgba(90, 93, 94, .5); }"
-    ".tcode-search .field button.option:checked { background: rgba(36, 137, 219, .51); border-color: #2488db;"
-    "  color: #ffffff; }"
-    ".tcode-search .label { color: #9d9d9d; font-size: 0.8em; margin: 6px 10px 0; }"
+    ".tcode-search .field button.option:hover { background: color-mix(in srgb, var(--tc-fg) 25%, transparent); }"
+    ".tcode-search .field button.option:checked { background: color-mix(in srgb, var(--tc-accent) 51%, transparent); border-color: var(--tc-accent);"
+    "  color: var(--tc-fg-strong); }"
+    ".tcode-search .label { color: var(--tc-fg-dim); font-size: 0.8em; margin: 6px 10px 0; }"
     ".tcode-search button.details { min-height: 0; min-width: 0; padding: 0 6px; margin: 2px 10px 0;"
-    "  background: none; box-shadow: none; color: #cccccc; }"
-    ".tcode-search button.details:checked { color: #ffffff; background: rgba(255, 255, 255, .08); }"
-    ".tcode-search .summary { color: #9d9d9d; font-size: 0.85em; margin: 8px 6px 4px 10px; }"
-    ".tcode-search .summary.error { color: #f14c4c; }"
+    "  background: none; box-shadow: none; color: var(--tc-fg); }"
+    ".tcode-search button.details:checked { color: var(--tc-fg-strong); background: color-mix(in srgb, var(--tc-fg) 8%, transparent); }"
+    ".tcode-search .summary { color: var(--tc-fg-dim); font-size: 0.85em; margin: 8px 6px 4px 10px; }"
+    ".tcode-search .summary.error { color: var(--tc-error); }"
     ".tcode-search button.tool { min-height: 0; min-width: 0; padding: 0 5px; margin-top: 4px; }"
     ".tcode-search list { background: transparent; }"
-    ".tcode-search row { padding: 0 6px 0 28px; margin: 0 4px; min-height: 22px; border-radius: 6px; color: #cccccc; }"
+    ".tcode-search row { padding: 0 6px 0 28px; margin: 0 4px; min-height: 22px; border-radius: 6px; color: var(--tc-fg); }"
     ".tcode-search row.heading { padding-left: 6px; }"
-    ".tcode-search row:hover { background: #2a2d2e; }"
-    ".tcode-search row:selected { background: #04395e; }"
-    ".tcode-search row .dim { color: #8b8b8b; font-size: 0.9em; }"
-    ".tcode-search row .chevron { color: #cccccc; min-width: 14px; }"
-    ".tcode-search row .badge { background: #616161; color: #f8f8f8; border-radius: 9px; padding: 0 6px;"
+    ".tcode-search row:hover { background: var(--tc-hover); }"
+    ".tcode-search row:selected { background: var(--tc-selection); }"
+    ".tcode-search row .dim { color: var(--tc-fg-faint); font-size: 0.9em; }"
+    ".tcode-search row .chevron { color: var(--tc-fg); min-width: 14px; }"
+    ".tcode-search row .badge { background: var(--tc-border-strong); color: var(--tc-fg-strong); border-radius: 9px; padding: 0 6px;"
     "  font-size: 0.8em; }";
 
 /* Searching ---------------------------------------------------------------------------------- */
@@ -206,7 +207,8 @@ static void add_hit(const SearchHit *hit, gpointer data)
   before = search_snippet(hit->text, hit->start, hit->end, &match, &after);
   if (hit->start == hit->end)
     g_strchug(after);
-  markup = g_markup_printf_escaped("%s<span background=\"#EA5C00\" bgalpha=\"40%%\">%s</span>%s", before, match, after);
+  markup = g_markup_printf_escaped("%s<span background=\"%s\" bgalpha=\"40%%\">%s</span>%s", before,
+                                   palette_hex(PAL_MATCH), match, after);
   label = gtk_label_new(NULL);
   gtk_label_set_markup(GTK_LABEL(label), markup);
   gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);

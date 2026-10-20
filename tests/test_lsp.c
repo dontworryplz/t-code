@@ -726,11 +726,16 @@ static void test_signature_markup(void)
   char *markup = hint_markup(offsets);
 
   g_assert_nonnull(strstr(markup, "2/2"));
-  g_assert_nonnull(strstr(markup, "f(int a, <b><span foreground=\"#2aaaff\">char *b</span></b>) -&gt; int"));
+  char *want = g_strdup_printf("f(int a, <b><span foreground=\"%s\">char *b</span></b>) -&gt; int",
+                               palette_hex(PAL_INFO)); /* the theme's */
+  g_assert_nonnull(strstr(markup, want));
+  g_free(want);
   g_assert_nonnull(strstr(markup, "Does f."));
   g_free(markup);
   markup = hint_markup(names);
-  g_assert_nonnull(strstr(markup, "g(<b><span foreground=\"#2aaaff\">x</span></b>, y)"));
+  want = g_strdup_printf("g(<b><span foreground=\"%s\">x</span></b>, y)", palette_hex(PAL_INFO));
+  g_assert_nonnull(strstr(markup, want));
+  g_free(want);
   g_free(markup);
   g_assert_null(hint_markup(none));
   json_node_unref(none);
@@ -840,11 +845,11 @@ static void test_semantic_colors(void)
   g_assert_true(server_agrees(tab));
   apply(tab, tokens);
   gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 4); /* f */
-  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-#DCDCAA")));
+  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-function")));
   gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 11); /* v */
-  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-#9CDCFE")));
+  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-variable")));
   gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 18); /* c, readonly */
-  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-#4FC1FF")));
+  g_assert_true(gtk_text_iter_has_tag(&at, gtk_text_tag_table_lookup(table, "semantic-constant")));
   gtk_text_buffer_get_iter_at_offset(GTK_TEXT_BUFFER(tab->buffer), &at, 22); /* the comment */
   GSList *tags = gtk_text_iter_get_tags(&at);
   for (GSList *each = tags; each; each = each->next) {
@@ -896,22 +901,22 @@ static void test_semantic_delta(void)
   apply(tab, full);
   g_assert_cmpstr(s->result_id, ==, "1");
   g_assert_cmpuint(s->data->len, ==, 15);
-  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "#9CDCFE"); /* v, a variable */
+  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "variable"); /* v, a variable */
 
   /* v becomes a function: the server sends the second token's type only. */
   delta = json_of("{\"resultId\":\"2\",\"edits\":[{\"start\":8,\"deleteCount\":1,\"data\":[0]}]}");
   apply_delta(s, delta, TRUE);
   g_assert_cmpstr(s->result_id, ==, "2");
-  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "#DCDCAA");
-  g_assert_cmpstr(semantic_color_at(tab, 4), ==, "#DCDCAA");  /* f: unchanged */
-  g_assert_cmpstr(semantic_color_at(tab, 18), ==, "#9CDCFE"); /* w: unchanged */
+  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "function");
+  g_assert_cmpstr(semantic_color_at(tab, 4), ==, "function");  /* f: unchanged */
+  g_assert_cmpstr(semantic_color_at(tab, 18), ==, "variable"); /* w: unchanged */
   json_node_unref(delta);
 
   /* A line typed above: the colors move with the text. The answer for it comes after more typing:
    * kept, and its lines colored with the next answer. */
   gtk_text_buffer_get_start_iter(GTK_TEXT_BUFFER(tab->buffer), &at);
   gtk_text_buffer_insert(GTK_TEXT_BUFFER(tab->buffer), &at, "int g;\n", -1);
-  g_assert_cmpstr(semantic_color_at(tab, 7 + 4), ==, "#DCDCAA"); /* f, moved down a line */
+  g_assert_cmpstr(semantic_color_at(tab, 7 + 4), ==, "function"); /* f, moved down a line */
   delta = json_of("{\"resultId\":\"3\",\"edits\":[{\"start\":0,\"deleteCount\":0,\"data\":[0,4,1,1,0]},"
                   "{\"start\":0,\"deleteCount\":1,\"data\":[1]}]}");
   apply_delta(s, delta, FALSE);
@@ -920,8 +925,8 @@ static void test_semantic_delta(void)
   g_assert_nonnull(s->dirty_from);
   nothing = json_of("{\"resultId\":\"4\",\"edits\":[]}");
   apply_delta(s, nothing, TRUE);
-  g_assert_cmpstr(semantic_color_at(tab, 4), ==, "#9CDCFE");  /* g */
-  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "#DCDCAA"); /* f */
+  g_assert_cmpstr(semantic_color_at(tab, 4), ==, "variable");  /* g */
+  g_assert_cmpstr(semantic_color_at(tab, 11), ==, "function"); /* f */
   g_assert_null(s->dirty_from);
 
   json_node_unref(nothing);

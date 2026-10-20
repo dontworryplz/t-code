@@ -13,11 +13,13 @@
 #include "window/terminal.h"
 #include "window/theme.h"
 #include "window/window.h"
+#include "window/palette.h"
 
-static const char *const css = ".tcode-settings { background: #1f1f1f; }"
-                               ".tcode-settings .section { font-weight: bold; color: #e7e7e7; margin: 18px 0 6px; }"
-                               ".tcode-settings .name { color: #cccccc; }"
-                               ".tcode-settings .note { color: #9d9d9d; font-size: smaller; }";
+static const char *const css =
+    ".tcode-settings { background: var(--tc-panel); }"
+    ".tcode-settings .section { font-weight: bold; color: var(--tc-fg-bright); margin: 18px 0 6px; }"
+    ".tcode-settings .name { color: var(--tc-fg); }"
+    ".tcode-settings .note { color: var(--tc-fg-dim); font-size: smaller; }";
 
 static GtkWidget *window; /* the Settings window while it is open */
 
@@ -141,6 +143,34 @@ static void on_theme(GtkDropDown *choice, GParamSpec *spec G_GNUC_UNUSED, gpoint
   t->settings.square = gtk_drop_down_get_selected(choice) == 1;
   apply_theme(t);
   session_save_settings(t);
+}
+
+static void on_color_theme(GtkDropDown *choice, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+  App *t = app_of(GTK_WIDGET(choice));
+
+  g_set_str(&t->settings.color_theme, palette_nth_id((int)gtk_drop_down_get_selected(choice)));
+  color_theme_apply(t, t->settings.color_theme);
+  session_save_settings(t);
+}
+
+/* A drop-down of the color themes, the current one chosen. */
+static GtkWidget *color_themes(void)
+{
+  const char **names = g_new0(const char *, palette_count() + 1);
+  GtkWidget *choice;
+  int current = 0;
+
+  for (int i = 0; i < palette_count(); i++) {
+    names[i] = palette_nth_name(i);
+    if (g_strcmp0(palette_nth_id(i), palette_id()) == 0)
+      current = i;
+  }
+  choice = gtk_drop_down_new_from_strings(names);
+  gtk_drop_down_set_selected(GTK_DROP_DOWN(choice), current);
+  g_signal_connect(choice, "notify::selected", G_CALLBACK(on_color_theme), NULL);
+  g_free(names);
+  return choice;
 }
 
 /* The "Open" buttons: data opens a file to edit by hand, in an editor tab over this window. */
@@ -288,6 +318,8 @@ void settings_changed(App *t, gboolean restart_lsp)
   each_editor(t);
   apply_fonts(t);
   apply_theme(t);
+  if (g_strcmp0(palette_id(), t->settings.color_theme) != 0)
+    color_theme_apply(t, t->settings.color_theme);
   if (restart_lsp)
     lsp_restart(t);
 }
@@ -361,6 +393,8 @@ void show_settings(App *t)
   GtkWidget *theme = gtk_drop_down_new_from_strings((const char *const[]){ "Rounded", "Square", NULL });
   gtk_drop_down_set_selected(GTK_DROP_DOWN(theme), t->settings.square ? 1 : 0);
   g_signal_connect(theme, "notify::selected", G_CALLBACK(on_theme), NULL);
+  add_row(GTK_GRID(grid), &row, "Color theme", "Also \"Preferences: Color Theme\" in the command palette",
+          color_themes());
   add_row(GTK_GRID(grid), &row, "Theme", "Rounded panels on a darker frame, or flat ones with lines between", theme);
   add_row(GTK_GRID(grid), &row, "Editor font", "Editors and the terminal", font_for(&t->settings.font));
   add_row(GTK_GRID(grid), &row, "Files panel font", "File icons need a Nerd Font installed",
@@ -376,7 +410,7 @@ void show_settings(App *t)
           open_button(open_settings_file));
   add_row(GTK_GRID(grid), &row, "Theme CSS", "theme.css: your own CSS over t-code's look (colors, corners, sizes)",
           open_button(open_user_theme));
-  add_row(GTK_GRID(grid), &row, "Editor colors", "Your copy of the editor's color scheme (dark-modern.xml)",
+  add_row(GTK_GRID(grid), &row, "Editor colors", "Your copy of the editor's color scheme (dark-classic.xml)",
           open_button(open_editor_colors));
 
   GtkWidget *scroll = gtk_scrolled_window_new();

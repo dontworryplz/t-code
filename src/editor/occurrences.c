@@ -5,6 +5,7 @@
 
 #include "editor/editing.h"
 #include "editor/editorview.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -117,17 +118,27 @@ static void on_occurrence_edit(GtkTextBuffer *buffer G_GNUC_UNUSED, Occurrences 
   clear_occurrences(o);
 }
 
+void occurrences_recolor(Tab *tab)
+{
+  GtkTextTag *tag = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer)), TAG);
+  GdkRGBA background = *palette_rgba(PAL_OCCURRENCE); /* VS Code's #add6ff26 */
+
+  background.alpha = 0.15f;
+  if (tag)
+    g_object_set(tag, "background-rgba", &background, NULL);
+}
+
 void occurrences_attach(Tab *tab)
 {
   Occurrences *o = g_new0(Occurrences, 1);
-  GdkRGBA background = { 0.68f, 0.84f, 1.0f, 0.15f }; /* #add6ff26 */
 
   o->tab = tab;
   o->buffer = GTK_TEXT_BUFFER(tab->buffer);
   o->lines = g_array_new(FALSE, FALSE, sizeof(int));
   o->tag = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(o->buffer), TAG);
   if (!o->tag)
-    o->tag = gtk_text_buffer_create_tag(o->buffer, TAG, "background-rgba", &background, NULL);
+    o->tag = gtk_text_buffer_create_tag(o->buffer, TAG, NULL);
+  occurrences_recolor(tab);
   g_signal_connect(o->buffer, "mark-set", G_CALLBACK(on_occurrence_mark_set), o);
   g_signal_connect(o->buffer, "changed", G_CALLBACK(on_occurrence_edit), o);
   tab->view->occurrences = o;

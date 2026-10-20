@@ -19,19 +19,19 @@ struct FindBar {
 };
 
 static const char *const find_css =
-    ".tcode-find { background: #202020; border: 1px solid #313131; border-top: none;"
+    ".tcode-find { background: var(--tc-raised); border: 1px solid var(--tc-input); border-top: none;"
     "  border-radius: 0 0 6px 6px; padding: 4px 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, .36); }"
-    ".tcode-find entry { min-height: 24px; background: #313131; border: 1px solid #3c3c3c; border-radius: 4px;"
-    "  box-shadow: none; color: #cccccc; }"
-    ".tcode-find entry:focus-within { border-color: #0078d4; outline: none; }"
-    ".tcode-find entry.error { border-color: #f14c4c; }"
+    ".tcode-find entry { min-height: 24px; background: var(--tc-input); border: 1px solid var(--tc-border-strong); border-radius: 4px;"
+    "  box-shadow: none; color: var(--tc-fg); }"
+    ".tcode-find entry:focus-within { border-color: var(--tc-accent); outline: none; }"
+    ".tcode-find entry.error { border-color: var(--tc-error); }"
     ".tcode-find button { min-height: 22px; min-width: 22px; padding: 0 4px; border-radius: 4px;"
-    "  background: none; box-shadow: none; border: 1px solid transparent; color: #cccccc; }"
-    ".tcode-find button:hover { background: rgba(255, 255, 255, .1); }"
-    ".tcode-find button:checked { background: rgba(36, 137, 219, .51); border-color: #2488db; color: #ffffff; }"
+    "  background: none; box-shadow: none; border: 1px solid transparent; color: var(--tc-fg); }"
+    ".tcode-find button:hover { background: color-mix(in srgb, var(--tc-fg) 10%, transparent); }"
+    ".tcode-find button:checked { background: color-mix(in srgb, var(--tc-accent) 51%, transparent); border-color: var(--tc-accent); color: var(--tc-fg-strong); }"
     ".tcode-find button.text { font-size: 0.85em; }"
-    ".tcode-find label.count { color: #cccccc; font-size: 0.85em; min-width: 72px; }"
-    ".tcode-find label.count.none { color: #f48771; }";
+    ".tcode-find label.count { color: var(--tc-fg); font-size: 0.85em; min-width: 72px; }"
+    ".tcode-find label.count.none { color: var(--tc-error); }";
 
 /* Matches ------------------------------------------------------------------------------------ */
 

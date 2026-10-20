@@ -1,5 +1,5 @@
 /*
- * t-code's look: VS Code Dark Modern colors on rounded panels ("cards") over GTK's built-in
+ * t-code's look: the color theme's colors (window/palette.c) on rounded panels ("cards") over GTK's built-in
  * Adwaita theme, or square ones (the settings' theme), and the user's own CSS over it.
  */
 #pragma once
@@ -21,3 +21,10 @@ void load_user_theme(void);
 
 /* Gives widget rounded corners on the window's darker frame; its children are cut to them. */
 void make_card(GtkWidget *widget);
+
+/* Switches the color theme while t-code runs (window/palette.c): the panels, editors, terminals and
+ * previews take its colors. Saves nothing. */
+void color_theme_apply(App *t, const char *id);
+
+/* Lets the user pick a color theme in the picker ("Preferences: Color Theme…"); saved in settings.ini. */
+void color_theme_pick(App *t);

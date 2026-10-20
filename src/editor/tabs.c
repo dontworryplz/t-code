@@ -213,7 +213,7 @@ void close_all_tabs(App *t)
       gtk_notebook_remove_page(t->editors.groups[g], 0);
     }
   t->closing = closing;
-  open_tabs_changed(t); /* it was quiet meanwhile */
+  open_tabs_changed(t);              /* it was quiet meanwhile */
   if (!closing && t->editors.second) /* empty now */
     gtk_window_close(t->editors.second);
 }

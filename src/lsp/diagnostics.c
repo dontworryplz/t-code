@@ -8,6 +8,7 @@
 #include "editor/editorview.h"
 #include "lsp/client.h"
 #include "window/statusbar.h"
+#include "window/palette.h"
 
 /* LSP's severities. */
 enum { SEVERITY_ERROR = 1, SEVERITY_WARNING, SEVERITY_INFO, SEVERITY_HINT };
@@ -18,8 +19,8 @@ typedef struct {
   char *message;
 } Diagnostic;
 
-/* VS Code's editorError / editorWarning / editorInfo foregrounds. */
-static const char *const colors[] = { NULL, "#F14C4C", "#CCA700", "#3794FF", "#3794FF" };
+/* VS Code's editorError / editorWarning / editorInfo foregrounds, from the color theme. */
+static const PalColor colors[] = { PAL_ERROR, PAL_ERROR, PAL_WARNING, PAL_INFO, PAL_INFO };
 static const char *const tag_names[] = { NULL, "lsp-error", "lsp-warning", "lsp-info", "lsp-info" };
 static const char *const labels[] = { NULL, "error", "warning", "note", "hint" };
 
@@ -128,8 +129,8 @@ char *diagnostics_at(Tab *tab, const GtkTextIter *iter, gboolean markup)
       g_string_append_c(text, '\n');
     if (markup) {
       char *escaped = g_markup_escape_text(d->message, -1);
-      g_string_append_printf(text, "<span foreground=\"%s\">%s:</span> %s", colors[d->severity], labels[d->severity],
-                             escaped);
+      g_string_append_printf(text, "<span foreground=\"%s\">%s:</span> %s", palette_hex(colors[d->severity]),
+                             labels[d->severity], escaped);
       g_free(escaped);
     } else {
       g_string_append_printf(text, "%s: %s", labels[d->severity], d->message);
@@ -194,14 +195,6 @@ void diagnostics_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot)
       GRAPHENE_RECT_INIT((float)visible.x, (float)visible.y, (float)visible.width, (float)visible.height);
   cairo_t *cr = NULL;
 
-  static const double rgb[][3] = {
-    { 0.0, 0.0, 0.0 },
-    { 0.945, 0.298, 0.298 }, /* SEVERITY_ERROR: #F14C4C */
-    { 0.800, 0.655, 0.000 }, /* SEVERITY_WARNING: #CCA700 */
-    { 0.216, 0.580, 1.000 }, /* SEVERITY_INFO: #3794FF */
-    { 0.216, 0.580, 1.000 }  /* SEVERITY_HINT */
-  };
-
   for (guint i = 0; i < tab->view->diagnostics->len; i++) {
     Diagnostic *d = g_ptr_array_index(tab->view->diagnostics, i);
     if (d->severity < SEVERITY_ERROR || d->severity > SEVERITY_INFO)
@@ -223,7 +216,7 @@ void diagnostics_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot)
       cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
     }
 
-    cairo_set_source_rgb(cr, rgb[d->severity][0], rgb[d->severity][1], rgb[d->severity][2]);
+    gdk_cairo_set_source_rgba(cr, palette_rgba(colors[d->severity]));
 
     for (int line = MAX(s_line, first_line); line <= MIN(e_line, last_line); line++) {
       GtkTextIter line_start, line_end;

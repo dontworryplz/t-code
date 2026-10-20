@@ -9,16 +9,11 @@
 #include "editor/editorview.h"
 #include "files/files.h"
 #include "window/window.h"
+#include "window/palette.h"
 
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
-
-/* VS Code's terminal colors on its Dark Modern background. */
-static const char *const palette_hex[16] = {
-  "#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
-  "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#e5e5e5",
-};
 
 void set_terminal_font(App *t, VteTerminal *term, const char *font)
 {
@@ -42,19 +37,25 @@ void apply_fonts(App *t)
   files_apply_font(t);
 }
 
+/* The color theme's text, background and 16 colors. */
+static void color_terminal(VteTerminal *term)
+{
+  vte_terminal_set_colors(term, palette_rgba(PAL_FG), palette_rgba(PAL_PANEL), palette_terminal(), 16);
+}
+
+void terminal_apply_colors(App *t)
+{
+  if (t->shell.term)
+    color_terminal(t->shell.term);
+}
+
 /* A terminal in the editor font. */
 VteTerminal *new_terminal(App *t)
 {
   VteTerminal *term = VTE_TERMINAL(vte_terminal_new());
-  GdkRGBA fg, bg, palette[16];
 
   set_terminal_font(t, term, t->settings.font);
-
-  gdk_rgba_parse(&fg, "#cccccc");
-  gdk_rgba_parse(&bg, "#1f1f1f");
-  for (int i = 0; i < 16; i++)
-    gdk_rgba_parse(&palette[i], palette_hex[i]);
-  vte_terminal_set_colors(term, &fg, &bg, palette, 16);
+  color_terminal(term);
   vte_terminal_set_scrollback_lines(term, 10000);
   vte_terminal_set_mouse_autohide(term, TRUE);
   gtk_widget_set_hexpand(GTK_WIDGET(term), TRUE);

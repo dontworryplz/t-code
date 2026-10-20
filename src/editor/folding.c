@@ -8,6 +8,7 @@
 #include "editor/blocks.h"
 #include "editor/editorview.h"
 #include "editor/sticky.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -326,7 +327,7 @@ static void on_folds_text_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, Folding *
 void folding_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot)
 {
   Folding *f = tab->view->folding;
-  static const GdkRGBA fill = { 0.26, 0.26, 0.26, 1 }, ink = { 0.62, 0.62, 0.62, 1 };
+  const GdkRGBA *fill = palette_rgba(PAL_INPUT), *ink = palette_rgba(PAL_FG_DIM);
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
   PangoLayout *layout = NULL;
   GdkRectangle visible;
@@ -353,11 +354,11 @@ void folding_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot)
     graphene_rect_t rect = GRAPHENE_RECT_INIT(at.x + 6, at.y + 2, width + 10, at.height - 4);
     gsk_rounded_rect_init_from_rect(&box, &rect, 3);
     gtk_snapshot_push_rounded_clip(snapshot, &box);
-    gtk_snapshot_append_color(snapshot, &fill, &rect);
+    gtk_snapshot_append_color(snapshot, fill, &rect);
     gtk_snapshot_pop(snapshot);
     gtk_snapshot_save(snapshot);
     gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(at.x + 11, at.y + (at.height - height) / 2.0));
-    gtk_snapshot_append_layout(snapshot, layout, &ink);
+    gtk_snapshot_append_layout(snapshot, layout, ink);
     gtk_snapshot_restore(snapshot);
   }
   if (layout)
@@ -384,7 +385,7 @@ static gboolean can_fold(Folding *f)
 /* A chevron like VS Code's: pointing down (open) or right (folded), in a box size wide. */
 static void draw_chevron(GtkSnapshot *snapshot, double x, double y, double size, gboolean folded)
 {
-  static const GdkRGBA ink = { 0.77, 0.77, 0.77, 1 };
+  const GdkRGBA *ink = palette_rgba(PAL_FG);
   GskPathBuilder *builder = gsk_path_builder_new();
   GskStroke *stroke = gsk_stroke_new(1.4);
   double c = size / 2, r = size / 5;
@@ -400,7 +401,7 @@ static void draw_chevron(GtkSnapshot *snapshot, double x, double y, double size,
     gsk_path_builder_line_to(builder, x + c + r, y + c - r / 2);
   }
   path = gsk_path_builder_free_to_path(builder);
-  gtk_snapshot_append_stroke(snapshot, path, stroke, &ink);
+  gtk_snapshot_append_stroke(snapshot, path, stroke, ink);
   gsk_path_unref(path);
   gsk_stroke_free(stroke);
 }
@@ -478,8 +479,8 @@ static void query_number(GtkSourceGutterRenderer *renderer, GtkSourceGutterLines
     return;
   }
   g_snprintf(number, sizeof number, "%u", line + 1);
-  if (gtk_source_gutter_lines_is_cursor(lines, line)) { /* Dark Modern's editorLineNumber.activeForeground */
-    char *markup = g_strdup_printf("<span foreground=\"#cccccc\">%s</span>", number);
+  if (gtk_source_gutter_lines_is_cursor(lines, line)) { /* Dark Classic's editorLineNumber.activeForeground */
+    char *markup = g_strdup_printf("<span foreground=\"%s\">%s</span>", palette_hex(PAL_FG), number);
     gtk_source_gutter_renderer_text_set_markup(text, markup, -1);
     g_free(markup);
   } else {

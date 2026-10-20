@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds t-code and installs it under ~/.local:
 #   ~/.local/bin/t-code
-#   ~/.local/share/t-code/styles/dark-modern.xml        the editor's colors
+#   ~/.local/share/t-code/styles/dark-classic.xml       the editor's colors
 #   ~/.local/share/applications/io.github.tcode.desktop app menu entry
 #   ~/.local/share/icons/hicolor/scalable/apps/io.github.tcode.svg
 # Run it again after pulling changes to update the installed copy.
@@ -48,7 +48,8 @@ rm -rf "$LIBEXEC" # t-code-fm, the terminal file manager before 0.2.1: the file 
 info "Installed $BIN"
 
 # 4. The editor's colors. What the micro-based t-code (0.1.x) installed is not used any more.
-install -Dm644 "$ROOT/styles/dark-modern.xml" "$SHARE/styles/dark-modern.xml"
+install -Dm644 "$ROOT/styles/dark-classic.xml" "$SHARE/styles/dark-classic.xml"
+rm -f "$SHARE/styles/dark-modern.xml" # its name before 0.3
 rm -rf "${SHARE:?}/micro"
 info "Installed the editor's colors in $SHARE/styles"
 

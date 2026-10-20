@@ -9,6 +9,7 @@
 #include "editor/blocks.h"
 #include "editor/editorview.h"
 #include "editor/folding.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -207,15 +208,15 @@ G_DEFINE_FINAL_TYPE(TcodeSticky, tcode_sticky, GTK_TYPE_WIDGET)
 static void snapshot_sticky(GtkWidget *widget, GtkSnapshot *snapshot)
 {
   Sticky *s = TCODE_STICKY(widget)->sticky;
-  static const GdkRGBA background = { 0.122, 0.122, 0.122, 1 }, number_ink = { 0.431, 0.463, 0.506, 1 },
-                       text_ink = { 0.8, 0.8, 0.8, 1 }, line = { 0.17, 0.17, 0.17, 1 };
+  const GdkRGBA *background = palette_rgba(PAL_PANEL), *number_ink = palette_rgba(PAL_LINE_NUMBER),
+                *text_ink = palette_rgba(PAL_FG), *line = palette_rgba(PAL_BORDER);
   int width = gtk_widget_get_width(widget);
   double text_x, gutter_right, numbers_right;
 
   if (!s || !s->count)
     return;
   sticky_columns(s, &text_x, &gutter_right, &numbers_right);
-  gtk_snapshot_append_color(snapshot, &background, &GRAPHENE_RECT_INIT(0, 0, width, s->count * s->row));
+  gtk_snapshot_append_color(snapshot, background, &GRAPHENE_RECT_INIT(0, 0, width, s->count * s->row));
   for (int i = 0; i < s->count; i++) {
     char number[24];
     PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(s->tab->source), NULL);
@@ -225,7 +226,7 @@ static void snapshot_sticky(GtkWidget *widget, GtkSnapshot *snapshot)
     pango_layout_get_pixel_size(layout, &number_width, NULL);
     gtk_snapshot_save(snapshot);
     gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(numbers_right - number_width, i * s->row));
-    gtk_snapshot_append_layout(snapshot, layout, &number_ink);
+    gtk_snapshot_append_layout(snapshot, layout, number_ink);
     gtk_snapshot_restore(snapshot);
     g_object_unref(layout);
 
@@ -233,13 +234,13 @@ static void snapshot_sticky(GtkWidget *widget, GtkSnapshot *snapshot)
     gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(gutter_right, i * s->row, width - gutter_right, s->row));
     gtk_snapshot_save(snapshot);
     gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_x, i * s->row));
-    gtk_snapshot_append_layout(snapshot, layout, &text_ink);
+    gtk_snapshot_append_layout(snapshot, layout, text_ink);
     gtk_snapshot_restore(snapshot);
     gtk_snapshot_pop(snapshot);
     g_object_unref(layout);
   }
   /* VS Code's line under them, and a shadow fading into the text. */
-  gtk_snapshot_append_color(snapshot, &line, &GRAPHENE_RECT_INIT(0, s->count * s->row - 1, width, 1));
+  gtk_snapshot_append_color(snapshot, line, &GRAPHENE_RECT_INIT(0, s->count * s->row - 1, width, 1));
   GskColorStop stops[] = { { 0, { 0, 0, 0, 0.45f } }, { 1, { 0, 0, 0, 0 } } };
   gtk_snapshot_append_linear_gradient(snapshot, &GRAPHENE_RECT_INIT(0, s->count * s->row, width, STICKY_SHADOW),
                                       &GRAPHENE_POINT_INIT(0, s->count * s->row),

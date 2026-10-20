@@ -11,6 +11,7 @@
 #include "project/session.h"
 #include "window/theme.h"
 
+#include <glib/gstdio.h>
 #include <string.h>
 
 #define RELOAD_MS 200
@@ -38,7 +39,7 @@ static const char *const theme_template =
     " * Wider gaps between the panels:\n"
     " *   paned > separator { min-width: 10px; min-height: 10px; }\n"
     " *\n"
-    " * The editor's text colors are in styles/dark-modern.xml next to this file\n"
+    " * The editor's text colors are in styles/dark-classic.xml next to this file\n"
     " * (\"Preferences: Open Editor Colors\" in the command palette).\n"
     " */\n";
 
@@ -62,6 +63,7 @@ static void reload_settings(App *t)
 
   old.font = g_strdup(t->settings.font);
   old.files_font = g_strdup(t->settings.files_font);
+  old.color_theme = g_strdup(t->settings.color_theme);
   session_load_settings(t);
   same = plain == t->plain && old.minimap == t->settings.minimap && old.sticky_scroll == t->settings.sticky_scroll &&
          old.reopen_last == t->settings.reopen_last && old.autosave == t->settings.autosave &&
@@ -69,11 +71,13 @@ static void reload_settings(App *t)
          old.detect_indent == t->settings.detect_indent && old.guides == t->settings.guides &&
          old.word_wrap == t->settings.word_wrap && old.clang_tidy == t->settings.clang_tidy &&
          old.format_on_save == t->settings.format_on_save && old.square == t->settings.square &&
-         g_strcmp0(old.font, t->settings.font) == 0 && g_strcmp0(old.files_font, t->settings.files_font) == 0;
+         g_strcmp0(old.font, t->settings.font) == 0 && g_strcmp0(old.files_font, t->settings.files_font) == 0 &&
+         g_strcmp0(old.color_theme, t->settings.color_theme) == 0;
   if (!same)
     settings_changed(t, old.clang_tidy != t->settings.clang_tidy);
   g_free(old.font);
   g_free(old.files_font);
+  g_free(old.color_theme);
 }
 
 /* The editor's colors changed: every editor gets the scheme read again. */
@@ -159,10 +163,30 @@ void open_user_theme(App *t)
   g_free(path);
 }
 
+/* The user's copy was called dark-modern.xml before 0.3, its scheme t-code-dark-modern: it moves to
+ * the new name, with the new id (else the editors would not find it). */
+void move_old_colors(void)
+{
+  char *path = user_colors_file(), *dir = g_path_get_dirname(path);
+  char *old = g_build_filename(dir, "dark-modern.xml", NULL), *text = NULL;
+
+  if (!g_file_test(path, G_FILE_TEST_EXISTS) && g_file_get_contents(old, &text, NULL, NULL)) {
+    GString *now = g_string_new(text);
+    g_string_replace(now, "id=\"t-code-dark-modern\"", "id=\"t-code-dark-classic\"", 1);
+    if (g_file_set_contents(path, now->str, -1, NULL))
+      g_remove(old);
+    g_string_free(now, TRUE);
+  }
+  g_free(text);
+  g_free(old);
+  g_free(dir);
+  g_free(path);
+}
+
 void open_editor_colors(App *t)
 {
   char *path = user_colors_file(), *dir = g_path_get_dirname(path);
-  char *ours = g_build_filename(t->paths.styles, "dark-modern.xml", NULL), *text = NULL;
+  char *ours = g_build_filename(t->paths.styles, "dark-classic.xml", NULL), *text = NULL;
 
   if (!g_file_test(path, G_FILE_TEST_EXISTS) && g_file_get_contents(ours, &text, NULL, NULL)) {
     const char *after = strstr(text, "?>"); /* below the XML declaration */

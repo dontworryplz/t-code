@@ -8,6 +8,7 @@
 #include "editor/editorview.h"
 #include "editor/tabs.h"
 #include "git/linediff.h"
+#include "window/palette.h"
 
 #include <string.h>
 
@@ -56,8 +57,6 @@ G_DECLARE_FINAL_TYPE(TcodeDiffRenderer, tcode_diff_renderer, TCODE, DIFF_RENDERE
 G_DEFINE_FINAL_TYPE(TcodeDiffRenderer, tcode_diff_renderer, GTK_SOURCE_TYPE_GUTTER_RENDERER)
 
 /* VS Code's editorGutter.addedBackground, .modifiedBackground, .deletedBackground. */
-static const GdkRGBA added = { 0.18, 0.63, 0.26, 1 }, modified = { 0.0, 0.47, 0.83, 1 },
-                     deleted = { 0.97, 0.32, 0.29, 1 };
 
 static void snapshot_line(GtkSourceGutterRenderer *renderer, GtkSnapshot *snapshot, GtkSourceGutterLines *lines,
                           guint line)
@@ -78,10 +77,12 @@ static void snapshot_line(GtkSourceGutterRenderer *renderer, GtkSnapshot *snapsh
     gsk_path_builder_line_to(builder, 0, y + 4);
     gsk_path_builder_close(builder);
     path = gsk_path_builder_free_to_path(builder);
-    gtk_snapshot_append_fill(snapshot, path, GSK_FILL_RULE_WINDING, &deleted);
+    gtk_snapshot_append_fill(snapshot, path, GSK_FILL_RULE_WINDING, palette_rgba(PAL_DIFF_DELETED));
     gsk_path_unref(path);
   } else {
-    const GdkRGBA *color = (mark == LINE_ADDED) ? (g->partner && g->is_old_side ? &deleted : &added) : &modified;
+    const GdkRGBA *color = palette_rgba(mark != LINE_ADDED             ? PAL_DIFF_MODIFIED
+                                        : g->partner && g->is_old_side ? PAL_DIFF_DELETED
+                                                                       : PAL_DIFF_ADDED);
     gtk_snapshot_append_color(snapshot, color, &GRAPHENE_RECT_INIT(0, y, MIN(width, 3), height));
   }
 }
@@ -338,11 +339,13 @@ static int *line_heights(Tab *tab, const char *text, int *width_out)
 static void apply_side_changes(DiffGutter *g, GArray *spans)
 {
   /* VS Code's diffEditor.insertedTextBackground / removedTextBackground. */
-  static const GdkRGBA inserted = { 0.61f, 0.80f, 0.17f, 0.28f }, removed = { 1, 0, 0, 0.30f };
+  GdkRGBA inserted = *palette_rgba(PAL_DIFF_ADDED), removed = *palette_rgba(PAL_DIFF_DELETED);
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(g->tab->buffer);
   GtkTextTag *words = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(buffer), CHANGED_WORDS);
   int lines = gtk_text_buffer_get_line_count(buffer);
 
+  inserted.alpha = 0.28f;
+  removed.alpha = 0.30f;
   if (!words)
     words = gtk_text_buffer_create_tag(buffer, CHANGED_WORDS, NULL);
   g_object_set(words, "background-rgba", g->is_old_side ? &removed : &inserted, NULL);
