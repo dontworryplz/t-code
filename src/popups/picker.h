@@ -12,12 +12,18 @@
 typedef void (*PickerQuery)(App *t, const char *query, guint generation);
 /* Called with the payload of the row the user picked. */
 typedef void (*PickerChoose)(App *t, const char *payload);
+/* Called when the picker closes without a pick. */
+typedef void (*PickerCancel)(App *t);
 
 /* Creates the (hidden) picker over the window's content. */
 void picker_init(App *t, GtkOverlay *overlay);
 
 /* Shows the picker with an empty entry and runs query for it. */
 void picker_open(App *t, const char *placeholder, PickerQuery query, PickerChoose choose);
+
+/* After picker_open(): preview(t, payload) runs for each row the arrow keys go to (a color theme
+ * shown as it would look), cancel(t) when the picker closes without a pick (to undo it). */
+void picker_set_preview(App *t, PickerChoose preview, PickerCancel cancel);
 
 /* Adds a result row: label, a dimmed detail on the right (may be NULL), and the payload choose
  * gets. Up to 200 rows. */

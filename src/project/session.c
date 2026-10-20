@@ -178,8 +178,7 @@ void session_save_settings(App *t)
   g_key_file_set_string(kf, "settings", "color-theme",
                         t->settings.color_theme ? t->settings.color_theme : "dark-classic");
   explain(kf, "color-theme",
-          " dark-classic, light-classic, monokai, dracula, one-dark, github-dark, tokyo-night, catppuccin-mocha,\n"
-          " nord, gruvbox-dark, solarized-dark, solarized-light; and matrix, barbie, hotdog-stand");
+          " dark-classic, light-classic, dracula, nord, ...: \"Preferences: Color Theme\" lists them all");
   g_key_file_set_boolean(kf, "settings", "minimap", t->settings.minimap);
   explain(kf, "minimap", " A small picture of the file next to the scrollbar");
   g_key_file_set_boolean(kf, "settings", "sticky-scroll", t->settings.sticky_scroll);

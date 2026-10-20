@@ -19,6 +19,8 @@ struct Picker {
   GtkLabel *message;
   PickerQuery query;
   PickerChoose choose;
+  PickerChoose preview; /* the row the arrows went to; NULL: none */
+  PickerCancel cancel;  /* closed without a pick */
   guint generation;
   int rows;
 };
@@ -130,10 +132,22 @@ void picker_requery(App *t, PickerQuery query)
 
 /* Showing and choosing ----------------------------------------------------------------------- */
 
+/* Closed without a pick (Escape, a click outside): the caller undoes what its previews did. */
+static void cancelled(Picker *p)
+{
+  PickerCancel cancel = p->cancel;
+
+  p->preview = NULL;
+  p->cancel = NULL;
+  if (cancel)
+    cancel(p->app);
+}
+
 static void hide(Picker *p)
 {
   p->generation++; /* late results go nowhere */
   gtk_widget_set_visible(p->box, FALSE);
+  cancelled(p);
   focus_current_tab(p->app);
 }
 
@@ -143,6 +157,7 @@ static void on_focus_leave(GtkEventControllerFocus *focus G_GNUC_UNUSED, Picker 
   if (gtk_widget_get_visible(p->box)) {
     p->generation++;
     gtk_widget_set_visible(p->box, FALSE);
+    cancelled(p);
   }
 }
 
@@ -154,6 +169,8 @@ static void choose(Picker *p, GtkListBoxRow *row)
   char *payload = g_strdup(g_object_get_data(G_OBJECT(row), "payload"));
   PickerChoose chosen = p->choose;
 
+  p->preview = NULL;
+  p->cancel = NULL; /* picked: nothing to undo */
   hide(p);
   chosen(p->app, payload);
   g_free(payload);
@@ -190,6 +207,8 @@ static gboolean on_key(GtkEventControllerKey *controller G_GNUC_UNUSED, guint ke
   GtkListBoxRow *next = gtk_list_box_get_row_at_index(p->list, index);
   gtk_list_box_select_row(p->list, next);
   gtk_widget_grab_focus(GTK_WIDGET(p->entry));
+  if (p->preview && next)
+    p->preview(p->app, g_object_get_data(G_OBJECT(next), "payload"));
   return TRUE;
 }
 
@@ -197,8 +216,12 @@ void picker_open(App *t, const char *placeholder, PickerQuery query, PickerChoos
 {
   Picker *p = t->picker;
 
+  if (gtk_widget_get_visible(p->box))
+    cancelled(p); /* another picker over this one */
   p->query = query;
   p->choose = chosen;
+  p->preview = NULL;
+  p->cancel = NULL;
   gtk_search_entry_set_placeholder_text(p->entry, placeholder);
   g_signal_handlers_block_matched(p->entry, G_SIGNAL_MATCH_DATA, 0, 0, NULL, NULL, p);
   gtk_editable_set_text(GTK_EDITABLE(p->entry), "");
@@ -206,6 +229,12 @@ void picker_open(App *t, const char *placeholder, PickerQuery query, PickerChoos
   gtk_widget_set_visible(p->box, TRUE);
   gtk_widget_grab_focus(GTK_WIDGET(p->entry));
   refresh(p);
+}
+
+void picker_set_preview(App *t, PickerChoose preview, PickerCancel cancel)
+{
+  t->picker->preview = preview;
+  t->picker->cancel = cancel;
 }
 
 void picker_init(App *t, GtkOverlay *overlay)

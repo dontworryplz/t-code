@@ -16,6 +16,8 @@
 #include "project/session.h"
 #include "project/userfiles.h"
 #include "window/secondwindow.h"
+#include "window/palette.h"
+#include "window/theme.h"
 #include "window/window.h"
 
 #include <gio/gunixsocketaddress.h>
@@ -552,6 +554,64 @@ static void test_open_tabs(void)
   g_assert_cmpint(list_rows(list), ==, 0);
 }
 
+/* The picker's entry key controller (the arrows go through it). */
+static GtkEventController *picker_keys(GtkWidget *entry)
+{
+  GListModel *controllers = gtk_widget_observe_controllers(entry);
+  GtkEventController *keys = NULL;
+
+  for (guint i = 0; i < g_list_model_get_n_items(controllers) && !keys; i++) {
+    GObject *controller = g_list_model_get_item(controllers, i);
+    if (GTK_IS_EVENT_CONTROLLER_KEY(controller))
+      keys = GTK_EVENT_CONTROLLER(controller);
+    g_object_unref(controller);
+  }
+  g_object_unref(controllers);
+  return keys;
+}
+
+static GtkWidget *focused_entry(void)
+{
+  GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(app.window));
+
+  return focus ? gtk_widget_get_ancestor(focus, GTK_TYPE_SEARCH_ENTRY) : NULL;
+}
+
+/* "Preferences: Color Theme": the arrows show each theme at once, unsaved; Escape goes back to the
+ * saved one, Enter keeps the one shown. */
+static void test_theme_preview(void)
+{
+  char *saved = g_strdup(app.settings.color_theme);
+  gboolean handled = FALSE;
+  GtkWidget *entry;
+
+  color_theme_pick(&app);
+  run(50);
+  entry = focused_entry();
+  g_assert_nonnull(entry);
+  g_signal_emit_by_name(picker_keys(entry), "key-pressed", GDK_KEY_Down, 0, 0, &handled);
+  run(50);
+  g_assert_true(handled);
+  g_assert_cmpstr(palette_id(), !=, saved);             /* the second theme, shown */
+  g_assert_cmpstr(app.settings.color_theme, ==, saved); /* not saved */
+  g_signal_emit_by_name(entry, "stop-search");          /* Escape */
+  run(50);
+  g_assert_cmpstr(palette_id(), ==, saved);
+
+  color_theme_pick(&app);
+  run(50);
+  entry = focused_entry();
+  g_signal_emit_by_name(picker_keys(entry), "key-pressed", GDK_KEY_Down, 0, 0, &handled);
+  g_signal_emit_by_name(entry, "activate"); /* Enter */
+  run(50);
+  g_assert_cmpstr(app.settings.color_theme, ==, palette_id());
+  g_assert_cmpstr(palette_id(), !=, saved);
+
+  g_set_str(&app.settings.color_theme, saved); /* back, for the other tests */
+  color_theme_apply(&app, saved);
+  g_free(saved);
+}
+
 /* A file opens at its left edge, also in a narrow view without word wrap (the cursor's reveal used to
  * scroll sideways by a few pixels, cutting off every line's first letters). */
 static void test_opens_at_left_edge(void)
@@ -743,6 +803,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/second-window", test_second_window);
   g_test_add_func("/window/tab-strip", test_tab_strip);
   g_test_add_func("/window/open-tabs", test_open_tabs);
+  g_test_add_func("/window/theme-preview", test_theme_preview);
 
   gapp = gtk_application_new("io.github.tcode.test", G_APPLICATION_NON_UNIQUE);
   g_object_set_data(G_OBJECT(gapp), "status", &status);

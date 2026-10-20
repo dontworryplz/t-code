@@ -201,7 +201,21 @@ static void theme_choose(App *t, const char *id)
   session_save_settings(t);
 }
 
+/* The arrows went to a theme: shown at once, not saved. */
+static void theme_preview(App *t, const char *id)
+{
+  color_theme_apply(t, id);
+}
+
+/* Closed without a pick: the saved theme again. */
+static void theme_cancel(App *t)
+{
+  if (g_strcmp0(palette_id(), t->settings.color_theme) != 0)
+    color_theme_apply(t, t->settings.color_theme);
+}
+
 void color_theme_pick(App *t)
 {
-  picker_open(t, "Pick a color theme", theme_query, theme_choose);
+  picker_open(t, "Pick a color theme (the arrows show each one)", theme_query, theme_choose);
+  picker_set_preview(t, theme_preview, theme_cancel);
 }
