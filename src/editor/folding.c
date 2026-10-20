@@ -7,11 +7,13 @@
 
 #include "editor/blocks.h"
 #include "editor/editorview.h"
+#include "editor/sticky.h"
 
 #include <string.h>
 
 #define FOLD_WIDTH 16 /* pixels */
 #define CHECK_MS 300  /* after a change: folds whose block went are dropped */
+#define BLOCKS_MS 250 /* after the last change the blocks are listed again (a big file takes ms) */
 #define HIDDEN "tcode-folded"
 
 typedef struct {
@@ -28,11 +30,13 @@ struct Folding {
   GArray *folds;  /* Fold */
   gboolean hover; /* the pointer is over the gutter */
   guint check_id;
+  guint blocks_id; /* the blocks are listed again shortly */
 };
 
 /* Blocks ------------------------------------------------------------------------------------- */
 
-GArray *folding_blocks(Tab *tab)
+/* The blocks of the text as it is now. */
+static GArray *fresh_blocks(Tab *tab)
 {
   Folding *f = tab->view->folding;
 
@@ -47,6 +51,31 @@ GArray *folding_blocks(Tab *tab)
     f->blocks_changes = tab->view->changes;
     g_free(text);
   }
+  return f->blocks;
+}
+
+/* Typing has stopped: the arrows and the sticky lines follow the new blocks. */
+static gboolean list_blocks_now(gpointer data)
+{
+  Folding *f = data;
+
+  f->blocks_id = 0;
+  fresh_blocks(f->tab);
+  gtk_widget_queue_draw(f->renderer);
+  sticky_apply_settings(f->tab);
+  return G_SOURCE_REMOVE;
+}
+
+/* While typing, the last list: the arrows and the sticky lines are drawn after every key, and
+ * listing a big file's blocks each time made typing in it four times slower. */
+GArray *folding_blocks(Tab *tab)
+{
+  Folding *f = tab->view->folding;
+
+  if (!f->blocks)
+    return fresh_blocks(tab);
+  if (f->blocks_changes != tab->view->changes && !f->blocks_id)
+    f->blocks_id = g_timeout_add(BLOCKS_MS, list_blocks_now, f);
   return f->blocks;
 }
 
@@ -152,6 +181,7 @@ static void toggle(Folding *f, int line)
   int index = fold_on(f, line);
   Block *block;
 
+  fresh_blocks(f->tab); /* block_at sees the text as it is */
   if (index >= 0)
     remove_fold(f, index);
   else if ((block = block_at(f->tab, line)))
@@ -162,7 +192,7 @@ static void toggle(Folding *f, int line)
 /* The innermost block whose lines (its head to its closing line) hold line. */
 static Block *block_around(Tab *tab, int line)
 {
-  GArray *blocks = folding_blocks(tab);
+  GArray *blocks = fresh_blocks(tab);
   Block *inner = NULL;
 
   for (guint i = 0; i < blocks->len; i++) {
@@ -214,7 +244,7 @@ void unfold_at_cursor(Tab *tab)
 
 void fold_all(Tab *tab)
 {
-  GArray *blocks = folding_blocks(tab);
+  GArray *blocks = fresh_blocks(tab);
   GtkTextIter start;
 
   for (guint i = 0; i < blocks->len; i++)
@@ -269,6 +299,7 @@ static gboolean check_folds(gpointer data)
   gboolean dropped = FALSE;
 
   f->check_id = 0;
+  fresh_blocks(f->tab);
   for (guint i = f->folds->len; i-- > 0;) {
     Fold *fold = &g_array_index(f->folds, Fold, i);
     Block *block = block_at(f->tab, fold_head(f->tab, fold));
@@ -585,6 +616,8 @@ void folding_free(Folding *f)
   g_object_unref(f->numbers);
   if (f->check_id)
     g_source_remove(f->check_id);
+  if (f->blocks_id)
+    g_source_remove(f->blocks_id);
   g_array_free(f->folds, TRUE); /* the marks go with the buffer */
   if (f->blocks)
     g_array_free(f->blocks, TRUE);
