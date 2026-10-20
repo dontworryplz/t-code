@@ -65,21 +65,21 @@ sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-dev
 
 ### With a package (Fedora, Arch Linux, Debian, Void Linux)
 
-t-code 0.2 has packages for Fedora 44, Arch Linux, Debian 13 (trixie) and Void Linux (glibc and
+t-code 0.2.1 has packages for Fedora 44, Arch Linux, Debian 13 (trixie) and Void Linux (glibc and
 musl), x86_64. Install the one for your distribution; the package manager pulls in what it needs
 (clangd, git and the Cascadia Code font among them):
 
 ```sh
-sudo dnf install ./t-code-0.2-1.fc44.x86_64.rpm          # Fedora
-sudo pacman -U t-code-0.2-1-x86_64.pkg.tar.zst           # Arch Linux
-sudo apt install ./t-code_0.2-1_amd64.deb                # Debian
+sudo dnf install ./t-code-0.2.1-1.fc44.x86_64.rpm        # Fedora
+sudo pacman -U t-code-0.2.1-1-x86_64.pkg.tar.zst         # Arch Linux
+sudo apt install ./t-code_0.2.1-1_amd64.deb              # Debian
 ```
 
 On Void Linux, xbps installs from a repository, so the downloaded package is indexed first (in
 the folder it is in; use the `x86_64-musl` file on musl):
 
 ```sh
-xbps-rindex -a t-code-0.2_1.x86_64.xbps
+xbps-rindex -a t-code-0.2.1_1.x86_64.xbps
 sudo xbps-install --repository="$PWD" t-code
 ```
 

@@ -1,5 +1,5 @@
 Name:           t-code
-Version:        0.2
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Lightweight C/C++ IDE: file tree, editor tabs with clangd and a shell
 License:        MIT
@@ -56,6 +56,19 @@ build/test-linediff
 %{_datadir}/icons/hicolor/scalable/apps/io.github.tcode.svg
 
 %changelog
+* Tue Oct 20 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.2.1-1
+- The Files panel is a native folder tree (GtkListView) instead of a terminal
+  file manager: lazy folders, git colors, drag and drop, create / rename /
+  delete / copy / move
+- Temporary tabs like VS Code's preview editor, and a comparison is one tab
+- Indentation from .editorconfig, .clang-format or the file itself, shown and
+  changeable per project in the status bar
+- clangd can be restarted from the Command Palette; a status bar hint when no
+  compile flags are found
+- Smarter Enter after an opening bracket, double click selects a name, other
+  occurrences of a selected name are highlighted and marked beside the minimap
+- Tab moves between a completed function's parameters
+
 * Mon Oct 19 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.2-1
 - Editor tabs are GtkSourceView 5 views instead of micro terminals, with an
   in-process clangd client: problems underlined, completion, parameter hints,

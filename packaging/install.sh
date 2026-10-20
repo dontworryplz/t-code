@@ -44,7 +44,7 @@ make -C "$ROOT" --no-print-directory
 # 3. Programs (a leftover symlink from a manual 'ln -s' setup is replaced by a real copy)
 [[ -L "$BIN" ]] && rm "$BIN"
 install -Dm755 "$ROOT/build/t-code" "$BIN"
-rm -rf "$LIBEXEC" # t-code-fm, the terminal file manager before 0.3: the file tree is built in now
+rm -rf "$LIBEXEC" # t-code-fm, the terminal file manager before 0.2.1: the file tree is built in now
 info "Installed $BIN"
 
 # 4. The editor's colors. What the micro-based t-code (0.1.x) installed is not used any more.
