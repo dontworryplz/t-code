@@ -43,13 +43,21 @@ the mouse. On top of that, like VS Code:
   open as C++ when they contain C++.
 - Find and replace (`Ctrl+F`, `Ctrl+H`; case, whole word, regular expressions), go to line
   (`Ctrl+G`), comment lines (`Ctrl+/`), duplicate (`Ctrl+D`), move (`Alt+↑` / `Alt+↓`) and delete
-  (`Ctrl+Shift+K`) lines, brackets and quotes that close by themselves, `Enter` between braces.
+  (`Ctrl+Shift+K`) lines, brackets and quotes that close by themselves (and wrap a selection).
+- `Enter` after an opening bracket goes one level deeper (between a pair the closer gets its own
+  line), and `}` outdents. A double click selects a name only (letters, digits, `_`).
+- **Selection highlight**: selecting a whole name highlights its other occurrences in the file and
+  marks their lines in the strip beside the minimap.
 - A minimap, indent guides (the block around the cursor in its bracket color), the git diff gutter
   (green added, blue changed, red deleted), autosave a second after the last change.
 
 clangd starts when the first C or C++ file is shown and stops a minute after the last one closes.
 It gets a file only once its tab is shown, so a restored session with many tabs costs it little.
 Other files (Markdown, Makefiles, scripts) get completion from the words in the file.
+"clangd: Restart Language Server" in the command palette restarts it (also one that gave up after
+crashes or was installed meanwhile). When clangd cannot find the includes and the project has no
+`compile_commands.json` or `compile_flags.txt`, the status bar shows **⚠ No compile flags**; a
+click explains how to give it the flags (and points out a misnamed `compile-flags.txt`).
 
 ## Requirements
 
@@ -199,6 +207,7 @@ palette) finds any command by name.
 | editor      | `F12`, `Ctrl+Click` / `Alt+←`          | go to definition / back                   |
 | editor      | `Shift+F12` / `F2`                     | find all references / rename symbol       |
 | editor      | `Shift+Alt+F`                          | format the file with clangd               |
+| editor      | double click                           | select a name (its other occurrences light up) |
 
 ### What else is there
 
@@ -208,8 +217,16 @@ asks whether to save. A file changed on disk (a `git checkout`, another program)
 when the editor has nothing unsaved.
 
 **Status bar**, like VS Code's: the git branch (`*` when there are changes), clangd's errors and
-warnings in the open files, **⚙ Build** and **▶ Run** with what they would build, the cursor's
-line and column, and **⌨ Keybinds**.
+warnings in the open files, **⚠ No compile flags** when clangd lacks them, **⚙ Build** and
+**▶ Run** with what they would build, the file's indentation (**Spaces: 4**, **Tab Size: 8**), the
+cursor's line and column, and **⌨ Keybinds**.
+
+**Indentation.** Each file gets the indentation its project asks for: the Settings' tab size and
+spaces, overridden by what the file itself uses (detect indentation), then by the project's
+`.editorconfig` and `.clang-format` (for C and C++), and last by a choice made for the project.
+The status bar shows the indentation in use and where it comes from; clicking it (or "Change
+Indentation for This Project…" in the command palette) picks one for the whole project, which is
+remembered. Makefiles always get tabs.
 
 **Build and run.** F5 / Run saves, then builds and runs in the shell (Build stops after
 building), looking upwards from the current file: a `CMakeLists.txt` is configured and built in
@@ -335,12 +352,14 @@ src/                 t-code, the window (src/app.h: the shared types and a map o
   editor/            editor tabs and the two groups (tabs.c), opening, saving, autosave and closing
                      (editor.c), the page with the minimap and its look (editorview.c), editing
                      commands and typing help (editing.c), the find bar (findbar.c), indent guides
-                     (guides.c), the git diff gutter (diffgutter.c), a file's indentation and
-                     language (detect.c); markdown preview (preview.c)
+                     (guides.c), the selection highlight (occurrences.c), the git diff gutter
+                     (diffgutter.c), a file's indentation and language (detect.c), what
+                     .editorconfig and .clang-format say about it (indentconf.c); markdown preview
+                     (preview.c)
   lsp/               the language server: the client and clangd's lifetime (client.c, over
                      channel.c), problems (diagnostics.c), hover, completion, parameter hints
                      (signature.c), definition / references / rename / format (navigate.c, edits.c),
-                     colors by meaning (semantic.c)
+                     colors by meaning (semantic.c), finding the compile database (compiledb.c)
   search/            the Search tab, Ctrl+Shift+F (ripgrep); searchmatch.c is its GLib-only part
   git/               the Source Control tab (scm.c), git status in the background (gitstatus.c),
                      comparing with HEAD or a commit from the history (compare.c), line differences
@@ -355,8 +374,9 @@ src/                 t-code, the window (src/app.h: the shared types and a map o
   ipc/               requests from scripts and tools over $TCODE_SOCKET (socket.c)
 styles/              the editor's colors: VS Code Dark Modern as a GtkSourceView style scheme
 tests/               make test: editing and the find bar, the language server client (with a fake
-                     server), detect.c, linediff.c, searchmatch.c, the Files panel and its GIO half,
-                     the Search panel, Source Control and About; make test-asan: the ones without
+                     server), detect.c and indentconf.c, linediff.c, searchmatch.c, the Files panel
+                     and its GIO half, the Search panel, Source Control, tabs in a whole window and
+                     About; make test-asan: the ones without
                      GTK under ASan
 tools/               measuring memory and CPU: the running process tree, a headless t-code, clangd
 desktop/             app menu entry template and the app icon
