@@ -37,7 +37,8 @@ static const char *const css =
     "windowcontrols > button.close:active { background: #a52617; color: #ffffff; }"
 
     /* Editor tabs: rounded on top, the current one in the editor's color, flowing into it. */
-    "notebook { background: none; }"
+    /* No frame: its 1px border pushed the tabs below the docks' headers. */
+    "notebook, notebook.frame { background: none; border: none; }"
     "notebook > header { background: #181818; border: none; box-shadow: none; padding: 4px 4px 0; }"
     /* Adwaita pulls the tabs over its header border (which t-code has not) with a negative margin: an
      * empty group then measured a negative height (a GTK warning). */
@@ -75,7 +76,8 @@ static const char *const square_css =
     ".tcode-status button { border-radius: 0; padding: 3px 8px; }"
 
     "notebook > header { padding: 0; box-shadow: inset 0 -1px #2b2b2b; }"
-    "notebook > header > tabs > tab { min-height: 34px; margin: 0; border-radius: 0;"
+    /* 36px and the line under them, level with the docks' headers beside them. */
+    "notebook > header > tabs > tab { min-height: 37px; margin: 0; border-radius: 0;"
     "  box-shadow: inset -1px 0 #2b2b2b, inset 0 -1px #2b2b2b; }"
     "notebook > header > tabs > tab:hover { background: #1f1f1f; }"
     "notebook > header > tabs > tab:checked { box-shadow: inset 0 1px #0078d4, inset -1px 0 #2b2b2b; }"
