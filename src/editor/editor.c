@@ -328,12 +328,16 @@ static void on_loaded(GObject *source, GAsyncResult *result, gpointer data)
       g_free(name);
     }
     gtk_source_buffer_set_language(tab->buffer, editor_language(tab->path, text));
+    v->own_indent = FALSE;
     if (tab->app->settings.detect_indent) {
       v->own_tabs = !tab->app->settings.tabs_to_spaces;
       v->own_width = tab->app->settings.tab_size;
       v->own_indent = detect_indent(text, -1, &v->own_tabs, &v->own_width);
-      editor_view_apply_settings(tab);
     }
+    v->config = (IndentStyle){ -1, 0 };
+    /* Old versions are in a temporary folder, away from the project's files. */
+    v->config_from = v->readonly ? NULL : indent_from_config(tab->path, &v->config);
+    editor_view_apply_settings(tab);
     gtk_text_buffer_set_modified(buffer, FALSE);
     g_free(v->etag);
     v->etag = disk_etag(tab->path);

@@ -2,15 +2,22 @@
  * The status bar at the bottom, like VS Code's:
  *   left   git branch ("*" when there are changes), clangd errors and warnings in the open files,
  *          a warning when clangd has no compile flags, Build and Run buttons and what they would build
- *   right  cursor line and column, and the Keybinds button
+ *   right  the current editor's indentation ("Spaces: 4", a click chooses the project's), cursor
+ *          line and column, and the Keybinds button
  */
 #include "window/statusbar.h"
 
 #include "dialogs/keybinds.h"
+#include "editor/editorview.h"
 #include "editor/tabs.h"
 #include "git/gitstatus.h"
 #include "lsp/client.h"
+#include "popups/picker.h"
+#include "project/session.h"
 #include "project/run.h"
+
+#include <stdlib.h>
+#include <string.h>
 
 static const char *const css =
     /* The title bar is in window/theme.c. */
@@ -51,7 +58,72 @@ void update_status(App *t)
   gtk_widget_set_visible(t->status.flags, text != NULL);
   g_free(text);
 
+  status_show_indent(t);
   status_show_position(t);
+}
+
+void status_show_indent(App *t)
+{
+  Tab *tab = current_tab(t);
+
+  if (!t->status.indent || t->closing)
+    return;
+  if (tab && tab->kind == TAB_EDITOR && tab->view->width > 0) {
+    char *text = g_strdup_printf("%s: %d", tab->view->tabs ? "Tab Size" : "Spaces", tab->view->width);
+    char *tip = g_strdup_printf("Indentation from %s; click to choose this project's", tab->view->indent_from);
+    gtk_button_set_label(GTK_BUTTON(t->status.indent), text);
+    gtk_widget_set_tooltip_text(t->status.indent, tip);
+    gtk_widget_set_visible(t->status.indent, TRUE);
+    g_free(tip);
+    g_free(text);
+  } else {
+    gtk_widget_set_visible(t->status.indent, FALSE);
+  }
+}
+
+/* The indentation picker ---------------------------------------------------------------------- */
+
+/* The choices: "s4" spaces, "t4" tabs, "auto" the files' and config files' own. */
+static const struct {
+  const char *payload, *label;
+} indents[] = {
+  { "s2", "Indent Using Spaces: 2" },
+  { "s4", "Indent Using Spaces: 4" },
+  { "s8", "Indent Using Spaces: 8" },
+  { "t2", "Indent Using Tabs: 2" },
+  { "t4", "Indent Using Tabs: 4" },
+  { "t8", "Indent Using Tabs: 8" },
+  { "auto", "Automatic: .editorconfig, .clang-format or the file's own" },
+};
+
+static void indent_query(App *t, const char *text, guint generation)
+{
+  for (size_t i = 0; i < G_N_ELEMENTS(indents); i++) {
+    gboolean chosen = t->project_indent.width > 0 && indents[i].payload[0] == (t->project_indent.tabs ? 't' : 's') &&
+                      atoi(indents[i].payload + 1) == t->project_indent.width;
+    gboolean automatic = t->project_indent.width == 0 && strcmp(indents[i].payload, "auto") == 0;
+    if (!*text || fuzzy_score(text, indents[i].label) >= 0)
+      picker_add(t, generation, indents[i].label, chosen || automatic ? "current" : NULL, indents[i].payload);
+  }
+}
+
+/* PickerChoose: the project's indentation, for its open editors and the ones opened later. */
+static void indent_choose(App *t, const char *payload)
+{
+  int n = tab_count(t);
+
+  t->project_indent.tabs = payload[0] == 't';
+  t->project_indent.width = strcmp(payload, "auto") == 0 ? 0 : atoi(payload + 1);
+  session_save_project_indent(t);
+  for (int i = 0; i < n; i++)
+    if (tab_nth(t, i)->kind == TAB_EDITOR)
+      editor_view_apply_settings(tab_nth(t, i));
+  status_show_indent(t);
+}
+
+void status_pick_indent(App *t)
+{
+  picker_open(t, "Indentation for this project", indent_query, indent_choose);
 }
 
 void status_show_position(App *t)
@@ -172,6 +244,8 @@ GtkWidget *status_bar(App *t)
 
   gtk_widget_set_hexpand(spacer, TRUE);
   gtk_box_append(GTK_BOX(bar), spacer);
+  t->status.indent = status_button(bar, "", NULL, G_CALLBACK(status_pick_indent), t);
+  gtk_widget_set_visible(t->status.indent, FALSE);
   t->status.position = status_label(bar, FALSE);
   status_button(bar, "⌨ Keybinds", "All keyboard shortcuts", G_CALLBACK(show_keybinds), t);
   return bar;

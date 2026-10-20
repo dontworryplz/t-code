@@ -3,7 +3,8 @@
  *   [settings]          the Settings window's choices
  *   [window]            size, pane sizes, which panes are shown, text size
  *   [recent]            the last opened project folders
- *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones
+ *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, and
+ *                       the indentation chosen for it in the status bar
  */
 #include "project/session.h"
 
@@ -199,6 +200,35 @@ void session_apply_window(App *t)
   if (!error && scale > 0)
     set_font_scale(t, scale);
   g_clear_error(&error);
+  g_key_file_free(kf);
+}
+
+void session_load_project_indent(App *t)
+{
+  GKeyFile *kf = load();
+  char *group = project_group(t);
+
+  t->project_indent.width = CLAMP(get_int(kf, group, "indent-width", 0), 0, 16);
+  t->project_indent.tabs = get_bool(kf, group, "indent-tabs", FALSE);
+  g_free(group);
+  g_key_file_free(kf);
+}
+
+void session_save_project_indent(App *t)
+{
+  GKeyFile *kf = load();
+  char *group = project_group(t);
+
+  g_key_file_set_string(kf, group, "root", t->root);
+  if (t->project_indent.width > 0) {
+    g_key_file_set_integer(kf, group, "indent-width", t->project_indent.width);
+    g_key_file_set_boolean(kf, group, "indent-tabs", t->project_indent.tabs);
+  } else {
+    g_key_file_remove_key(kf, group, "indent-width", NULL);
+    g_key_file_remove_key(kf, group, "indent-tabs", NULL);
+  }
+  store(kf);
+  g_free(group);
   g_key_file_free(kf);
 }
 

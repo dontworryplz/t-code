@@ -128,6 +128,7 @@ static void switch_project(App *t, const char *root)
 
   g_free(t->root);
   t->root = g_strdup(root);
+  session_load_project_indent(t);
   update_title(t);
   session_add_recent(t);
   rebuild_recent_menu(t);

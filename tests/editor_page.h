@@ -10,6 +10,7 @@
 #include "editor/editing.c"
 #include "editor/editorview.c"
 #include "editor/findbar.c"
+#include "editor/indentconf.c"
 #include "editor/guides.c"
 #include "lsp/channel.c"
 #include "lsp/client.c"
@@ -24,6 +25,7 @@
 
 /* clang-format off */
 void update_status(App *t G_GNUC_UNUSED) {}
+void status_show_indent(App *t G_GNUC_UNUSED) {}
 int tab_count(App *t G_GNUC_UNUSED) { return 0; }
 Tab *tab_nth(App *t G_GNUC_UNUSED, int index G_GNUC_UNUSED) { return NULL; }
 Tab *find_tab(App *t G_GNUC_UNUSED, TabKind kind G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) { return NULL; }

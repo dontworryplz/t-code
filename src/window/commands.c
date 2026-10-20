@@ -21,6 +21,7 @@
 #include "popups/quickopen.h"
 #include "project/project.h"
 #include "project/run.h"
+#include "window/statusbar.h"
 #include "window/window.h"
 
 #include <stdlib.h>
@@ -229,6 +230,7 @@ static const Command commands[] = {
   { "Source Control", "<Control><Shift>g", "Ctrl+Shift+G", show_scm, FALSE },
   { "Toggle Code Coloring", "F7", "F7", toggle_syntax, FALSE },
   { "clangd: Restart Language Server", NULL, NULL, lsp_restart, FALSE },
+  { "Change Indentation for This Project…", NULL, NULL, status_pick_indent, FALSE },
   { "Zoom In", "<Control>equal|<Control>plus|<Control>KP_Add", "Ctrl+=", zoom_in, FALSE },
   { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out, FALSE },
   { "Reset Zoom", "<Control>0|<Control>KP_0", "Ctrl+0", zoom_reset, FALSE },

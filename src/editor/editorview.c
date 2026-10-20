@@ -16,7 +16,10 @@
 #include "lsp/navigate.h"
 #include "lsp/semantic.h"
 #include "lsp/signature.h"
+#include "window/statusbar.h"
 #include "window/terminal.h"
+
+#include <string.h>
 
 #define SCHEME "t-code-dark-modern" /* styles/dark-modern.xml */
 
@@ -133,12 +136,34 @@ void editor_view_apply_settings(Tab *tab)
   App *t = tab->app;
   EditorView *v = tab->view;
   GtkSourceView *view = tab->source;
-  int width = v->own_indent ? v->own_width : t->settings.tab_size;
-  gboolean spaces = v->own_indent ? !v->own_tabs : t->settings.tabs_to_spaces;
+  GtkSourceLanguage *language = gtk_source_buffer_get_language(tab->buffer);
 
-  gtk_source_view_set_tab_width(view, MAX(width, 1));
+  /* The settings, then the file's own, the project's config files, the project's choice. */
+  v->tabs = !t->settings.tabs_to_spaces;
+  v->width = t->settings.tab_size;
+  v->indent_from = "Settings";
+  if (v->own_indent) {
+    v->tabs = v->own_tabs;
+    v->width = v->own_width;
+    v->indent_from = "the file's own indentation";
+  }
+  if (v->config.tabs >= 0)
+    v->tabs = v->config.tabs;
+  if (v->config.width > 0)
+    v->width = v->config.width;
+  if (v->config_from)
+    v->indent_from = v->config_from;
+  if (t->project_indent.width > 0) {
+    v->tabs = t->project_indent.tabs;
+    v->width = t->project_indent.width;
+    v->indent_from = "this project's choice";
+  }
+  if (language && strcmp(gtk_source_language_get_id(language), "makefile") == 0)
+    v->tabs = TRUE; /* make's recipes start with a tab */
+
+  gtk_source_view_set_tab_width(view, MAX(v->width, 1));
   gtk_source_view_set_indent_width(view, -1); /* the tab width */
-  gtk_source_view_set_insert_spaces_instead_of_tabs(view, spaces);
+  gtk_source_view_set_insert_spaces_instead_of_tabs(view, !v->tabs);
   gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), t->settings.word_wrap ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
   gtk_source_buffer_set_highlight_syntax(tab->buffer, !t->plain);
   gtk_widget_set_visible(v->map, t->settings.minimap);
@@ -147,6 +172,7 @@ void editor_view_apply_settings(Tab *tab)
   gtk_widget_queue_draw(GTK_WIDGET(view)); /* the indent guides, turned off or on */
   if (tab->old_side)                       /* a comparison's right side is in no tab list */
     editor_view_apply_settings(tab->old_side);
+  status_show_indent(t);
 }
 
 /* The problems strip ------------------------------------------------------------------------- */
@@ -305,6 +331,8 @@ void editor_view_init(Tab *tab, gboolean readonly)
   GtkWidget *scrolled = gtk_scrolled_window_new();
   GtkSourceBuffer *buffer;
   GtkSourceView *view;
+
+  v->config = (IndentStyle){ -1, 0 }; /* until loaded */
 
   buffer = gtk_source_buffer_new(NULL);
   gtk_source_buffer_set_style_scheme(buffer, editor_style_scheme(t));

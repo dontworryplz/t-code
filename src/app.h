@@ -81,7 +81,8 @@ struct App {
   Picker *picker;
   struct {
     GtkLabel *branch, *problems, *build, *position;
-    GtkWidget *flags; /* "No compile flags": clangd cannot find a file's headers */
+    GtkWidget *flags;  /* "No compile flags": clangd cannot find a file's headers */
+    GtkWidget *indent; /* "Spaces: 4": the current editor's indentation, a click changes it */
   } status;
   char *root;
   char *git_top; /* the work tree root of t->root's repository; NULL outside one */
@@ -94,6 +95,10 @@ struct App {
   double font_scale;
   gboolean closing;
   gboolean plain; /* syntax coloring off (F7) */
+  struct {
+    gboolean tabs;
+    int width;      /* 0: none chosen */
+  } project_indent; /* chosen for this project in the status bar (session.c); beats everything else */
   struct {
     gboolean minimap;
     gboolean reopen_last; /* started from the app menu: open the last project */

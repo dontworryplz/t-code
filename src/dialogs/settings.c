@@ -284,7 +284,9 @@ void show_settings(App *t)
           switch_for(t->settings.guides, G_CALLBACK(on_guides)));
   add_row(GTK_GRID(grid), &row, "Word wrap", "Lines longer than the editor continue on the next row",
           switch_for(t->settings.word_wrap, G_CALLBACK(on_word_wrap)));
-  add_row(GTK_GRID(grid), &row, "Tab size", NULL, spin_for(1, 16, 1, t->settings.tab_size, G_CALLBACK(on_tab_size)));
+  add_row(GTK_GRID(grid), &row, "Tab size",
+          "For projects without their own: the status bar's choice, .editorconfig or .clang-format come first",
+          spin_for(1, 16, 1, t->settings.tab_size, G_CALLBACK(on_tab_size)));
   add_row(GTK_GRID(grid), &row, "Insert spaces for Tab", NULL,
           switch_for(t->settings.tabs_to_spaces, G_CALLBACK(on_tabs_to_spaces)));
   add_row(GTK_GRID(grid), &row, "Detect indentation",

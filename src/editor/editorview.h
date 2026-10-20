@@ -6,6 +6,7 @@
 #pragma once
 
 #include "app.h"
+#include "editor/indentconf.h"
 
 typedef void (*EditorSavedFunc)(gpointer data, gboolean ok);
 
@@ -49,6 +50,11 @@ struct EditorView {
   gboolean own_indent;        /* the file's own indentation (detect indentation) overrides the settings */
   gboolean own_tabs;
   int own_width;
+  IndentStyle config;      /* what the project's .editorconfig / .clang-format say (indentconf.c) */
+  const char *config_from; /* which of the two said it, or NULL */
+  gboolean tabs;           /* the indentation in use (editor_view_apply_settings) */
+  int width;
+  const char *indent_from; /* where it comes from, for the status bar */
 };
 
 /* An editor tab's page, empty until editor_view_init() fills it. */

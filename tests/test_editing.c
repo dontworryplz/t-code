@@ -650,6 +650,49 @@ static void test_comparison_gaps(void)
   free_tab(new_side);
 }
 
+/* The indentation in use: the settings, then the file's own, the config files, the project's
+ * choice; a Makefile keeps tabs. */
+static void test_indent_order(void)
+{
+  Tab *tab = new_tab("int a;\n");
+  EditorView *v = tab->view;
+
+  editor_view_apply_settings(tab);
+  g_assert_false(v->tabs);
+  g_assert_cmpint(v->width, ==, 4);
+  g_assert_cmpstr(v->indent_from, ==, "Settings");
+
+  v->own_indent = TRUE;
+  v->own_tabs = FALSE;
+  v->own_width = 2;
+  editor_view_apply_settings(tab);
+  g_assert_cmpint(v->width, ==, 2);
+
+  v->config = (IndentStyle){ 1, 0 }; /* .editorconfig says tabs only: the file's width stays */
+  v->config_from = ".editorconfig";
+  editor_view_apply_settings(tab);
+  g_assert_true(v->tabs);
+  g_assert_cmpint(v->width, ==, 2);
+  g_assert_cmpstr(v->indent_from, ==, ".editorconfig");
+  g_assert_false(gtk_source_view_get_insert_spaces_instead_of_tabs(tab->source));
+
+  app.project_indent.tabs = FALSE;
+  app.project_indent.width = 8;
+  editor_view_apply_settings(tab);
+  g_assert_false(v->tabs);
+  g_assert_cmpint(gtk_source_view_get_tab_width(tab->source), ==, 8);
+  g_assert_true(gtk_source_view_get_insert_spaces_instead_of_tabs(tab->source));
+
+  gtk_source_buffer_set_language(
+      tab->buffer, gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(), "makefile"));
+  editor_view_apply_settings(tab);
+  g_assert_true(v->tabs);
+  g_assert_cmpint(v->width, ==, 8);
+
+  app.project_indent.width = 0;
+  free_tab(tab);
+}
+
 int main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
@@ -663,6 +706,7 @@ int main(int argc, char **argv)
   app.font_scale = 1.0;
   app.styles_dir = g_canonicalize_filename("styles", NULL); /* run from the repository (make test) */
   g_test_add_func("/editing/comment-lines", test_comment_lines);
+  g_test_add_func("/editing/indent-order", test_indent_order);
   g_test_add_func("/editing/comment-indented", test_comment_indented);
   g_test_add_func("/editing/block-comment", test_block_comment);
   g_test_add_func("/editing/duplicate", test_duplicate);

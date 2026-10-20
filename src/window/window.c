@@ -1138,6 +1138,7 @@ void build_window(App *t, GtkApplication *app)
   /* The last session's sizes, then start the programs and show it. */
   add_shortcuts(t);
   session_apply_window(t);
+  session_load_project_indent(t);
   if (strcmp(t->root, g_get_home_dir()) != 0) /* home means no folder (see reopen_last_project) */
     session_add_recent(t);
   rebuild_recent_menu(t);
