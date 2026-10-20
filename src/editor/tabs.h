@@ -37,17 +37,37 @@ gboolean any_unsaved(App *t);
  * Tab is freed with the page. */
 Tab *add_tab(App *t, TabKind kind, GtkWidget *page, const char *path);
 
+/* The group's temporary tab (a click in the Files panel opened it), or NULL. */
+Tab *temporary_tab(App *t, int group);
+
+/* Keeps a temporary tab: the next click in the Files panel opens another tab instead of replacing
+ * it. */
+void keep_tab(Tab *tab);
+
+/* Puts right (an old version) next to left in left's notebook page: one tab, both sides; it closes
+ * with left. */
+void join_tabs(Tab *left, Tab *right);
+
+/* Takes a comparison apart: its right side closes, left is a tab of its own again. */
+void part_tabs(Tab *left);
+
+/* A tab's position in its group, and moving it to another one there. */
+int tab_position(Tab *tab);
+void set_tab_position(Tab *tab, int position);
+
 /* Moves a tab (with its editor) to the end of the other group. */
 void move_tab(Tab *tab, int group);
 
-/* Takes the tab out of its group at once, unsaved changes or not. Closing an editor the normal
- * way goes through quit_editor(), which asks about unsaved changes. */
+/* Takes the tab out of its group at once, unsaved changes or not; a comparison goes with both
+ * sides. Closing an editor the normal way goes through
+ * quit_editor(), which asks about unsaved changes. */
 void remove_tab(Tab *tab);
 
 /* Removes every tab without asking (a project switch, after asking). */
 void close_all_tabs(App *t);
 
-/* The label: the file name, "●" when unsaved, "Preview" for previews; the path as tooltip. */
+/* The label: the file name, "●" when unsaved, "Preview" for previews, in italics while temporary;
+ * the path as tooltip. */
 void update_tab_label(Tab *tab);
 
 /* Focus -------------------------------------------------------------------------------------- */

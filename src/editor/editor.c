@@ -63,10 +63,12 @@ static void on_mark_set(GtkTextBuffer *buffer, const GtkTextIter *where G_GNUC_U
     update_position(tab);
 }
 
-/* Saved or changed: the "●" in the tab's label. */
+/* Saved or changed: the "●" in the tab's label. An edited temporary tab is kept. */
 static void on_modified_changed(GtkTextBuffer *buffer, Tab *tab)
 {
   tab->modified = gtk_text_buffer_get_modified(buffer);
+  if (tab->modified && !tab->view->loading) /* typed, not the file coming in */
+    tab->temporary = FALSE;
   update_tab_label(tab);
 }
 
@@ -105,6 +107,10 @@ static gboolean scroll_to_cursor(gpointer data)
   tab->view->scroll_id = 0;
   if (!gtk_widget_get_mapped(GTK_WIDGET(tab->source))) {
     tab->view->scroll_pending = TRUE;
+    return G_SOURCE_REMOVE;
+  }
+  if (gtk_widget_get_width(GTK_WIDGET(tab->source)) <= 1) { /* shown but not laid out yet: in a moment */
+    tab->view->scroll_id = g_timeout_add(50, scroll_to_cursor, tab);
     return G_SOURCE_REMOVE;
   }
   tab->view->scroll_pending = FALSE;
@@ -476,7 +482,33 @@ void open_file_at(App *t, const char *path, int line, int column)
 
 void open_file(App *t, const char *path)
 {
+  Tab *existing = find_tab(t, TAB_EDITOR, path);
+
+  if (existing)
+    keep_tab(existing); /* opened on purpose: no longer temporary */
   open_file_at(t, path, 0, 0);
+}
+
+void open_file_temporary(App *t, const char *path)
+{
+  int group = t->active;
+  Tab *existing = find_tab(t, TAB_EDITOR, path), *old = temporary_tab(t, group), *tab;
+  int position = -1;
+
+  if (existing) {
+    select_tab(existing);
+    return;
+  }
+  if (old) { /* replaced, in its place */
+    position = tab_position(old);
+    remove_tab(old);   /* temporary tabs have nothing unsaved: an edit keeps them */
+    t->active = group; /* removing it focused another tab, maybe in the other group */
+  }
+  tab = open_editor(t, path, 0, 0, FALSE);
+  tab->temporary = TRUE;
+  update_tab_label(tab);
+  if (position >= 0)
+    set_tab_position(tab, position);
 }
 
 void open_to_side(App *t, const char *path)

@@ -109,16 +109,23 @@ void editor_view_reveal_cursor(Tab *tab)
   GtkTextView *view = GTK_TEXT_VIEW(tab->source);
   GtkTextMark *insert = gtk_text_buffer_get_insert(GTK_TEXT_BUFFER(tab->buffer));
   GtkAdjustment *vertical = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(view));
+  GtkAdjustment *horizontal = gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(view));
+  double sideways = horizontal ? gtk_adjustment_get_value(horizontal) : 0;
   GdkRectangle visible, cursor;
   GtkTextIter iter;
+  gboolean seen_sideways;
 
   gtk_text_buffer_get_iter_at_mark(GTK_TEXT_BUFFER(tab->buffer), &iter, insert);
   gtk_text_view_get_visible_rect(view, &visible);
   gtk_text_view_get_iter_location(view, &iter, &cursor);
+  seen_sideways = cursor.x >= visible.x && cursor.x + MAX(cursor.width, 1) <= visible.x + visible.width;
   if (vertical && (cursor.y < visible.y || cursor.y + cursor.height > visible.y + visible.height))
     gtk_adjustment_set_value(vertical, cursor.y + cursor.height / 2.0 - gtk_adjustment_get_page_size(vertical) / 2);
-  /* Far lines have estimated heights until laid out: this makes it exact. */
+  /* Far lines have estimated heights until laid out: this makes it exact. It also moved a cursor that
+   * was in view sideways by a few pixels (cutting off the first letters): that is undone. */
   gtk_text_view_scroll_mark_onscreen(view, insert);
+  if (horizontal && seen_sideways)
+    gtk_adjustment_set_value(horizontal, sideways);
 }
 
 void editor_view_apply_settings(Tab *tab)
@@ -138,6 +145,8 @@ void editor_view_apply_settings(Tab *tab)
   if (lsp_has(tab))
     semantic_update(tab);                  /* code coloring may have been turned off or on */
   gtk_widget_queue_draw(GTK_WIDGET(view)); /* the indent guides, turned off or on */
+  if (tab->old_side)                       /* a comparison's right side is in no tab list */
+    editor_view_apply_settings(tab->old_side);
 }
 
 /* The problems strip ------------------------------------------------------------------------- */

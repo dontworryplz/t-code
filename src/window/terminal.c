@@ -1,13 +1,13 @@
 /*
- * Terminals: their look, starting programs in them, and the two that are always there (the file
- * manager and the shell). In the shell, Ctrl+click on a "file.c:12:5" location (compiler output)
- * opens the file at that line.
+ * Terminals: their look, starting programs in them, and the shell pane, which is always there. In
+ * the shell, Ctrl+click on a "file.c:12:5" location (compiler output) opens the file at that line.
  */
 #define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 #include "window/terminal.h"
 
 #include "editor/editor.h"
 #include "editor/editorview.h"
+#include "files/files.h"
 #include "window/window.h"
 
 #include <signal.h>
@@ -29,15 +29,15 @@ void set_terminal_font(App *t, VteTerminal *term, const char *font)
   pango_font_description_free(desc);
 }
 
-/* Gives every terminal and the editors the font the settings choose for them. */
+/* Gives the shell, the editors and the Files panel the fonts the settings choose for them. */
 void apply_fonts(App *t)
 {
-  set_terminal_font(t, t->fm, t->settings.fm_font);
   set_terminal_font(t, t->shell, t->settings.font);
   editor_view_set_font(t);
+  files_apply_font(t);
 }
 
-/* A terminal in the editor font; the file manager gets its own in create_fixed_terminals(). */
+/* A terminal in the editor font. */
 VteTerminal *new_terminal(App *t)
 {
   VteTerminal *term = VTE_TERMINAL(vte_terminal_new());
@@ -90,17 +90,10 @@ void spawn(App *t, VteTerminal *term, char **argv, char **extra_env, GPid *pid)
   g_strfreev(env);
 }
 
-/* The file manager and the shell ------------------------------------------------------------- */
-
-static void start_fm(App *t)
-{
-  char *argv[] = { t->fm_program, NULL };
-
-  spawn(t, t->fm, argv, NULL, &t->fm_pid);
-}
+/* The shell pane ----------------------------------------------------------------------------- */
 
 /* $SHELL first, like most terminals; then the login shell from the user database. */
-static void start_shell(App *t)
+void start_shell_pane(App *t)
 {
   const char *env = g_getenv("SHELL");
   char *shell = env && *env ? g_strdup(env) : vte_get_user_shell();
@@ -110,36 +103,21 @@ static void start_shell(App *t)
   g_free(shell);
 }
 
-void start_fixed_terminals(App *t)
+/* It comes back when it exits, in the current project (see on_shell_exited). */
+void restart_shell_pane(App *t)
 {
-  start_fm(t);
-  start_shell(t);
-}
-
-/* They come back when they exit, in the current project (see on_fixed_exited). */
-void restart_fixed_terminals(App *t)
-{
-  if (t->fm_pid > 0)
-    kill(t->fm_pid, SIGHUP);
   if (t->shell_pid > 0)
     kill(t->shell_pid, SIGHUP);
 }
 
-/* The file manager or the shell exited (or restart_fixed_terminals() hung them up): it starts
- * again, in the current project. */
-static void on_fixed_exited(VteTerminal *term, int status G_GNUC_UNUSED, App *t)
+/* The shell exited (or restart_shell_pane() hung it up): it starts again, in the current project. */
+static void on_shell_exited(VteTerminal *term, int status G_GNUC_UNUSED, App *t)
 {
   if (t->closing)
     return;
-  if (term == t->fm)
-    t->fm_pid = 0; /* gone: nothing may signal its pid until the new one starts */
-  else
-    t->shell_pid = 0;
+  t->shell_pid = 0; /* gone: nothing may signal its pid until the new one starts */
   vte_terminal_reset(term, TRUE, TRUE);
-  if (term == t->fm)
-    start_fm(t);
-  else
-    start_shell(t);
+  start_shell_pane(t);
 }
 
 /* The process group in the foreground of the shell pane: the shell itself when it waits at its
@@ -238,6 +216,16 @@ void run_in_shell(App *t, const char *command)
   g_timeout_add(50, run_when_idle, waiting);
 }
 
+void cd_in_shell(App *t, const char *dir)
+{
+  char *quoted = g_shell_quote(dir);
+  char *command = g_strdup_printf(" cd -- %s", quoted); /* the leading space keeps it out of history */
+
+  run_in_shell(t, command);
+  g_free(command);
+  g_free(quoted);
+}
+
 /* Clickable compiler messages ---------------------------------------------------------------- */
 
 #define PCRE2_MULTILINE 0x00000400u /* VTE wants its match patterns multiline */
@@ -320,12 +308,9 @@ static void add_location_links(App *t)
   gtk_widget_add_controller(GTK_WIDGET(t->shell), GTK_EVENT_CONTROLLER(click));
 }
 
-void create_fixed_terminals(App *t)
+void create_shell_pane(App *t)
 {
-  t->fm = new_terminal(t);
   t->shell = new_terminal(t);
-  set_terminal_font(t, t->fm, t->settings.fm_font);
-  g_signal_connect(t->fm, "child-exited", G_CALLBACK(on_fixed_exited), t);
-  g_signal_connect(t->shell, "child-exited", G_CALLBACK(on_fixed_exited), t);
+  g_signal_connect(t->shell, "child-exited", G_CALLBACK(on_shell_exited), t);
   add_location_links(t);
 }

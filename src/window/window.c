@@ -5,9 +5,11 @@
 #include "window/window.h"
 
 #include "dialogs/settings.h"
+#include "editor/editor.h"
 #include "editor/editorview.h"
 #include "editor/preview.h"
 #include "editor/tabs.h"
+#include "files/files.h"
 #include "git/scm.h"
 #include "ipc/socket.h"
 #include "popups/picker.h"
@@ -57,7 +59,7 @@ static void focus_panel(App *t, const char *page)
   if (strcmp(page, "search") == 0)
     search_focus();
   else if (strcmp(page, "files") == 0)
-    gtk_widget_grab_focus(GTK_WIDGET(t->fm));
+    files_focus(t);
   else if (strcmp(page, "scm") == 0)
     gtk_widget_grab_focus(t->scm);
   else if (strcmp(page, "shell") == 0)
@@ -110,16 +112,23 @@ static void sync_sidebar_visible(App *t)
     gtk_widget_set_visible(t->right_sidebar, side_any_visible(t, 2));
 }
 
-static void ensure_right_width(App *t)
+/* Gives a side that is being shown room when its paned has squeezed it to (almost) nothing. */
+static void make_room(App *t, int side)
 {
-  if (!t->rpaned)
-    return;
-  int w = gtk_widget_get_width(GTK_WIDGET(t->rpaned));
-  int pos = gtk_paned_get_position(t->rpaned);
-  if (w > 320 && (pos <= 0 || pos > w - 60))
-    gtk_paned_set_position(t->rpaned, w - 280);
-  else if (w <= 320 && pos <= 0)
-    gtk_paned_set_position(t->rpaned, 840);
+  if (side == 0 && gtk_paned_get_position(t->hpaned) < 48) {
+    gtk_paned_set_position(t->hpaned, 280);
+  } else if (side == 1 && t->vpaned) {
+    int h = gtk_widget_get_height(GTK_WIDGET(t->vpaned));
+    if (h > 200 && gtk_paned_get_position(t->vpaned) > h - 60)
+      gtk_paned_set_position(t->vpaned, h - 240);
+  } else if (side == 2 && t->rpaned) {
+    int w = gtk_widget_get_width(GTK_WIDGET(t->rpaned));
+    int pos = gtk_paned_get_position(t->rpaned);
+    if (w > 320 && (pos <= 0 || pos > w - 60))
+      gtk_paned_set_position(t->rpaned, w - 280);
+    else if (w <= 320 && pos <= 0)
+      gtk_paned_set_position(t->rpaned, 840);
+  }
 }
 
 /* Adjusts the paned positions on a side so collapsed docks shrink to their header bar and
@@ -224,9 +233,9 @@ void set_font_scale(App *t, double scale)
   int n = tab_count(t);
 
   t->font_scale = CLAMP(scale, 0.5, 3.0);
-  vte_terminal_set_font_scale(t->fm, t->font_scale);
   vte_terminal_set_font_scale(t->shell, t->font_scale);
   editor_view_set_font(t);
+  files_apply_font(t);
   for (int i = 0; i < n; i++)
     if (tab_nth(t, i)->kind == TAB_PREVIEW)
       preview_set_zoom(tab_nth(t, i), t->font_scale);
@@ -253,14 +262,7 @@ static void show_side(App *t, int side, gboolean visible)
   if (visible) {
     for (int i = 0; i < 4; i++)
       gtk_widget_set_visible(t->docks[side * 4 + i], dock_has_pages(t, side * 4 + i));
-    if (side == 0 && gtk_paned_get_position(t->hpaned) < 48)
-      gtk_paned_set_position(t->hpaned, 280);
-    else if (side == 1) {
-      int h = gtk_widget_get_height(GTK_WIDGET(t->vpaned));
-      if (h > 200 && gtk_paned_get_position(t->vpaned) > h - 60)
-        gtk_paned_set_position(t->vpaned, h - 240);
-    } else if (side == 2)
-      ensure_right_width(t);
+    make_room(t, side);
     sync_side_paneds(t, side);
   }
 }
@@ -302,14 +304,7 @@ void show_sidebar_page(App *t, const char *page)
   if (t->dock_collapsed[d])
     set_dock_collapsed(t, d, FALSE);
   gtk_widget_set_visible(side_widget(t, side), TRUE);
-  if (side == 0 && gtk_paned_get_position(t->hpaned) < 48)
-    gtk_paned_set_position(t->hpaned, 280);
-  else if (side == 1) {
-    int h = gtk_widget_get_height(GTK_WIDGET(t->vpaned));
-    if (h > 200 && gtk_paned_get_position(t->vpaned) > h - 48)
-      gtk_paned_set_position(t->vpaned, h - 220);
-  } else if (side == 2)
-    ensure_right_width(t);
+  make_room(t, side);
   sync_side_paneds(t, side);
   gtk_stack_set_visible_child_name(t->dock_stacks[d], page);
   focus_panel(t, page);
@@ -434,17 +429,9 @@ static void move_panel_at(App *t, const char *page, int to, int insert_pos)
   if (t->dock_collapsed[to])
     set_dock_collapsed(t, to, FALSE);
   sync_sidebar_visible(t);
-  int side = to / 4;
-  if (side == 0 && gtk_paned_get_position(t->hpaned) < 48)
-    gtk_paned_set_position(t->hpaned, 280);
-  else if (side == 1 && t->vpaned) {
-    int h = gtk_widget_get_height(GTK_WIDGET(t->vpaned));
-    if (h > 200 && gtk_paned_get_position(t->vpaned) > h - 60)
-      gtk_paned_set_position(t->vpaned, h - 240);
-  } else if (side == 2)
-    ensure_right_width(t);
+  make_room(t, to / 4);
   sync_side_paneds(t, from / 4);
-  sync_side_paneds(t, side);
+  sync_side_paneds(t, to / 4);
   gtk_stack_set_visible_child_name(t->dock_stacks[to], page);
 }
 
@@ -676,68 +663,74 @@ static int header_drop_pos(App *t, int to, const char *page, double x)
   return pos;
 }
 
+/* The dock icon menu: what it does to menu_target_page, the panel it was opened on. */
+typedef enum {
+  DOCK_TAB_LEFT,
+  DOCK_TAB_RIGHT,
+  DOCK_TO_LEFT,
+  DOCK_STACK_LEFT,
+  DOCK_TO_BOTTOM,
+  DOCK_SPLIT_BOTTOM,
+  DOCK_TO_RIGHT,
+  DOCK_STACK_RIGHT,
+  DOCK_COLLAPSE,
+  DOCK_HIDE
+} DockAction;
+
+static const char *const dock_action_labels[] = {
+  [DOCK_TAB_LEFT] = "Move Tab Left",           [DOCK_TAB_RIGHT] = "Move Tab Right",
+  [DOCK_TO_LEFT] = "Move to Left (Tab)",       [DOCK_STACK_LEFT] = "Stack on Left (Above/Below)",
+  [DOCK_TO_BOTTOM] = "Move to Bottom (Tab)",   [DOCK_SPLIT_BOTTOM] = "Split on Bottom (Side by Side)",
+  [DOCK_TO_RIGHT] = "Move to Right (Tab)",     [DOCK_STACK_RIGHT] = "Stack on Right (Above/Below)",
+  [DOCK_COLLAPSE] = "Collapse / Expand Panel", [DOCK_HIDE] = "Hide Panel",
+};
+
 static char *menu_target_page;
+static App *menu_app;
 
-typedef struct {
-  App *app;
-  int action;
-} MoveTarget;
-
-static gboolean move_panel_idle(gpointer data)
+/* Runs in an idle: the popover is gone first. */
+static gboolean run_dock_action(gpointer data)
 {
-  MoveTarget *m = data;
-  App *t = m->app;
+  DockAction action = GPOINTER_TO_INT(data);
+  App *t = menu_app;
+  const char *page = menu_target_page;
+  int cur = page ? panel_dock(t, page) : -1, idx = page ? panel_tab_index(t, page) : -1;
 
-  if (menu_target_page) {
-    int cur = panel_dock(t, menu_target_page);
-    int idx = panel_tab_index(t, menu_target_page);
-    switch (m->action) {
-      case 0:
-        if (cur >= 0 && idx > 0)
-          move_panel_at(t, menu_target_page, cur, idx - 1);
-        break;
-      case 1:
-        if (cur >= 0 && idx >= 0)
-          move_panel_at(t, menu_target_page, cur, idx + 1);
-        break;
-      case 2: move_panel(t, menu_target_page, first_tab_dock(t, 0)); break;
-      case 3: move_panel(t, menu_target_page, new_split_dock(t, 0, menu_target_page)); break;
-      case 4: move_panel(t, menu_target_page, first_tab_dock(t, 1)); break;
-      case 5: move_panel(t, menu_target_page, new_split_dock(t, 1, menu_target_page)); break;
-      case 6: move_panel(t, menu_target_page, first_tab_dock(t, 2)); break;
-      case 7: move_panel(t, menu_target_page, new_split_dock(t, 2, menu_target_page)); break;
-      case 8:
-        if (cur >= 0)
-          set_dock_collapsed(t, cur, !t->dock_collapsed[cur]);
-        break;
-      case 9: hide_dock(t, cur); break;
-    }
+  if (cur < 0)
+    return G_SOURCE_REMOVE;
+  switch (action) {
+    case DOCK_TAB_LEFT:
+      if (idx > 0)
+        move_panel_at(t, page, cur, idx - 1);
+      break;
+    case DOCK_TAB_RIGHT:
+      if (idx >= 0)
+        move_panel_at(t, page, cur, idx + 1);
+      break;
+    case DOCK_TO_LEFT: move_panel(t, page, first_tab_dock(t, 0)); break;
+    case DOCK_STACK_LEFT: move_panel(t, page, new_split_dock(t, 0, page)); break;
+    case DOCK_TO_BOTTOM: move_panel(t, page, first_tab_dock(t, 1)); break;
+    case DOCK_SPLIT_BOTTOM: move_panel(t, page, new_split_dock(t, 1, page)); break;
+    case DOCK_TO_RIGHT: move_panel(t, page, first_tab_dock(t, 2)); break;
+    case DOCK_STACK_RIGHT: move_panel(t, page, new_split_dock(t, 2, page)); break;
+    case DOCK_COLLAPSE: set_dock_collapsed(t, cur, !t->dock_collapsed[cur]); break;
+    case DOCK_HIDE: hide_dock(t, cur); break;
   }
-  g_free(m);
   return G_SOURCE_REMOVE;
 }
 
-static void on_move_item_clicked(GtkButton *btn, App *t)
+static void on_dock_action_clicked(GtkButton *btn, gpointer action)
 {
-  int action = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "tcode-action"));
   GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(btn), GTK_TYPE_POPOVER);
-  MoveTarget *m = g_new0(MoveTarget, 1);
 
   if (pop)
     gtk_popover_popdown(GTK_POPOVER(pop));
-  m->app = t;
-  m->action = action;
-  g_idle_add(move_panel_idle, m);
+  g_idle_add(run_dock_action, action);
 }
 
 /* Right-click on a dock tab icon: menu to reorder/move/split/stack/collapse/hide that panel. */
 static void on_switcher_right_click(GtkGestureClick *gesture, int n_press G_GNUC_UNUSED, double x, double y, App *t)
 {
-  static const char *const labels[] = { "Move Tab Left",           "Move Tab Right",
-                                        "Move to Left (Tab)",      "Stack on Left (Above/Below)",
-                                        "Move to Bottom (Tab)",    "Split on Bottom (Side by Side)",
-                                        "Move to Right (Tab)",     "Stack on Right (Above/Below)",
-                                        "Collapse / Expand Panel", "Hide Panel" };
   GtkWidget *switcher = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
   GtkStack *stack = GTK_STACK(gtk_stack_switcher_get_stack(GTK_STACK_SWITCHER(switcher)));
   GtkWidget *header = gtk_widget_get_ancestor(switcher, GTK_TYPE_BOX);
@@ -748,17 +741,17 @@ static void on_switcher_right_click(GtkGestureClick *gesture, int n_press G_GNUC
   if (!page || !header)
     return;
   g_set_str(&menu_target_page, page);
+  menu_app = t;
   pop = g_object_get_data(G_OBJECT(header), "tcode-pop");
   if (!pop) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     pop = GTK_POPOVER(gtk_popover_new());
     gtk_popover_set_has_arrow(pop, FALSE);
-    for (int i = 0; i < 10; i++) {
-      GtkWidget *btn = gtk_button_new_with_label(labels[i]);
+    for (DockAction i = 0; i < G_N_ELEMENTS(dock_action_labels); i++) {
+      GtkWidget *btn = gtk_button_new_with_label(dock_action_labels[i]);
       gtk_button_set_has_frame(GTK_BUTTON(btn), FALSE);
       gtk_widget_set_halign(btn, GTK_ALIGN_FILL);
-      g_object_set_data(G_OBJECT(btn), "tcode-action", GINT_TO_POINTER(i));
-      g_signal_connect(btn, "clicked", G_CALLBACK(on_move_item_clicked), t);
+      g_signal_connect(btn, "clicked", G_CALLBACK(on_dock_action_clicked), GINT_TO_POINTER(i));
       gtk_box_append(GTK_BOX(box), btn);
     }
     gtk_popover_set_child(pop, box);
@@ -816,14 +809,24 @@ static gboolean on_dock_drop(GtkDropTarget *target, const GValue *value, double 
   return TRUE;
 }
 
-/* Dropping near the left, right or bottom edge of the editor area moves or splits a panel there. */
+/* A file dropped on the editor area opens; a panel dropped near its left, right or bottom edge moves or
+ * splits there. */
 static gboolean on_editor_drop(GtkDropTarget *target, const GValue *value, double x, double y, App *t)
 {
   GtkWidget *area = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target));
-  const char *page = panel_from_id(g_value_get_int(value));
   int w = MAX(gtk_widget_get_width(area), 1), h = MAX(gtk_widget_get_height(area), 1);
+  const char *page;
   int side, to;
 
+  if (G_VALUE_HOLDS(value, G_TYPE_FILE)) { /* a file: opened */
+    char *path = g_file_get_path(g_value_get_object(value));
+    gboolean opened = path && g_file_test(path, G_FILE_TEST_IS_REGULAR);
+    if (opened)
+      open_file(t, path);
+    g_free(path);
+    return opened;
+  }
+  page = panel_from_id(g_value_get_int(value));
   if (!page)
     return FALSE;
   if (x > w * 0.70)
@@ -963,7 +966,8 @@ static void create_docks(App *t)
       "  color: #e7e7e7; background: rgba(255, 255, 255, .05); }"
       ".tcode-scm-badge { font-size: 0.78em; font-weight: bold; }";
   GtkCssProvider *provider = gtk_css_provider_new();
-  GtkDropTarget *ed_drop = gtk_drop_target_new(G_TYPE_INT, GDK_ACTION_MOVE);
+  GtkDropTarget *ed_drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_MOVE | GDK_ACTION_COPY);
+  GType dropped[] = { G_TYPE_INT, G_TYPE_FILE }; /* a panel's icon, a file from the Files panel */
 
   gtk_css_provider_load_from_string(provider, css);
   gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
@@ -978,7 +982,7 @@ static void create_docks(App *t)
   gtk_widget_add_css_class(GTK_WIDGET(t->shell), "tcode-shell");
   vte_terminal_set_clear_background(t->shell, FALSE);
 
-  add_dock_panel(t, 0, GTK_WIDGET(t->fm), "files", "Files (Alt+1)");
+  add_dock_panel(t, 0, clip_box(files_panel(t), TRUE), "files", "Files (Alt+1)");
   add_dock_panel(t, 0, t->scm, "scm", "SOURCE CONTROL");
   add_dock_panel(t, 0, clip_box(search_panel(t), TRUE), "search", "Search (Ctrl+Shift+F)");
   add_dock_panel(t, 4, GTK_WIDGET(t->shell), "shell", "Terminal (Alt+3 / Ctrl+J)");
@@ -988,6 +992,7 @@ static void create_docks(App *t)
   t->right_sidebar = build_side_chain(t, 2, GTK_ORIENTATION_VERTICAL, 320);
   update_docks(t);
 
+  gtk_drop_target_set_gtypes(ed_drop, dropped, G_N_ELEMENTS(dropped));
   gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(ed_drop), GTK_PHASE_CAPTURE);
   g_signal_connect(ed_drop, "drop", G_CALLBACK(on_editor_drop), t);
   gtk_widget_add_controller(GTK_WIDGET(t->editor_area), GTK_EVENT_CONTROLLER(ed_drop));
@@ -1087,7 +1092,7 @@ void build_window(App *t, GtkApplication *app)
   g_signal_connect(t->window, "close-request", G_CALLBACK(on_close_request), t);
   update_title(t);
 
-  create_fixed_terminals(t);
+  create_shell_pane(t);
   create_groups(t);
   create_docks(t);
 
@@ -1136,8 +1141,8 @@ void build_window(App *t, GtkApplication *app)
   if (strcmp(t->root, g_get_home_dir()) != 0) /* home means no folder (see reopen_last_project) */
     session_add_recent(t);
   rebuild_recent_menu(t);
-  start_fixed_terminals(t);
+  start_shell_pane(t);
   start_status_updates(t);
   gtk_window_present(t->window);
-  gtk_widget_grab_focus(GTK_WIDGET(t->fm));
+  files_focus(t);
 }

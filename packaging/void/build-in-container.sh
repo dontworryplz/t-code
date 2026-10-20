@@ -30,10 +30,10 @@ build/test-detect
 build/test-linediff
 test "$(build/t-code --version)" = "t-code $VERSION"
 
-make install DESTDIR="$dest" PREFIX=/usr LIBEXECDIR=/usr/libexec
+make install DESTDIR="$dest" PREFIX=/usr
 install -Dm644 LICENSE "$dest/usr/share/licenses/t-code/LICENSE"
 desktop-file-validate "$dest/usr/share/applications/io.github.tcode.desktop"
-strip --strip-unneeded "$dest/usr/bin/t-code" "$dest/usr/libexec/t-code/"*
+strip --strip-unneeded "$dest/usr/bin/t-code"
 
 # Cascadia Code is not in Void's repositories: without it the terminals use the default
 # monospace font (and any font can be picked in Settings).

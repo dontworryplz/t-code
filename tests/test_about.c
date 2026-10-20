@@ -77,7 +77,6 @@ int main(int argc, char **argv)
   }
   app.window = GTK_WINDOW(gtk_window_new());
   app.styles_dir = "/test/styles";
-  app.fm_program = "/test/t-code-fm";
   g_test_add_func("/about/contents", test_contents);
   g_test_add_func("/about/close-early", test_close_early);
   return g_test_run();

@@ -4,7 +4,7 @@
  *   +-------------+-------------------------------+
  *   |             | [main.c x] [util.c x]         |  editor tabs (GtkSourceView);
  *   |    files    |                               |  split into two groups side by side
- *   | (t-code-fm) +-------------------------------+
+ *   |             +-------------------------------+
  *   |             | shell                         |
  *   +-------------+-------------------------------+
  *   | branch  problems  Build  Run      Ln, Col  Keybinds |  status bar
@@ -16,11 +16,11 @@
 
 #include "app.h"
 
-/* Creates the window with everything in it, starts the terminals and shows it. Called once, from
+/* Creates the window with everything in it, starts the shell and shows it. Called once, from
  * the application's "activate" or "open" signal. */
 void build_window(App *t, GtkApplication *app);
 
-/* Text size of every terminal and preview (Ctrl+= / Ctrl+-), 0.5 to 3. */
+/* Text size of the shell, editors, previews and the Files panel (Ctrl+= / Ctrl+-), 0.5 to 3. */
 void set_font_scale(App *t, double scale);
 
 /* Shows or hides a pane (the sidebar or the shell); a pane that had the keyboard gives it to the

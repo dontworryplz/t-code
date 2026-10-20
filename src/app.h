@@ -6,13 +6,14 @@
  * what they all need. The folders:
  *   main.c     start-up and shutdown
  *   window/    the window itself: layout, theme, terminals, status bar, shortcuts
+ *   files/     the Files panel: the project's folder tree
  *   editor/    editor tabs: GtkSourceView, the page around it (minimap, guides), Markdown previews
  *   search/    the Search panel
  *   git/       Source Control panel, git status, comparing with old versions
  *   popups/    the popup list (Ctrl+P, command palette)
  *   dialogs/   Settings, Keyboard Shortcuts, About
  *   project/   the project folder, the saved session, Build and Run
- *   ipc/       the socket for the file manager's commands
+ *   ipc/       the control socket ($TCODE_SOCKET): open files from scripts and tools
  *   lsp/       the language server: clangd's diagnostics, hover, completion, ...
  */
 #pragma once
@@ -32,17 +33,20 @@ typedef enum {
   TAB_PREVIEW, /* a rendered markdown file */
 } TabKind;
 
-typedef struct {
+typedef struct Tab {
   App *app;
   TabKind kind;
-  GtkWidget *page;       /* the notebook page: the editor's or the preview */
+  GtkWidget *page;       /* the editor's or the preview */
+  GtkWidget *frame;      /* the notebook page when it is not page: a comparison's two sides */
   GtkSourceView *source; /* editors only */
   GtkSourceBuffer *buffer;
   Preview *preview; /* previews only */
   GtkLabel *label;
   char *path;
-  char *title;        /* shown instead of the file name (an old version in a comparison) */
-  char *compare_with; /* old versions only: the working file they are compared with */
+  char *title;          /* shown instead of the file name (an old version in a comparison) */
+  char *compare_with;   /* old versions only: the working file they are compared with */
+  struct Tab *old_side; /* a comparison's left side: the right one, in the same notebook page */
+  gboolean temporary;   /* VS Code's preview editor: a click in Files opens it, the next one replaces it */
   gboolean modified;
   int line, column;     /* the cursor (1-based) */
   int errors, warnings; /* clangd's (lsp/diagnostics.c) */
@@ -71,9 +75,9 @@ struct App {
   int active; /* the group new tabs go to */
   GtkToggleButton *split_button;
   GMenu *recent_menu;
-  VteTerminal *fm;
+  GtkWidget *files; /* the Files panel (files/files.c) */
   VteTerminal *shell;
-  GPid fm_pid, shell_pid;
+  GPid shell_pid;
   Picker *picker;
   struct {
     GtkLabel *branch, *problems, *build, *position;
@@ -81,7 +85,6 @@ struct App {
   char *root;
   char *git_top; /* the work tree root of t->root's repository; NULL outside one */
   char *socket_path;
-  char *fm_program; /* t-code-fm */
   char *styles_dir; /* the editor's style scheme (Dark Modern) */
   char *icon_dir;   /* desktop/ in the build tree, holding the app icon */
   char *temp_dir;   /* old file versions for comparisons */
@@ -102,6 +105,6 @@ struct App {
     gboolean clang_tidy;     /* clangd also runs the project's .clang-tidy checks */
     gboolean format_on_save; /* Ctrl+S formats the file with clangd first */
     char *font;              /* editors and the shell, a Pango font description */
-    char *fm_font;           /* the file manager */
+    char *files_font;        /* the Files panel */
   } settings;
 };

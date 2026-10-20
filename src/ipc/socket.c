@@ -1,5 +1,6 @@
 /*
- * The unix socket the file manager talks to; its path is in $TCODE_SOCKET. One request per line:
+ * The control socket, for scripts and tools (tools/headless.sh, packaging/smoke-test.sh); its path
+ * is in $TCODE_SOCKET. One request per line:
  *   open <path>        open-side <path>    preview <path>     project <dir>
  *   compare <path>     history <path>      terminal <dir>     copy <text>
  * Paths are absolute. "compare" and "history" are git comparisons (git/compare.c), "terminal"
@@ -17,18 +18,7 @@
 #include <string.h>
 #include <unistd.h>
 
-/* The "terminal" request: cd into dir in the shell pane. */
-static void cd_shell(App *t, const char *dir)
-{
-  char *quoted = g_shell_quote(dir);
-  char *command = g_strdup_printf(" cd -- %s", quoted); /* the leading space keeps it out of history */
-
-  run_in_shell(t, command);
-  g_free(command);
-  g_free(quoted);
-}
-
-/* One request from the file manager (see the top of this file). */
+/* One request (see the top of this file). */
 static void handle(App *t, const char *command, const char *arg)
 {
   if (strcmp(command, "copy") == 0) {
@@ -50,7 +40,7 @@ static void handle(App *t, const char *command, const char *arg)
   else if (strcmp(command, "project") == 0 && g_file_test(arg, G_FILE_TEST_IS_DIR))
     open_project(t, arg);
   else if (strcmp(command, "terminal") == 0)
-    cd_shell(t, arg);
+    cd_in_shell(t, arg);
 }
 
 /* A line came on a connection: handle it and read the next one; the connection ends at EOF. */
@@ -73,7 +63,7 @@ static void on_line(GObject *source, GAsyncResult *result, gpointer data)
   g_data_input_stream_read_line_async(in, G_PRIORITY_DEFAULT, NULL, on_line, t);
 }
 
-/* The file manager connected; its lines are read until it closes the connection. */
+/* A client connected; its lines are read until it closes the connection. */
 static gboolean on_incoming(GSocketService *service G_GNUC_UNUSED, GSocketConnection *conn,
                             GObject *source G_GNUC_UNUSED, App *t)
 {

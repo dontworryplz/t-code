@@ -202,10 +202,25 @@ static void draw_guide(GtkSnapshot *snapshot, const GdkRGBA *ink, double x, int 
   gtk_snapshot_append_color(snapshot, ink, &GRAPHENE_RECT_INIT((float)x, (float)y, 1, (float)height));
 }
 
+/* A gap row block across the view: filled, with a line at its top and bottom. */
+static void draw_gap(GtkSnapshot *snapshot, const GdkRGBA *fill, const GdkRGBA *edge, const GdkRectangle *visible,
+                     int y, int height)
+{
+  float x = (float)visible->x, width = (float)visible->width;
+
+  gtk_snapshot_append_color(snapshot, fill, &GRAPHENE_RECT_INIT(x, (float)y, width, (float)height));
+  gtk_snapshot_append_color(snapshot, edge, &GRAPHENE_RECT_INIT(x, (float)y, width, 1));
+  gtk_snapshot_append_color(snapshot, edge, &GRAPHENE_RECT_INIT(x, (float)(y + height - 1), width, 1));
+}
+
+/* A comparison's changed lines, tinted (green on the new side, red on the old one, VS Code's
+ * diffEditor line backgrounds), and its gap rows: on the new side red where lines were deleted, on
+ * the old side black where lines were added. */
 static void draw_diff_gaps(TcodeView *self, GtkSnapshot *snapshot)
 {
-  static const GdkRGBA deleted_bg = { 0.90f, 0.20f, 0.18f, 0.22f };
-  static const GdkRGBA deleted_edge = { 0.97f, 0.32f, 0.29f, 0.45f };
+  static const GdkRGBA deleted_fill = { 0.90f, 0.20f, 0.18f, 0.22f }, deleted_edge = { 0.97f, 0.32f, 0.29f, 0.45f };
+  static const GdkRGBA added_fill = { 0, 0, 0, 0.45f }, added_edge = { 0, 0, 0, 0.70f };
+  static const GdkRGBA inserted_line = { 0.61f, 0.73f, 0.33f, 0.13f }, removed_line = { 1, 0, 0, 0.13f };
   GtkTextView *view = GTK_TEXT_VIEW(self);
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(self->tab->buffer);
   GdkRectangle visible;
@@ -220,30 +235,23 @@ static void draw_diff_gaps(TcodeView *self, GtkSnapshot *snapshot)
 
   for (int line = first; line <= last; line++) {
     int above_px = 0, below_px = 0, y = 0, height = 0;
-    if (!diff_gutter_line_gaps(self->tab, line, &above_px, &below_px) || (above_px <= 0 && below_px <= 0))
+    gboolean new_side = diff_gutter_line_gaps(self->tab, line, &above_px, &below_px);
+    const GdkRGBA *fill = new_side ? &deleted_fill : &added_fill, *edge = new_side ? &deleted_edge : &added_edge;
+    gboolean changed = diff_gutter_line_changed(self->tab, line);
+
+    if (above_px <= 0 && below_px <= 0 && !changed)
       continue;
     gtk_text_buffer_get_iter_at_line(buffer, &iter, line);
     gtk_text_view_get_line_yrange(view, &iter, &y, &height);
-    if (above_px > 0) {
-      gtk_snapshot_append_color(snapshot, &deleted_bg,
-                                &GRAPHENE_RECT_INIT((float)visible.x, (float)y, (float)visible.width, (float)above_px));
-      gtk_snapshot_append_color(snapshot, &deleted_edge,
-                                &GRAPHENE_RECT_INIT((float)visible.x, (float)y, (float)visible.width, 1));
-      gtk_snapshot_append_color(
-          snapshot, &deleted_edge,
-          &GRAPHENE_RECT_INIT((float)visible.x, (float)(y + above_px - 1), (float)visible.width, 1));
-    }
-    if (below_px > 0) {
-      int gap_y = y + height - below_px;
-      gtk_snapshot_append_color(
-          snapshot, &deleted_bg,
-          &GRAPHENE_RECT_INIT((float)visible.x, (float)gap_y, (float)visible.width, (float)below_px));
-      gtk_snapshot_append_color(snapshot, &deleted_edge,
-                                &GRAPHENE_RECT_INIT((float)visible.x, (float)gap_y, (float)visible.width, 1));
-      gtk_snapshot_append_color(
-          snapshot, &deleted_edge,
-          &GRAPHENE_RECT_INIT((float)visible.x, (float)(gap_y + below_px - 1), (float)visible.width, 1));
-    }
+    if (changed) /* the text's rows only, not the gaps around them */
+      gtk_snapshot_append_color(snapshot, new_side ? &inserted_line : &removed_line,
+                                &GRAPHENE_RECT_INIT((float)visible.x, (float)(y + above_px), (float)visible.width,
+                                                    (float)(height - above_px - below_px)));
+    if (above_px > 0)
+      draw_gap(snapshot, fill, edge, &visible, y, above_px);
+    int pad = diff_gutter_line_pad(self->tab, line); /* blank: the facing line wraps to more rows */
+    if (below_px > pad)
+      draw_gap(snapshot, fill, edge, &visible, y + height - below_px + pad, below_px - pad);
   }
 }
 
@@ -314,6 +322,7 @@ static void snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapsho
 
   GTK_TEXT_VIEW_CLASS(tcode_view_parent_class)->snapshot_layer(view, layer, snapshot);
   if (layer == GTK_TEXT_VIEW_LAYER_BELOW_TEXT && self->tab && self->tab->view && !self->tab->view->loading) {
+    diff_gutter_check_width(self->tab);
     draw_diff_gaps(self, snapshot);
     if (self->tab->app->settings.guides)
       draw_guides(self, snapshot);

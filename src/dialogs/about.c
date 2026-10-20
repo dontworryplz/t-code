@@ -111,7 +111,6 @@ static char *libraries(App *t)
   /* clang-format off */
   return g_strdup_printf("t-code %s\n"
                          "  styles        %s\n"
-                         "  file manager  %s\n"
                          "\n"
                          "Libraries\n"
                          "  GTK            %u.%u.%u\n"
@@ -123,7 +122,7 @@ static char *libraries(App *t)
 #else
                          "  C library      %s\n",
 #endif
-                         TCODE_VERSION, t->styles_dir, t->fm_program,
+                         TCODE_VERSION, t->styles_dir,
                          gtk_get_major_version(), gtk_get_minor_version(), gtk_get_micro_version(),
                          gtk_source_get_major_version(), gtk_source_get_minor_version(), gtk_source_get_micro_version(),
                          vte_get_major_version(), vte_get_minor_version(), vte_get_micro_version(),

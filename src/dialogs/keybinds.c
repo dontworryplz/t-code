@@ -8,21 +8,23 @@
 
 static const KeyHelp tab_keys[] = {
   { "Switch to a tab", "Click" },
-  { "Close a tab", "Middle click, ×" },
+  { "Close a tab (a comparison closes with both sides)", "Middle click, ×" },
+  { "Keep a temporary (italic) tab", "Double click it, or edit the file" },
   { "Move a tab to the other group", "Drag it" },
   { "Open a compiler message's file and line", "Ctrl+Click in the shell" },
 };
 
-static const KeyHelp fm_keys[] = {
-  { "Open folder / open file in a tab", "Click, Enter, l, →" },
-  { "Collapse folder / go to parent", "h, Backspace, ←" },
-  { "Move / scroll", "↑ ↓, j k, Wheel" },
+static const KeyHelp files_keys[] = {
+  { "Open file (in a temporary tab: the next click replaces it) / open or close folder", "Click, Enter, l" },
+  { "Open file for good / to the side", "Double click / middle click" },
+  { "Open folder or go into it / close it or go to its parent", "→ / ←, h, Backspace" },
+  { "Move", "↑ ↓, j k, Home End" },
   { "More (open to the side, preview, git, …)", "Right click" },
-  { "New file (end with / for a folder)", "a" },
-  { "Rename / delete", "r / d, Delete" },
+  { "New file (a/b.c makes folders, end with / for a folder)", "a" },
+  { "Rename / delete", "r, F2 / d, Delete" },
   { "Cut / copy / paste files", "Ctrl+X / Ctrl+C / Ctrl+V" },
-  { "Move into a folder", "Drag a file onto it" },
-  { "Hide / show dotfiles / refresh", ". / R" },
+  { "Move into a folder / open in an editor", "Drag a file onto it / onto the editors" },
+  { "Hide / show dotfiles / read the tree again", ". / R" },
 };
 
 /* The editor's own keys (GtkSourceView's); its commands (save, find, comment, ...) are in the
@@ -111,7 +113,7 @@ void show_keybinds(App *t)
   gtk_widget_set_margin_bottom(grid, 24);
   add_section(GTK_GRID(grid), &row, "Window", window_list, n);
   add_section(GTK_GRID(grid), &row, "Tabs and mouse", tab_keys, G_N_ELEMENTS(tab_keys));
-  add_section(GTK_GRID(grid), &row, "File manager", fm_keys, G_N_ELEMENTS(fm_keys));
+  add_section(GTK_GRID(grid), &row, "Files", files_keys, G_N_ELEMENTS(files_keys));
   add_section(GTK_GRID(grid), &row, "Editor", editor_keys, G_N_ELEMENTS(editor_keys));
 
   scroll = gtk_scrolled_window_new();

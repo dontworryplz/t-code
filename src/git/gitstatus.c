@@ -1,16 +1,14 @@
 /*
  * git status for the project, run in the background (see gitstatus.h). Its output fills the
- * branch in the status bar and the Source Control panel, and tells the file manager when files
- * changed in folders it does not watch.
+ * branch in the status bar and the Source Control panel, and tells the Files panel when it changed.
  */
-#define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 #include "git/gitstatus.h"
 
 #include "editor/diffgutter.h"
+#include "files/files.h"
 #include "git/scm.h"
 #include "window/statusbar.h"
 
-#include <signal.h>
 #include <string.h>
 
 static gboolean branch_busy;  /* a git status runs */
@@ -62,10 +60,10 @@ static void on_branch(GObject *source, GAsyncResult *result, gpointer data)
   }
   if (!t->closing)
     scm_update(t, ok ? bytes : NULL, size);
-  /* The file manager watches only open folders: tell it when a file changed in a closed one. */
+  /* The Files panel reads its git colors again (its git status also lists ignored files). */
   guint hash = out ? g_bytes_hash(out) : 0;
-  if (hash != last_status && last_status && !t->closing && t->fm_pid > 0)
-    kill(t->fm_pid, SIGUSR1);
+  if (hash != last_status && !t->closing)
+    files_git_changed(t);
   last_status = hash;
   if (!t->closing)
     status_show_branch(t, branch, dirty);

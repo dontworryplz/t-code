@@ -122,34 +122,212 @@ GArray *line_diff(const char *old_text, const char *new_text)
 typedef struct {
   GArray *gaps;
   gboolean old_side;
-  guint lines; /* in the side the gaps are for */
+  guint lines;                          /* in the side the gaps are for */
+  const int *old_heights, *new_heights; /* per line (word wrap, pixels); NULL: 1 each */
+  guint old_at, new_at;                 /* the first lines not lined up yet */
 } Gaps;
 
-/* HunkFunc for line_diff_gaps(): the side with fewer lines in a stretch gets a gap of the
- * difference, below the line before the stretch (above line 0 at the start). */
+static int height_of(const int *heights, guint line)
+{
+  return heights ? MAX(heights[line], 0) : 1;
+}
+
+/* Adds space below line (above line 0 when above): count for missing lines, pad for a shorter line.
+ * A line has one gap (a text view takes one pixels-below per line, not their sum). */
+static void add_gap(Gaps *g, guint line, gboolean above, int count, int pad)
+{
+  DiffGap *last = g->gaps->len ? &g_array_index(g->gaps, DiffGap, g->gaps->len - 1) : NULL;
+  DiffGap gap = { (int)MIN(line, g->lines - 1), MAX(count, 0), MAX(pad, 0), above };
+
+  if (gap.count + gap.pad == 0 || g->lines == 0)
+    return;
+  if (last && last->line == gap.line && last->above == above) {
+    last->count += gap.count;
+    last->pad += gap.pad;
+  } else {
+    g_array_append_val(g->gaps, gap);
+  }
+}
+
+/* Lines both sides have, from old_at / new_at on: the shorter of each pair (it wraps less) is padded
+ * to the other's height. */
+static void line_up_same(Gaps *g, guint count)
+{
+  for (guint k = 0; k < count; k++) {
+    guint old_line = g->old_at + k, new_line = g->new_at + k;
+    int old_height = height_of(g->old_heights, old_line), new_height = height_of(g->new_heights, new_line);
+    int mine = g->old_side ? old_height : new_height, theirs = g->old_side ? new_height : old_height;
+    add_gap(g, g->old_side ? old_line : new_line, FALSE, 0, theirs - mine);
+  }
+  g->old_at += count;
+  g->new_at += count;
+}
+
+/* HunkFunc for line_diff_gaps(): the same lines before the stretch are lined up one by one; in the
+ * stretch, the side whose lines take less height gets a gap of the difference, below its last line
+ * there (or the line before; above line 0 at the start). */
 static void gap_hunk(guint old_start, guint deleted, guint new_start, guint added, gpointer data)
 {
   Gaps *g = data;
-  guint mine = g->old_side ? deleted : added, theirs = g->old_side ? added : deleted;
-  guint at = (g->old_side ? old_start : new_start) + mine;
-  DiffGap gap = { 0, (int)(theirs - mine), at == 0 };
+  int old_height = 0, new_height = 0;
 
-  if (theirs <= mine || g->lines == 0)
-    return;
-  gap.line = at > 0 ? (int)MIN(at - 1, g->lines - 1) : 0;
-  g_array_append_val(g->gaps, gap);
+  line_up_same(g, old_start - g->old_at);
+  for (guint i = 0; i < deleted; i++)
+    old_height += height_of(g->old_heights, old_start + i);
+  for (guint i = 0; i < added; i++)
+    new_height += height_of(g->new_heights, new_start + i);
+  guint at = (g->old_side ? old_start + deleted : new_start + added);
+  add_gap(g, at > 0 ? at - 1 : 0, at == 0, g->old_side ? new_height - old_height : old_height - new_height, 0);
+  g->old_at = old_start + deleted;
+  g->new_at = new_start + added;
 }
 
-GArray *line_diff_gaps(const char *old_text, const char *new_text, gboolean for_old_side)
+GArray *line_diff_gaps(const char *old_text, const char *new_text, const int *old_heights, const int *new_heights,
+                       gboolean for_old_side)
 {
   Lines old, new;
-  Gaps g = { g_array_new(FALSE, FALSE, sizeof(DiffGap)), for_old_side, 0 };
+  Gaps g = { g_array_new(FALSE, FALSE, sizeof(DiffGap)), for_old_side, 0, old_heights, new_heights, 0, 0 };
 
   split(&old, old_text);
   split(&new, new_text);
   g.lines = for_old_side ? old.lines->len : new.lines->len;
   walk_hunks(&old, &new, gap_hunk, &g);
+  line_up_same(&g, old.lines->len - g.old_at); /* the same lines at the end */
   lines_free(&old);
   lines_free(&new);
   return g.gaps;
+}
+
+guint line_count(const char *text)
+{
+  Lines l;
+  guint n;
+
+  split(&l, text);
+  n = l.lines->len;
+  lines_free(&l);
+  return n;
+}
+
+/* Changed words ------------------------------------------------------------------------------ */
+
+#define MAX_TOKEN_CELLS (400 * 400) /* past it, a line pair is just changed as a whole */
+
+/* A line's tokens: words (letters, digits, _ and any non-ASCII byte), runs of spaces, or one other
+ * character each; as byte offsets, the last one the line's end. */
+static GArray *tokens(const char *text)
+{
+  GArray *starts = g_array_new(FALSE, FALSE, sizeof(int));
+  int i = 0, n = (int)strlen(text);
+
+#define WORD(c) (g_ascii_isalnum(c) || (c) == '_' || (guchar)(c) >= 0x80)
+  while (i < n) {
+    g_array_append_val(starts, i);
+    if (WORD(text[i]))
+      while (i < n && WORD(text[i]))
+        i++;
+    else if (text[i] == ' ' || text[i] == '\t')
+      while (i < n && (text[i] == ' ' || text[i] == '\t'))
+        i++;
+    else
+      i++;
+  }
+#undef WORD
+  g_array_append_val(starts, n);
+  return starts;
+}
+
+static gboolean same_token(const char *a, const GArray *ta, guint i, const char *b, const GArray *tb, guint j)
+{
+  int la = g_array_index(ta, int, i + 1) - g_array_index(ta, int, i);
+  int lb = g_array_index(tb, int, j + 1) - g_array_index(tb, int, j);
+
+  return la == lb && memcmp(a + g_array_index(ta, int, i), b + g_array_index(tb, int, j), la) == 0;
+}
+
+/* Adds a span of line; one that starts where the last one ended, or only spaces after it, joins it.
+ * Spaces alone are no span (they only bridge two). */
+static void add_span(GArray *spans, const char *text, int line, int start, int end)
+{
+  DiffSpan *last = spans->len ? &g_array_index(spans, DiffSpan, spans->len - 1) : NULL;
+  DiffSpan span = { line, start, end };
+
+  if (start >= end || strspn(text + start, " \t") >= (size_t)(end - start))
+    return;
+  if (last && last->line == line && last->end >= 0 && strspn(text + last->end, " \t") >= (size_t)(start - last->end)) {
+    last->end = end;
+    return;
+  }
+  g_array_append_val(spans, span);
+}
+
+/* The words of mine (line line) that theirs does not have, as spans. */
+static void changed_words(GArray *spans, int line, const char *mine, const char *theirs)
+{
+  GArray *tm = tokens(mine), *tt = tokens(theirs);
+  guint n = tm->len - 1, m = tt->len - 1;
+
+  if ((gsize)n * m > MAX_TOKEN_CELLS) {
+    add_span(spans, mine, line, 0, (int)strlen(mine));
+  } else {
+    guint16 *lcs = g_new0(guint16, (gsize)(n + 1) * (m + 1));
+    guint i = 0, j = 0;
+#define LCS(a, b) lcs[(gsize)(a) * (m + 1) + (b)]
+    for (int a = (int)n - 1; a >= 0; a--)
+      for (int b = (int)m - 1; b >= 0; b--)
+        LCS(a, b) = same_token(mine, tm, a, theirs, tt, b) ? LCS(a + 1, b + 1) + 1 : MAX(LCS(a + 1, b), LCS(a, b + 1));
+    while (i < n) {
+      if (j < m && same_token(mine, tm, i, theirs, tt, j)) {
+        i++, j++;
+      } else if (j < m && LCS(i, j + 1) >= LCS(i + 1, j)) {
+        j++;
+      } else { /* a token of mine theirs does not have */
+        add_span(spans, mine, line, g_array_index(tm, int, i), g_array_index(tm, int, i + 1));
+        i++;
+      }
+    }
+#undef LCS
+    g_free(lcs);
+  }
+  g_array_free(tm, TRUE);
+  g_array_free(tt, TRUE);
+}
+
+typedef struct {
+  GArray *spans;
+  gboolean old_side;
+  Lines *old, *new;
+} Spans;
+
+/* HunkFunc for line_diff_spans(): each changed line of this side is marked; the lines of a stretch
+ * that both sides have (paired in order) mark their changed words, the others all their text. */
+static void span_hunk(guint old_start, guint deleted, guint new_start, guint added, gpointer data)
+{
+  Spans *s = data;
+  guint mine = s->old_side ? deleted : added, start = s->old_side ? old_start : new_start;
+  Lines *my_lines = s->old_side ? s->old : s->new, *their_lines = s->old_side ? s->new : s->old;
+  guint their_start = s->old_side ? new_start : old_start, theirs = s->old_side ? added : deleted;
+
+  for (guint k = 0; k < mine; k++) {
+    const char *text = line(my_lines, start + k);
+    DiffSpan whole = { (int)(start + k), 0, -1 };
+    g_array_append_val(s->spans, whole);
+    if (k < theirs)
+      changed_words(s->spans, (int)(start + k), text, line(their_lines, their_start + k));
+    else
+      add_span(s->spans, text, (int)(start + k), 0, (int)strlen(text));
+  }
+}
+
+GArray *line_diff_spans(const char *old_text, const char *new_text, gboolean for_old_side)
+{
+  Lines old, new;
+  Spans s = { g_array_new(FALSE, FALSE, sizeof(DiffSpan)), for_old_side, &old, &new };
+
+  split(&old, old_text);
+  split(&new, new_text);
+  walk_hunks(&old, &new, span_hunk, &s);
+  lines_free(&old);
+  lines_free(&new);
+  return s.spans;
 }

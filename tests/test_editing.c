@@ -606,6 +606,50 @@ static void test_signature_outlived(void)
   g_object_unref(horizontal);
 }
 
+/* Side by side, the sides line up with gap rows: the new side's where lines were deleted (drawn
+ * red), the old side's where lines were added (drawn black); changed lines and words are colored. */
+static void test_comparison_gaps(void)
+{
+  Tab *new_side = new_tab("a\nadded\nb\n"), *old_side = new_tab("a\nb\nremoved\n");
+  int new_px = 0, old_px = 0, above, below;
+  gboolean new_red = FALSE, old_red = FALSE;
+
+  diff_gutter_pair(new_side, old_side);
+  for (int line = 0; line < 4; line++) {
+    if (diff_gutter_line_gaps(new_side, line, &above, &below) && above + below > 0)
+      new_red = TRUE;
+    new_px += above + below;
+    if (diff_gutter_line_gaps(old_side, line, &above, &below) && above + below > 0)
+      old_red = TRUE;
+    old_px += above + below;
+  }
+  g_assert_cmpint(new_px, >, 0); /* for "removed" */
+  g_assert_cmpint(old_px, >, 0); /* for "added" */
+  g_assert_cmpint(new_px, ==, old_px);
+  g_assert_true(new_red);
+  g_assert_false(old_red);
+
+  /* Changed lines are tinted and their words colored (a tag); the same lines are not. */
+  GtkTextIter at;
+  GtkTextTag *words = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(new_side->buffer)),
+                                                "tcode-changed-words");
+  g_assert_false(diff_gutter_line_changed(new_side, 0));
+  g_assert_true(diff_gutter_line_changed(new_side, 1)); /* "added" */
+  g_assert_true(diff_gutter_line_changed(old_side, 2)); /* "removed" */
+  g_assert_nonnull(words);
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(new_side->buffer), &at, 1, 2);
+  g_assert_true(gtk_text_iter_has_tag(&at, words));
+  gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(new_side->buffer), &at, 0);
+  g_assert_false(gtk_text_iter_has_tag(&at, words));
+
+  diff_gutter_pair(new_side, NULL); /* no comparison: no colors */
+  g_assert_false(diff_gutter_line_changed(new_side, 1));
+  gtk_text_buffer_get_iter_at_line_offset(GTK_TEXT_BUFFER(new_side->buffer), &at, 1, 2);
+  g_assert_false(gtk_text_iter_has_tag(&at, words));
+  free_tab(old_side);
+  free_tab(new_side);
+}
+
 int main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
@@ -641,6 +685,7 @@ int main(int argc, char **argv)
   g_test_add_func("/find/big-file", test_find_big_file);
   g_test_add_func("/diff-gutter/marks", test_diff_gutter);
   g_test_add_func("/diff-gutter/trailing-newline", test_trailing_newline);
+  g_test_add_func("/diff-gutter/comparison-gaps", test_comparison_gaps);
   g_test_add_func("/guides/brackets", test_guide_brackets);
   g_test_add_func("/guides/pair", test_guide_pair);
   g_test_add_func("/guides/pair-in-comment", test_guide_pair_in_comment);

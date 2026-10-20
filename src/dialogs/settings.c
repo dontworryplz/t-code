@@ -137,7 +137,7 @@ static void on_text_size(GtkSpinButton *spin, gpointer data G_GNUC_UNUSED)
   session_save_settings(t); /* kept even if t-code does not close normally */
 }
 
-/* Font buttons: data is the setting (&t->settings.font or fm_font) they change. */
+/* Font buttons: data is the setting (&t->settings.font or files_font) they change. */
 static void on_font(GtkFontDialogButton *button, GParamSpec *spec G_GNUC_UNUSED, gpointer data)
 {
   App *t = app_of(GTK_WIDGET(button));
@@ -301,8 +301,8 @@ void show_settings(App *t)
 
   add_heading(GTK_GRID(grid), &row, "Window");
   add_row(GTK_GRID(grid), &row, "Editor font", "Editors and the terminal", font_for(&t->settings.font));
-  add_row(GTK_GRID(grid), &row, "File manager font", "Icons need a Nerd Font installed",
-          font_for(&t->settings.fm_font));
+  add_row(GTK_GRID(grid), &row, "Files panel font", "File icons need a Nerd Font installed",
+          font_for(&t->settings.files_font));
   add_row(GTK_GRID(grid), &row, "Text size (%)", "Also Ctrl+= and Ctrl+-",
           spin_for(50, 300, 10, t->font_scale * 100, G_CALLBACK(on_text_size)));
   add_row(GTK_GRID(grid), &row, "Reopen the last project",

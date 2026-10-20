@@ -75,10 +75,12 @@ static void test_big(void)
   g_string_free(old, TRUE);
 }
 
-/* The gaps as a string: "<line>:<count>" (below that line) or "^:<count>" (above line 0). */
-static char *gaps_of(const char *old, const char *new, gboolean old_side)
+/* The gaps as a string: "<line>:<count>" (below that line) or "^:<count>" (above line 0); rows:
+ * the screen rows of each line with word wrap (NULL: one each). */
+static char *wrapped_gaps_of(const char *old, const char *new, const int *old_rows, const int *new_rows,
+                             gboolean old_side)
 {
-  GArray *gaps = line_diff_gaps(old, new, old_side);
+  GArray *gaps = line_diff_gaps(old, new, old_rows, new_rows, old_side);
   GString *text = g_string_new(NULL);
 
   for (guint i = 0; i < gaps->len; i++) {
@@ -87,19 +89,28 @@ static char *gaps_of(const char *old, const char *new, gboolean old_side)
       g_string_append_printf(text, "%s^:%d", text->len ? " " : "", gap->count);
     else
       g_string_append_printf(text, "%s%d:%d", text->len ? " " : "", gap->line, gap->count);
+    if (gap->pad)
+      g_string_append_printf(text, "+%d", gap->pad);
   }
   g_array_free(gaps, TRUE);
   return g_string_free(text, FALSE);
 }
 
-static void check_gaps(const char *old, const char *new, const char *new_side, const char *old_side)
+static void check_wrapped_gaps(const char *old, const char *new, const int *old_rows, const int *new_rows,
+                               const char *new_side, const char *old_side)
 {
-  char *a = gaps_of(old, new, FALSE), *b = gaps_of(old, new, TRUE);
+  char *a = wrapped_gaps_of(old, new, old_rows, new_rows, FALSE),
+       *b = wrapped_gaps_of(old, new, old_rows, new_rows, TRUE);
 
   g_assert_cmpstr(a, ==, new_side);
   g_assert_cmpstr(b, ==, old_side);
   g_free(b);
   g_free(a);
+}
+
+static void check_gaps(const char *old, const char *new, const char *new_side, const char *old_side)
+{
+  check_wrapped_gaps(old, new, NULL, NULL, new_side, old_side);
 }
 
 /* Side by side, the side with fewer lines in a stretch gets the difference as a gap. */
@@ -112,6 +123,67 @@ static void test_gaps(void)
   check_gaps("a\nb\n", "a\nB1\nB2\nB3", "", "1:2"); /* one for three: two rows */
 }
 
+/* With word wrap, rows line up rather than lines: a line both sides have that wraps to more rows on
+ * one side gives the other a gap; a missing line counts all its rows; gaps on one line add up. */
+static void test_wrapped_gaps(void)
+{
+  static const int one_three_one[] = { 1, 3, 1 }, ones[] = { 1, 1, 1, 1 }, one_two_one[] = { 1, 2, 1 };
+  static const int px_17[] = { 17, 17, 17 }, px_52[] = { 17, 52, 17 };
+
+  /* "long" wraps to 3 rows in the new version only: the old one is padded (no block). */
+  check_wrapped_gaps("a\nlong\nb", "a\nlong\nb", ones, one_three_one, "", "1:0+2");
+  /* a deleted line that took 2 rows: a 2-row block on the new side. */
+  check_wrapped_gaps("a\nx\nb", "a\nb", one_two_one, ones, "0:2", "");
+  /* line 1 wraps to 3 rows on the new side and line 2 was added: one gap, padded 2, a block of 1. */
+  check_wrapped_gaps("a\nlong", "a\nlong\nadded", ones, one_three_one, "", "1:1+2");
+  /* in pixels: a paragraph of 3 rows is not always 3 times one row (each one is rounded alone) */
+  check_wrapped_gaps("a\nlong\nb", "a\nlong\nb", px_17, px_52, "", "1:0+35");
+}
+
+/* The spans as a string: "<line>" for a changed line, "<line>:<text>" for its changed words. */
+static char *spans_of(const char *old, const char *new, gboolean old_side)
+{
+  const char *text = old_side ? old : new;
+  char **lines = g_strsplit(text, "\n", -1);
+  GArray *spans = line_diff_spans(old, new, old_side);
+  GString *out = g_string_new(NULL);
+
+  for (guint i = 0; i < spans->len; i++) {
+    DiffSpan *span = &g_array_index(spans, DiffSpan, i);
+    if (out->len)
+      g_string_append_c(out, ' ');
+    if (span->end < 0)
+      g_string_append_printf(out, "%d", span->line);
+    else
+      g_string_append_printf(out, "%d:%.*s", span->line, span->end - span->start, lines[span->line] + span->start);
+  }
+  g_array_free(spans, TRUE);
+  g_strfreev(lines);
+  return g_string_free(out, FALSE);
+}
+
+static void check_spans(const char *old, const char *new, const char *new_side, const char *old_side)
+{
+  char *a = spans_of(old, new, FALSE), *b = spans_of(old, new, TRUE);
+
+  g_assert_cmpstr(a, ==, new_side);
+  g_assert_cmpstr(b, ==, old_side);
+  g_free(b);
+  g_free(a);
+}
+
+/* Changed words, like VS Code: only what differs in a changed line; a line without a pair is all
+ * changed; words with only spaces between them make one span. */
+static void test_spans(void)
+{
+  check_spans("a\n{ \"Close a tab\", \"x\" },\nb\n", "a\n{ \"Close a tab (too)\", \"x\" },\nb\n", "1 1:(too)", "1");
+  check_spans("int count = 1;\n", "int total = 1;\n", "0 0:total", "0 0:count");
+  check_spans("x\n", "x\nint added;\n", "1 1:int added;", "");
+  check_spans("keep\ngone line\n", "keep\n", "", "1 1:gone line");
+  check_spans("same\n", "same\n", "", "");
+  check_spans("a b c\n", "a x y c\n", "0 0:x y", "0 0:b"); /* "x y": one span over the space */
+}
+
 int main(int argc, char **argv)
 {
   g_test_init(&argc, &argv, NULL);
@@ -122,5 +194,7 @@ int main(int argc, char **argv)
   g_test_add_func("/linediff/hunks", test_hunks);
   g_test_add_func("/linediff/big", test_big);
   g_test_add_func("/linediff/gaps", test_gaps);
+  g_test_add_func("/linediff/wrapped-gaps", test_wrapped_gaps);
+  g_test_add_func("/linediff/spans", test_spans);
   return g_test_run();
 }

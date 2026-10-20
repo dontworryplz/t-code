@@ -1,15 +1,15 @@
 /*
- * Finding t-code's helper programs and data next to its executable (see paths.h).
- *   build tree   build/t-code, build/t-code-fm, styles/
- *   installed    bin/t-code, libexec/t-code/t-code-fm (lib/t-code on Arch), share/t-code/styles
+ * Finding t-code's data next to its executable (see paths.h).
+ *   build tree   build/t-code, styles/
+ *   installed    bin/t-code, share/t-code/styles
  */
 #include "window/paths.h"
 
 #include <unistd.h>
 
-/* Looked up next to the executable: the installed layout (bin/t-code, libexec/t-code/t-code-fm,
- * share/t-code/styles) or the build tree (build/t-code, build/t-code-fm, styles). candidates are
- * paths relative to the executable's folder, tried in order; the first one that exists wins. */
+/* Looked up next to the executable: the installed layout (bin/t-code, share/t-code/styles) or the
+ * build tree (build/t-code, styles). candidates are paths relative to the executable's folder,
+ * tried in order; the first one that exists wins. */
 static char *find_beside_exe(const char *const *candidates)
 {
   char *exe = g_file_read_link("/proc/self/exe", NULL);
@@ -24,7 +24,7 @@ static char *find_beside_exe(const char *const *candidates)
     g_free(clean);
     g_free(path);
   }
-  if (!found) /* spawning fails and says so inside the pane */
+  if (!found) /* loading from it fails and says so */
     found = g_build_filename(dir, candidates[0], NULL);
   g_free(dir);
   g_free(exe);
@@ -33,15 +33,12 @@ static char *find_beside_exe(const char *const *candidates)
 
 void find_files(App *t)
 {
-  /* libexec/t-code (Fedora, Debian, ~/.local) or lib/t-code (Arch) */
-  static const char *const fm[] = { "t-code-fm", "../libexec/t-code/t-code-fm", "../lib/t-code/t-code-fm", NULL };
   static const char *const styles[] = { "../share/t-code/styles", "../styles", NULL };
   /* Installed, the icon is in ~/.local/share/icons; from the build tree it is in desktop/. */
   static const char *const icons[] = { "../desktop", NULL };
   /* Old file versions for comparisons; the pid keeps two t-code windows apart. */
   char *versions = g_strdup_printf("t-code-%d-versions", getpid());
 
-  t->fm_program = find_beside_exe(fm);
   t->styles_dir = find_beside_exe(styles);
   t->icon_dir = find_beside_exe(icons);
   t->temp_dir = g_build_filename(g_get_user_runtime_dir(), versions, NULL);

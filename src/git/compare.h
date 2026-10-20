@@ -1,7 +1,7 @@
 /*
- * Comparing a file with an older version from git, side by side: the working file on the left,
- * the old version (read-only, from a temporary file) on the right, each gutter marking what
- * differs from the other. Also File History, which lists a file's commits to compare with.
+ * Comparing a file with an older version from git, side by side in one tab: the working file on
+ * the left, the old version (read-only, from a temporary file) on the right, each gutter marking
+ * what differs from the other. Also File History, which lists a file's commits to compare with.
  */
 #pragma once
 
@@ -28,16 +28,16 @@ void file_history(App *t, const char *path);
  * side (the file was added or deleted). */
 void compare_revisions(App *t, const char *old_rev, const char *old_rel, const char *new_rev, const char *new_rel);
 
-/* Closes the old versions of the current file. */
+/* Ends the current tab's comparison: an old version closes, the working file stays (its gutter
+ * following HEAD again). */
 void stop_comparing(App *t);
 
-/* An editor closes: it and the tab it scrolled together with (a comparison's other side) stop
- * moving each other. Its adjustments may outlive it, and the other side's would reach a freed tab. */
-void unsync_scroll(Tab *tab);
+/* The same for one tab (the left side of a comparison); nothing when it compares nothing. */
+void stop_comparing_tab(Tab *tab);
 
-/* An old version's tab closed: the working file's gutter goes back to following HEAD, unless
- * another old version still compares with it. */
-void forget_comparison(Tab *old_version);
+/* A comparison ends (left: its left side): the two sides stop scrolling each other. Their
+ * adjustments may outlive them, and would reach a freed view. */
+void unsync_scroll(Tab *left);
 
 /* Deletes the temporary folder of old versions (t->temp_dir), when t-code quits. */
 void remove_temp_dir(App *t);

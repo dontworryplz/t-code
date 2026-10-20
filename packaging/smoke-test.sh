@@ -1,6 +1,6 @@
 # Runs as a normal user inside a fresh container with the t-code package installed (test.sh):
 # checks the installed files, starts t-code on a headless X server with five C files and checks
-# that the file manager and clangd (with fewer malloc arenas) come up, that a Markdown preview
+# that clangd (with fewer malloc arenas) comes up, that a Markdown preview
 # opens, and that t-code quits cleanly.
 set -uo pipefail
 
@@ -14,12 +14,9 @@ check() { # <description> <command...>
 }
 
 share=/usr/share/t-code
-helpers=/usr/libexec/t-code
-[[ -d $helpers ]] || helpers=/usr/lib/t-code
 
 echo "Installed files"
 check "t-code --version prints 't-code $VERSION'" test "$(t-code --version)" = "t-code $VERSION"
-check "t-code-fm in $helpers" test -x "$helpers/t-code-fm"
 check "the editor's style scheme in $share/styles" test -f "$share/styles/dark-modern.xml"
 check "desktop entry is valid" desktop-file-validate /usr/share/applications/io.github.tcode.desktop
 check "icon installed" test -f /usr/share/icons/hicolor/scalable/apps/io.github.tcode.svg
@@ -51,7 +48,6 @@ for _ in $(seq 30); do pgrep -u "$USER" -f '^clangd ' >/dev/null && break; sleep
 
 tcode=$(pgrep -u "$USER" -x t-code | head -1)
 check "t-code is running" test -n "$tcode"
-check "file manager (t-code-fm) started" pgrep -u "$USER" -f "$helpers/t-code-fm"
 check "clangd started" pgrep -u "$USER" -f '^clangd '
 check "one clangd for all five editors" test "$(pgrep -u "$USER" -fc '^clangd ')" -eq 1
 check "clangd runs with 2 malloc arenas" \

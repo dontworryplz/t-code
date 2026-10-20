@@ -7,6 +7,7 @@
 #include "app.h"
 
 #include "editor/editor.h"
+#include "files/files.h"
 #include "git/compare.h"
 #include "lsp/client.h"
 #include "ipc/socket.h"
@@ -112,6 +113,7 @@ static void on_shutdown(GApplication *app G_GNUC_UNUSED, App *t)
 {
   t->closing = TRUE;
   stop_socket(t);
+  files_stop(t);
   lsp_stop(t);
   remove_temp_dir(t);
 }
@@ -185,13 +187,12 @@ int main(int argc, char **argv)
   g_object_unref(app);
   g_clear_object(&t.service);
   g_free(t.socket_path);
-  g_free(t.fm_program);
   g_free(t.styles_dir);
   g_free(t.icon_dir);
   g_free(t.temp_dir);
   g_free(t.git_top);
   g_free(t.root);
   g_free(t.settings.font);
-  g_free(t.settings.fm_font);
+  g_free(t.settings.files_font);
   return status;
 }

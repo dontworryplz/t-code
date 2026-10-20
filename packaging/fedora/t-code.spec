@@ -1,7 +1,7 @@
 Name:           t-code
 Version:        0.2
 Release:        1%{?dist}
-Summary:        Lightweight C/C++ IDE: file manager, editor tabs with clangd and a shell
+Summary:        Lightweight C/C++ IDE: file tree, editor tabs with clangd and a shell
 License:        MIT
 URL:            https://github.com/suacayipkisi/t-code
 Source0:        %{name}-%{version}.tar.gz
@@ -23,7 +23,7 @@ Requires:       hicolor-icon-theme
 Recommends:     ripgrep
 
 %description
-t-code is a lightweight C/C++ IDE: a terminal file manager (t-code-fm),
+t-code is a lightweight C/C++ IDE: a file tree,
 GtkSourceView editor tabs sharing one clangd (errors underlined, completion,
 parameter hints, go to definition) and a shell, in a GTK4 window with VS Code
 Dark Modern colors. It also has a Search panel, Source Control, git comparisons
@@ -33,10 +33,10 @@ and Markdown previews.
 %autosetup
 
 %build
-%make_build build/t-code build/t-code-fm
+%make_build build/t-code
 
 %install
-%make_install PREFIX=%{_prefix} BINDIR=%{_bindir} LIBEXECDIR=%{_libexecdir} DATADIR=%{_datadir}
+%make_install PREFIX=%{_prefix} BINDIR=%{_bindir} DATADIR=%{_datadir}
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.tcode.desktop
@@ -51,7 +51,6 @@ build/test-linediff
 %license LICENSE
 %doc README.md
 %{_bindir}/t-code
-%{_libexecdir}/t-code/
 %{_datadir}/t-code/
 %{_datadir}/applications/io.github.tcode.desktop
 %{_datadir}/icons/hicolor/scalable/apps/io.github.tcode.svg

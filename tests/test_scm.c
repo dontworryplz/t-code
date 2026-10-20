@@ -20,6 +20,7 @@ Tab *find_tab(App *t G_GNUC_UNUSED, TabKind kind G_GNUC_UNUSED, const char *path
 void open_file(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void editor_reload(Tab *tab G_GNUC_UNUSED) {}
 void diff_gutter_head_moved(App *t G_GNUC_UNUSED) { head_moves++; }
+void files_git_changed(App *t G_GNUC_UNUSED) {}
 void quit_editor(Tab *tab G_GNUC_UNUSED) {}
 void compare_with_head(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void compare_with_index(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}

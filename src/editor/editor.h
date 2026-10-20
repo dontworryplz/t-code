@@ -12,8 +12,12 @@
 /* Opens path in a new tab of the active group. line > 0 puts the cursor there (column 1-based). */
 Tab *open_editor(App *t, const char *path, int line, int column, gboolean readonly);
 
-/* Opens path in an editor, or switches to the tab that has it already. */
+/* Opens path in an editor, or switches to the tab that has it already (and keeps it, if temporary). */
 void open_file(App *t, const char *path);
+
+/* A click in the Files panel: opens path in a temporary tab of the active group, in place of the
+ * group's temporary tab (VS Code's preview editor), or switches to the tab that has it already. */
+void open_file_temporary(App *t, const char *path);
 
 /* The same, and puts the cursor at line and column (1-based; line 0: where it is). */
 void open_file_at(App *t, const char *path, int line, int column);

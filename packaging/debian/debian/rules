@@ -6,10 +6,10 @@ include /usr/share/dpkg/pkg-info.mk
 	dh $@
 
 override_dh_auto_build:
-	dh_auto_build -- build/t-code build/t-code-fm
+	dh_auto_build -- build/t-code
 
 override_dh_auto_install:
-	dh_auto_install -- PREFIX=/usr LIBEXECDIR=/usr/libexec
+	dh_auto_install -- PREFIX=/usr
 	desktop-file-validate debian/t-code/usr/share/applications/io.github.tcode.desktop
 
 # The other tests open windows and need a display.

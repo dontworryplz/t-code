@@ -1,14 +1,15 @@
 /*
  * Projects: the folder t-code works in. Open Folder (Ctrl+Shift+O, title bar button), the recent
- * folders menu, and "Open Folder as Project" in the file manager all switch it. Switching
- * remembers and closes the current project's tabs, restarts the file manager and the shell in
- * the new folder, and brings back that folder's tabs from last time.
+ * folders menu, and "Open Folder as Project" in the Files panel all switch it. Switching remembers
+ * and closes the current project's tabs, shows the new folder in the Files panel, restarts the
+ * shell there, and brings back that folder's tabs from last time.
  */
 #include "project/project.h"
 
 #include "dialogs/about.h"
 #include "dialogs/keybinds.h"
 #include "editor/tabs.h"
+#include "files/files.h"
 #include "git/gitstatus.h"
 #include "git/scm.h"
 #include "lsp/client.h"
@@ -111,8 +112,8 @@ void rebuild_recent_menu(App *t)
   g_strfreev(recent);
 }
 
-/* Switches to root: the current tabs are saved and closed, the file manager and the shell restart
- * there, the panels empty, and root's tabs from last time come back. */
+/* Switches to root: the current tabs are saved and closed, the Files panel shows root, the shell
+ * restarts there, the panels empty, and root's tabs from last time come back. */
 static void switch_project(App *t, const char *root)
 {
   if (strcmp(root, t->root) == 0)
@@ -130,16 +131,17 @@ static void switch_project(App *t, const char *root)
   update_title(t);
   session_add_recent(t);
   rebuild_recent_menu(t);
-  restart_fixed_terminals(t);
+  restart_shell_pane(t);
   scm_reset();
   search_reset();
-  watch_git(t);
+  watch_git(t); /* t->git_top for the Files panel's git colors */
+  files_set_root(t);
 
   session_restore_tabs(t);
   update_editor_area(t);
   update_status(t);
   if (!current_tab(t))
-    gtk_widget_grab_focus(GTK_WIDGET(t->fm));
+    files_focus(t);
 }
 
 void open_project(App *t, const char *root)

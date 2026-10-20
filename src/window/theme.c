@@ -38,6 +38,9 @@ static const char *const css =
     /* Editor tabs: rounded on top, the current one in the editor's color, flowing into it. */
     "notebook { background: none; }"
     "notebook > header { background: #181818; border: none; box-shadow: none; padding: 4px 4px 0; }"
+    /* Adwaita pulls the tabs over its header border (which t-code has not) with a negative margin: an
+     * empty group then measured a negative height (a GTK warning). */
+    "notebook > header > tabs { margin: 0; }"
     "notebook > header > tabs > tab { min-height: 30px; padding: 0 4px 0 12px; margin: 0 1px;"
     "  border-radius: 9px 9px 0 0; background: none; box-shadow: none; border: none; outline: none; color: #9d9d9d; }"
     "notebook > header > tabs > tab:hover { background: #222222; color: #cccccc; }"
@@ -47,6 +50,7 @@ static const char *const css =
     "  border-radius: 6px; background: none; box-shadow: none; opacity: 0; }"
     "notebook > header > tabs > tab:hover button, notebook > header > tabs > tab:checked button { opacity: 1; }"
     "notebook > header > tabs > tab button:hover { background: rgba(255, 255, 255, .12); }"
+    "notebook > header > tabs > tab label.temporary { font-style: italic; }"
     "notebook > header > arrow { border-radius: 6px; }"
     "notebook > stack { background: #1f1f1f; }"
 

@@ -9,6 +9,8 @@
 #include "editor/tabs.h"
 #include "git/linediff.h"
 
+#include <string.h>
+
 #define UPDATE_MS 300 /* after the last change */
 #define WIDTH 4       /* pixels */
 
@@ -27,7 +29,9 @@ struct DiffGutter {
   gboolean is_old_side;  /* TRUE for the right-hand (older) tab in a comparison */
   GArray *gaps;          /* DiffGap per hunk gap when partner != NULL */
   GPtrArray *gap_tags;   /* GtkTextTag* created for the current gaps */
-  int line_height;       /* single-line pixel height used for the current gaps */
+  int wrap_width;        /* the width the gaps were made for with word wrap (0: no wrap) */
+  GArray *changed;       /* guint8 per line: TRUE where the line differs from the other side */
+  guint relayout_id;     /* the gaps are made again (the view's width changed) */
   gboolean base_pending; /* git show waits for the tab to be shown */
   guint update_id;
   Loading *loading; /* the git show in flight */
@@ -223,10 +227,19 @@ void diff_gutter_compare_file(Tab *tab, const char *path)
   set_kind(tab, path ? BASE_FILE : BASE_NONE, path);
 }
 
-/* Takes the gap rows out of the buffer (the tags that make them). The view is not touched: it
- * may be gone already (the tab closing). */
+#define CHANGED_WORDS "tcode-changed-words"
+
+/* Takes the gap rows and the changed lines' and words' colors out of the buffer (the tags that make
+ * them). The view is not touched: it may be gone already (the tab closing). */
 static void remove_gap_tags(DiffGutter *g)
 {
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(g->tab->buffer);
+  GtkTextIter start, end;
+
+  gtk_text_buffer_get_bounds(buffer, &start, &end);
+  if (gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(buffer), CHANGED_WORDS))
+    gtk_text_buffer_remove_tag_by_name(buffer, CHANGED_WORDS, &start, &end);
+  g_clear_pointer(&g->changed, g_array_unref);
   if (g->gap_tags) {
     GtkTextTagTable *table = gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(g->tab->buffer));
     for (guint i = 0; i < g->gap_tags->len; i++)
@@ -243,29 +256,17 @@ static void clear_side_gaps(DiffGutter *g)
   gtk_widget_queue_draw(GTK_WIDGET(g->tab->source));
 }
 
-/* One line's height, from the font: a line's own extent would include the gap rows. */
-static int measure_line_height(Tab *tab)
-{
-  PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(tab->source), "Mg");
-  int height = 0;
-
-  pango_layout_get_pixel_size(layout, NULL, &height);
-  g_object_unref(layout);
-  return MAX(height, 1);
-}
-
-static void apply_side_gaps(DiffGutter *g, GArray *gaps, int line_h)
+static void apply_side_gaps(DiffGutter *g, GArray *gaps)
 {
   GtkTextBuffer *buf = GTK_TEXT_BUFFER(g->tab->buffer);
 
   if (!g->gap_tags)
     g->gap_tags = g_ptr_array_new();
   g->gaps = gaps;
-  g->line_height = line_h;
   for (guint i = 0; i < gaps->len; i++) {
     DiffGap *gap = &g_array_index(gaps, DiffGap, i);
     GtkTextTag *tag = gtk_text_buffer_create_tag(buf, NULL, gap->above ? "pixels-above-lines" : "pixels-below-lines",
-                                                 gap->count * line_h, NULL);
+                                                 gap->count + gap->pad, NULL);
     GtkTextIter start, end;
     gtk_text_buffer_get_iter_at_line(buf, &start, gap->line);
     end = start;
@@ -277,6 +278,94 @@ static void apply_side_gaps(DiffGutter *g, GArray *gaps, int line_h)
     g_ptr_array_add(g->gap_tags, tag);
   }
   gtk_widget_queue_draw(GTK_WIDGET(g->tab->source));
+}
+
+/* The height in pixels each line of text takes in tab's view, as the view lays it out: with word
+ * wrap at its width, font and tab stops (a line's height is rounded once, for all its rows: three
+ * rows are not three times one). *width_out: the wrap width (0: no wrap). */
+static int *line_heights(Tab *tab, const char *text, int *width_out)
+{
+  GtkTextView *view = GTK_TEXT_VIEW(tab->source);
+  GtkWrapMode mode = gtk_text_view_get_wrap_mode(view);
+  PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(view), "x");
+  guint n = line_count(text), i = 0;
+  int *heights = g_new(int, MAX(n, 1)), width, one;
+  PangoTabArray *tabs;
+  GdkRectangle visible;
+
+  gtk_text_view_get_visible_rect(view, &visible);
+  width = visible.width - gtk_text_view_get_left_margin(view) - gtk_text_view_get_right_margin(view);
+  *width_out = mode == GTK_WRAP_NONE ? 0 : MAX(width, 0);
+  pango_layout_get_size(layout, NULL, &one);
+  one = PANGO_PIXELS(one);
+  if (mode == GTK_WRAP_NONE || width <= 0) { /* every line one row */
+    for (i = 0; i < n; i++)
+      heights[i] = one;
+    g_object_unref(layout);
+    return heights;
+  }
+  pango_layout_set_width(layout, width * PANGO_SCALE);
+  pango_layout_set_wrap(layout, mode == GTK_WRAP_CHAR   ? PANGO_WRAP_CHAR
+                                : mode == GTK_WRAP_WORD ? PANGO_WRAP_WORD
+                                                        : PANGO_WRAP_WORD_CHAR);
+  if ((tabs = gtk_text_view_get_tabs(view))) {
+    pango_layout_set_tabs(layout, tabs);
+    pango_tab_array_free(tabs);
+  }
+  for (const char *p = text; i < n; i++) {
+    const char *nl = strchr(p, '\n');
+    int height;
+    pango_layout_set_text(layout, p, nl ? (int)(nl - p) : -1);
+    pango_layout_get_size(layout, NULL, &height);
+    heights[i] = pango_layout_get_line_count(layout) > 1 ? PANGO_PIXELS(height) : one;
+    p = nl ? nl + 1 : p + strlen(p);
+  }
+  g_object_unref(layout);
+  return heights;
+}
+
+/* Marks the changed lines (guides.c tints them) and colors their changed words, like VS Code: green
+ * on the new side, red on the old one. */
+static void apply_side_changes(DiffGutter *g, GArray *spans)
+{
+  /* VS Code's diffEditor.insertedTextBackground / removedTextBackground. */
+  static const GdkRGBA inserted = { 0.61f, 0.80f, 0.17f, 0.28f }, removed = { 1, 0, 0, 0.30f };
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(g->tab->buffer);
+  GtkTextTag *words = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(buffer), CHANGED_WORDS);
+  int lines = gtk_text_buffer_get_line_count(buffer);
+
+  if (!words)
+    words = gtk_text_buffer_create_tag(buffer, CHANGED_WORDS, NULL);
+  g_object_set(words, "background-rgba", g->is_old_side ? &removed : &inserted, NULL);
+  g->changed = g_array_new(FALSE, TRUE, sizeof(guint8));
+  g_array_set_size(g->changed, lines);
+  for (guint i = 0; i < spans->len; i++) {
+    DiffSpan *span = &g_array_index(spans, DiffSpan, i);
+    GtkTextIter start, end;
+    if (span->line >= lines)
+      continue;
+    if (span->end < 0) {
+      g_array_index(g->changed, guint8, span->line) = TRUE;
+      continue;
+    }
+    gtk_text_buffer_get_iter_at_line(buffer, &end, span->line);
+    if (!gtk_text_iter_ends_line(&end))
+      gtk_text_iter_forward_to_line_end(&end);
+    if (span->end > gtk_text_iter_get_line_index(&end)) /* the text changed meanwhile */
+      continue;
+    gtk_text_buffer_get_iter_at_line_index(buffer, &start, span->line, span->start);
+    gtk_text_buffer_get_iter_at_line_index(buffer, &end, span->line, span->end);
+    gtk_text_buffer_apply_tag(buffer, words, &start, &end);
+  }
+  g_array_unref(spans);
+}
+
+gboolean diff_gutter_line_changed(Tab *tab, int line)
+{
+  DiffGutter *g = tab && tab->view ? tab->view->diff : NULL;
+
+  return g && g->partner && g->changed && line >= 0 && (guint)line < g->changed->len &&
+         g_array_index(g->changed, guint8, line);
 }
 
 static void sync_pair_gaps(DiffGutter *g)
@@ -292,14 +381,20 @@ static void sync_pair_gaps(DiffGutter *g)
 
   clear_side_gaps(ng);
   clear_side_gaps(og);
-  int line_h = measure_line_height(new_tab);
   gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(new_tab->buffer), &s1, &e1);
   gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(old_tab->buffer), &s2, &e2);
   char *new_text = gtk_text_buffer_get_text(GTK_TEXT_BUFFER(new_tab->buffer), &s1, &e1, TRUE);
   char *old_text = gtk_text_buffer_get_text(GTK_TEXT_BUFFER(old_tab->buffer), &s2, &e2, TRUE);
 
-  apply_side_gaps(ng, line_diff_gaps(old_text, new_text, FALSE), line_h);
-  apply_side_gaps(og, line_diff_gaps(old_text, new_text, TRUE), line_h);
+  int *new_heights = line_heights(new_tab, new_text, &ng->wrap_width);
+  int *old_heights = line_heights(old_tab, old_text, &og->wrap_width);
+
+  apply_side_gaps(ng, line_diff_gaps(old_text, new_text, old_heights, new_heights, FALSE));
+  apply_side_gaps(og, line_diff_gaps(old_text, new_text, old_heights, new_heights, TRUE));
+  apply_side_changes(ng, line_diff_spans(old_text, new_text, FALSE));
+  apply_side_changes(og, line_diff_spans(old_text, new_text, TRUE));
+  g_free(new_heights);
+  g_free(old_heights);
   g_free(new_text);
   g_free(old_text);
 }
@@ -334,16 +429,64 @@ gboolean diff_gutter_line_gaps(Tab *tab, int line, int *above_px, int *below_px)
   if (!tab || !tab->view || !tab->view->diff || !tab->view->diff->partner || !tab->view->diff->gaps)
     return FALSE;
   DiffGutter *g = tab->view->diff;
-  for (guint i = 0; i < g->gaps->len; i++) {
+  guint low = 0, high = g->gaps->len;
+
+  while (low < high) { /* the gaps are in line order: the first one at line or after */
+    guint middle = (low + high) / 2;
+    if (g_array_index(g->gaps, DiffGap, middle).line < line)
+      low = middle + 1;
+    else
+      high = middle;
+  }
+  for (guint i = low; i < g->gaps->len && g_array_index(g->gaps, DiffGap, i).line == line; i++) {
     DiffGap *gap = &g_array_index(g->gaps, DiffGap, i);
-    if (gap->line == line) {
-      if (gap->above)
-        *above_px += gap->count * g->line_height;
-      else
-        *below_px += gap->count * g->line_height;
-    }
+    if (gap->above)
+      *above_px += gap->count + gap->pad;
+    else
+      *below_px += gap->count + gap->pad;
   }
   return !g->is_old_side;
+}
+
+int diff_gutter_line_pad(Tab *tab, int line)
+{
+  DiffGutter *g = tab && tab->view ? tab->view->diff : NULL;
+
+  for (guint i = 0; g && g->partner && g->gaps && i < g->gaps->len; i++) {
+    DiffGap *gap = &g_array_index(g->gaps, DiffGap, i);
+    if (gap->line == line && !gap->above)
+      return gap->pad;
+    if (gap->line > line)
+      break;
+  }
+  return 0;
+}
+
+static gboolean relayout_now(gpointer data)
+{
+  DiffGutter *g = data;
+
+  g->relayout_id = 0;
+  sync_pair_gaps(g);
+  return G_SOURCE_REMOVE;
+}
+
+void diff_gutter_check_width(Tab *tab)
+{
+  DiffGutter *g = tab && tab->view ? tab->view->diff : NULL;
+  GtkTextView *view;
+  GdkRectangle visible;
+  int width;
+
+  if (!g || !g->partner || g->relayout_id)
+    return;
+  view = GTK_TEXT_VIEW(tab->source);
+  gtk_text_view_get_visible_rect(view, &visible);
+  width = visible.width - gtk_text_view_get_left_margin(view) - gtk_text_view_get_right_margin(view);
+  if (gtk_text_view_get_wrap_mode(view) == GTK_WRAP_NONE)
+    width = 0;
+  if (width != g->wrap_width)
+    g->relayout_id = g_idle_add(relayout_now, g);
 }
 
 static void on_source_mapped(GtkWidget *widget G_GNUC_UNUSED, DiffGutter *g)
@@ -408,6 +551,8 @@ void diff_gutter_free(DiffGutter *g)
   g_object_unref(g->renderer);
   if (g->update_id)
     g_source_remove(g->update_id);
+  if (g->relayout_id)
+    g_source_remove(g->relayout_id);
   if (g->loading)
     g->loading->gutter = NULL;
   if (g->marks)

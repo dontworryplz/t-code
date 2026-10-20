@@ -11,13 +11,13 @@ A light C/C++ IDE for Linux in one GTK4 window, with VS Code's Dark Modern look.
 
 `t-code --version` prints the installed version.
 
-![t-code editing its own source: the file manager on the left, a C file in the editor with indent guides and the minimap, the shell below, and the status bar](docs/screenshot.png)
+![t-code editing its own source: the folder tree on the left, a C file in the editor with indent guides and the minimap, the shell below, and the status bar](docs/screenshot.png)
 
 <sub>t-code 0.2 open on its own repository.</sub>
 
-Two small C programs:
+One window, one process (besides clangd and your shell):
 
-- **left:** `t-code-fm`, a file manager written in plain C (no libraries), in a terminal (VTE)
+- **left:** the Files panel, the project's folder tree with file icons and git colors
 - **right:** editor tabs (GtkSourceView), sharing one clangd
 - **bottom:** your shell, in a terminal
 
@@ -90,9 +90,8 @@ Then start `t-code` from the app menu, or `t-code [folder]` in a terminal. To re
 your package manager (`sudo dnf remove t-code`, `sudo pacman -R t-code`, `sudo apt remove t-code`,
 `sudo xbps-remove t-code`).
 
-A package puts `t-code` in `/usr/bin`, the file manager in `/usr/libexec/t-code/`
-(`/usr/lib/t-code/` on Arch), the editor's colors in `/usr/share/t-code/styles/`, and the app menu
-entry and icon.
+A package puts `t-code` in `/usr/bin`, the editor's colors in `/usr/share/t-code/styles/`, and the
+app menu entry and icon.
 
 ### Building the packages yourself
 
@@ -112,8 +111,7 @@ built directly with `rpmbuild`; install its build dependencies once with
 
 `packaging/test.sh` installs each package in a fresh container of its distribution (so the
 package manager has to find every dependency), checks the installed files, and starts t-code on
-a headless X server with five C files: the file manager and one clangd (with its malloc arena
-limit) have to come up, a Markdown preview has to open, and t-code has to quit cleanly.
+a headless X server with five C files: one clangd (with its malloc arena limit) has to come up, a Markdown preview has to open, and t-code has to quit cleanly.
 While they build, the packages also run the tests that need no display.
 
 ### From the source, into ~/.local
@@ -122,8 +120,8 @@ While they build, the packages also run the tests that need no display.
 packaging/install.sh
 ```
 
-This builds t-code and installs it under `~/.local`: the `t-code` command, the file manager in
-`libexec/t-code/`, the editor's colors in `share/t-code/styles/`, and a "t-code" entry in the app menu
+This builds t-code and installs it under `~/.local`: the `t-code` command, the editor's colors in
+`share/t-code/styles/`, and a "t-code" entry in the app menu
 with its own icon (`desktop/io.github.tcode.svg`, installed to `~/.local/share/icons`). Run it again after changing the code to update the installed copy.
 
 To remove everything it installed:
@@ -176,19 +174,21 @@ palette) finds any command by name.
 | anywhere    | `Ctrl+\`                               | split the editor into two groups / join   |
 | anywhere    | `Ctrl+1` / `Ctrl+2`                    | left / right editor group                 |
 | anywhere    | `Ctrl+PageDown` / `Ctrl+PageUp`, `Alt+.` / `Alt+,` | next / previous tab           |
-| anywhere    | `Alt+1` / `Alt+2` / `Alt+3`            | file manager / editor / shell             |
-| anywhere    | `Ctrl+B` / `Ctrl+J`                    | hide / show the file manager / the shell  |
+| anywhere    | `Alt+1` / `Alt+2` / `Alt+3`            | Files / editor / shell                    |
+| anywhere    | `Ctrl+B` / `Ctrl+J`                    | hide / show the Files panel / the shell   |
 | anywhere    | `F7`                                   | code coloring on / off (all tabs)         |
 | anywhere    | `Ctrl+=` / `Ctrl+-` / `Ctrl+0`         | bigger / smaller / normal text            |
 | shell       | `Ctrl+Click` on `file.c:12:5`          | open the file at that line (compiler messages) |
 | tab         | left click / middle click / `×`        | switch to / close / close                 |
-| files       | click, `Enter`, `l`, `→`               | open folder, or open the file in a tab    |
-| files       | `h`, `Backspace`, `←`                  | collapse folder / go to parent            |
-| files       | `↑` `↓`, `j` `k`, wheel                 | move / scroll                             |
-| files       | `a` / `r` / `d`, `Delete`              | new file (end with `/` for a folder) / rename / delete |
+| tab         | double click                           | keep a temporary (italic) tab             |
+| files       | click, `Enter`, `l`                    | open or close a folder, or open the file in a temporary tab (italic; the next click replaces it) |
+| files       | double click / middle click            | open the file for good / to the side      |
+| files       | `→` / `←`, `h`, `Backspace`            | open a folder or go into it / close it or go to its parent |
+| files       | `↑` `↓`, `j` `k`, `g` `G`, wheel        | move / first / last / scroll              |
+| files       | `a` / `r`, `F2` / `d`, `Delete`        | new file (`a/b.c` makes folders, end with `/` for a folder) / rename / delete |
 | files       | `Ctrl+X` / `Ctrl+C` / `Ctrl+V`         | cut / copy / paste files and folders      |
-| files       | drag a row onto a folder               | move it there                             |
-| files       | `.` / `R`                              | hide / show dotfiles (shown by default) / refresh |
+| files       | drag a row onto a folder / the editors | move it there / open it                   |
+| files       | `.` / `R`                              | hide / show dotfiles (shown by default) / read the tree again |
 | files       | right click                            | Open, Open to the Side, Open Preview, Compare with HEAD, File History, New File/Folder, Open in Terminal, Cut/Copy/Paste, Copy (Relative) Path, Rename, Delete, Open Folder as Project |
 | editor      | `Ctrl+S` / `Ctrl+W`                    | save / close this tab                     |
 | editor      | `Ctrl+F` / `Ctrl+H`, `F3` / `Shift+F3` | find / replace, next / previous           |
@@ -219,17 +219,23 @@ and UBSan) into `build/` and run. Ctrl+click a `file.c:12:5` in the compiler's o
 
 **Git.** The editor marks changed lines in the gutter like VS Code (blue changed, green added, red
 where lines were deleted), following new commits by itself. **Compare with HEAD** (`Ctrl+Alt+D`)
-and **File History** (`Ctrl+Alt+H`, pick a commit) open the old version read-only to the side:
-both gutters then mark the differences between the two. Closing the old version goes back to
-comparing with the last commit. The file manager colors files by their git state (modified,
+and **File History** (`Ctrl+Alt+H`, pick a commit) open one tab ("file ↔ commit") with the file
+on the left and the old version read-only on the right, scrolling together and lined up (also with
+word wrap): changed lines are tinted, their changed words colored (green new, red old), and gap
+rows stand for missing lines. Closing the tab closes both sides; "Git: Stop Comparing" in the
+command palette keeps the file, back to comparing with the last commit. The Files panel colors files by their git state (modified,
 added, untracked, conflicted, ignored) with the letter at the end of the row.
 
-**File manager.** It refreshes by itself when files are added, removed or saved, and after a git
-commit. Files and folders can be cut, copied and pasted (a name that is taken gets " copy"), or
-dragged onto a folder.
+**Files panel.** A folder is read when you open it and shows new, removed and renamed files by
+itself; the git colors follow commits and saves. Files and folders can be cut, copied and pasted
+(a name that is taken gets " copy"), dragged onto a folder (from another file manager they are
+copied), or dragged onto the editors to open them. A new file opens in the editor.
+Like VS Code, a click opens a file in a temporary tab (its name in italics) that the next click
+replaces, so browsing does not pile up tabs; editing the file or double-clicking it (in the tree or
+on the tab) keeps it, and a middle click opens it to the side.
 
 **Split editor.** `Ctrl+\` (or the title bar button) puts a second group of tabs next to the
-first. New files open in the group you are in; "Open to the Side" in the file manager opens a
+first. New files open in the group you are in; "Open to the Side" in the Files panel opens a
 file straight into the right group. Tabs can be dragged between the groups, and the right group
 closes when its last tab does. A file is never open in both groups at once, since two editors
 saving the same file would overwrite each other.
@@ -237,8 +243,8 @@ saving the same file would overwrite each other.
 **Projects.** The title bar has buttons to open another folder and to pick a recent one.
 For a second project next to the first, middle-click the dock icon (or pick "New Window" from
 its menu, or run `t-code --new-window`): a new window opens and asks for a folder.
-Switching remembers and closes the current project's tabs, restarts the file manager and the
-shell in the new folder, and brings back that folder's tabs from last time. t-code also remembers
+Switching remembers and closes the current project's tabs, shows the new folder in the Files
+panel, restarts the shell there, and brings back that folder's tabs from last time. t-code also remembers
 the window size, pane sizes, hidden panes and text size (in `~/.config/t-code/session.ini`).
 
 **Search** (`Ctrl+Shift+F`), a tab next to Files and Source Control, like VS Code's: results
@@ -262,8 +268,8 @@ preview, other local files open in an editor, and web links open in the browser.
 
 ## Performance
 
-t-code is meant to be light: GtkSourceView editors in one process, a small terminal file manager,
-and one clangd that only knows the files you have looked at.
+t-code is meant to be light: GtkSourceView editors and the folder tree in one process, and one
+clangd that only knows the files you have looked at.
 
 Measured on Fedora 44 (x86_64) with `tools/headless.sh` (t-code run invisibly, then
 `tools/proc-report.sh`), the same 25 C files of this repository opened, each tab then shown in
@@ -298,8 +304,10 @@ What keeps it small:
   a network process, 150-200 MB, per preview).
 - **Freed memory goes back**: t-code calls glibc's `malloc_trim(0)` when a tab closes, a search
   ends and the project changes.
-- **The file manager does not watch build output**: `build/`, `target/`, `node_modules/`, `.git/`
-  and `.cache/` are never watched, and a burst of changes refreshes the tree once (250 ms).
+- **The Files panel reads only open folders** and frees a folder's rows when it closes. It does
+  not watch build output (`build/`, `target/`, `node_modules/`, `.git/`, `.cache/`), and a burst of
+  changes reads a folder once (250 ms). Saving a file reads nothing: only files coming, going or
+  being renamed do.
 
 How to measure it yourself (see `tools/`):
 
@@ -321,7 +329,7 @@ arena limit.
 src/                 t-code, the window (src/app.h: the shared types and a map of the folders;
                      every .c file has a .h next to it with what it offers the others)
   main.c             start and quit: the command line, the application, signals
-  window/            the window: layout and panes (window.c), where the helpers are (paths.c),
+  window/            the window: layout and panes (window.c), where its data is (paths.c),
                      theme, terminals and Ctrl+click on compiler messages (terminal.c), the status
                      bar, every command: shortcuts, palette and Keybinds list (commands.c)
   editor/            editor tabs and the two groups (tabs.c), opening, saving, autosave and closing
@@ -342,12 +350,14 @@ src/                 t-code, the window (src/app.h: the shared types and a map o
   dialogs/           the Settings, Keyboard Shortcuts and About windows
   project/           switching folders (project.c), remembering the window and tabs (session.c),
                      build and run (run.c)
-  ipc/               requests from the file manager over $TCODE_SOCKET (socket.c)
-  fm/                t-code-fm, the file manager (see src/fm/fm.h)
+  files/             the Files panel (files.c): a folder's entries read and watched (folder.c), file
+                     operations (fileops.c), git colors (gitmarks.c), file icons (icons.c)
+  ipc/               requests from scripts and tools over $TCODE_SOCKET (socket.c)
 styles/              the editor's colors: VS Code Dark Modern as a GtkSourceView style scheme
 tests/               make test: editing and the find bar, the language server client (with a fake
-                     server), detect.c, linediff.c, searchmatch.c, the Search panel, Source Control
-                     and About; make test-asan: the ones without GTK under ASan
+                     server), detect.c, linediff.c, searchmatch.c, the Files panel and its GIO half,
+                     the Search panel, Source Control and About; make test-asan: the ones without
+                     GTK under ASan
 tools/               measuring memory and CPU: the running process tree, a headless t-code, clangd
 desktop/             app menu entry template and the app icon
 packaging/           install.sh, uninstall.sh, build.sh, test.sh: Fedora (fedora/t-code.spec), Arch

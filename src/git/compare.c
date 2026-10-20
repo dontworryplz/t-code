@@ -1,9 +1,10 @@
 /*
- * Comparing a file with an older version from git, side by side:
+ * Comparing a file with an older version from git, side by side in one tab:
  *   left   the working file; its gutter marks what changed since that version
  *   right  the old version, read-only; its gutter marks what changed since then
  * Ctrl+Alt+D compares with the last commit (HEAD); Ctrl+Alt+H lists the file's commits to pick
- * one. When the old version's tab closes, the left gutter follows HEAD again.
+ * one. Closing the tab closes both; "Git: Stop Comparing" keeps the working file, its gutter
+ * following HEAD again.
  */
 #include "git/compare.h"
 
@@ -99,26 +100,6 @@ static char *write_old_version(App *t, const char *path, const char *spec, const
   return old_path;
 }
 
-/* A tab that shows an old version already: its file may have been written again (the index
- * changes). */
-static void refresh_version(Tab *tab)
-{
-  editor_reload(tab);
-}
-
-/* Closes the old versions compared with path, except keep: one comparison per file at a time, or
- * a forgotten one would keep path's gutter from going back to HEAD when the newer one closes. */
-static void close_comparisons(App *t, const char *path, const char *keep)
-{
-  int n = tab_count(t);
-
-  for (int i = n - 1; i >= 0; i--) { /* from the end: closing shifts the ones after */
-    Tab *tab = tab_nth(t, i);
-    if (g_strcmp0(tab->compare_with, path) == 0 && g_strcmp0(tab->path, keep) != 0)
-      quit_editor(tab); /* read-only: nothing to save */
-  }
-}
-
 static void on_vscroll(GtkAdjustment *src, GtkScrollable *dst)
 {
   GtkAdjustment *target = gtk_scrollable_get_vadjustment(dst);
@@ -139,90 +120,90 @@ static void on_hscroll(GtkAdjustment *src, GtkScrollable *dst)
     gtk_adjustment_set_value(target, val);
 }
 
-/* Keeps two side-by-side comparison tabs scrolling together vertically and horizontally. */
-static void sync_scroll(Tab *a, Tab *b)
+/* Once laid out, the right side starts where the left one is (it opens at the top). */
+static void on_right_mapped(GtkWidget *right, GtkScrollable *left)
 {
-  if (!a || !b || !a->source || !b->source)
-    return;
-  GtkAdjustment *va = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(a->source));
-  GtkAdjustment *vb = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(b->source));
-  GtkAdjustment *ha = gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(a->source));
-  GtkAdjustment *hb = gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(b->source));
+  GtkAdjustment *from = gtk_scrollable_get_vadjustment(left);
 
-  if (va && vb) {
-    g_signal_handlers_disconnect_by_func(va, on_vscroll, b->source);
-    g_signal_handlers_disconnect_by_func(vb, on_vscroll, a->source);
-    g_signal_connect_object(va, "value-changed", G_CALLBACK(on_vscroll), b->source, 0);
-    g_signal_connect_object(vb, "value-changed", G_CALLBACK(on_vscroll), a->source, 0);
-  }
-  if (ha && hb) {
-    g_signal_handlers_disconnect_by_func(ha, on_hscroll, b->source);
-    g_signal_handlers_disconnect_by_func(hb, on_hscroll, a->source);
-    g_signal_connect_object(ha, "value-changed", G_CALLBACK(on_hscroll), b->source, 0);
-    g_signal_connect_object(hb, "value-changed", G_CALLBACK(on_hscroll), a->source, 0);
-  }
+  g_signal_handlers_disconnect_by_func(right, on_right_mapped, left);
+  if (from)
+    on_vscroll(from, GTK_SCROLLABLE(right));
 }
 
-void unsync_scroll(Tab *tab)
+/* Keeps a comparison's two sides scrolling together vertically and horizontally. */
+static void sync_scroll(Tab *left, Tab *right)
 {
-  int n = tab_count(tab->app);
+  GtkScrollable *a = GTK_SCROLLABLE(left->source), *b = GTK_SCROLLABLE(right->source);
 
-  if (tab->kind != TAB_EDITOR || !tab->source)
-    return;
-  for (int i = -1; i < n; i++) { /* its own adjustments, then the other tabs' */
-    Tab *other = i < 0 ? tab : tab_nth(tab->app, i);
-    if (other->kind != TAB_EDITOR || !other->source || (other == tab && i >= 0))
+  g_signal_connect_object(right->source, "map", G_CALLBACK(on_right_mapped), a, G_CONNECT_AFTER);
+  g_signal_connect_object(gtk_scrollable_get_vadjustment(a), "value-changed", G_CALLBACK(on_vscroll), b, 0);
+  g_signal_connect_object(gtk_scrollable_get_vadjustment(b), "value-changed", G_CALLBACK(on_vscroll), a, 0);
+  g_signal_connect_object(gtk_scrollable_get_hadjustment(a), "value-changed", G_CALLBACK(on_hscroll), b, 0);
+  g_signal_connect_object(gtk_scrollable_get_hadjustment(b), "value-changed", G_CALLBACK(on_hscroll), a, 0);
+}
+
+void unsync_scroll(Tab *left)
+{
+  Tab *sides[] = { left, left->old_side };
+
+  for (gsize i = 0; i < G_N_ELEMENTS(sides); i++) {
+    if (!sides[i] || !sides[i]->source)
       continue;
-    GtkAdjustment *adjustments[] = { gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(other->source)),
-                                     gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(other->source)) };
+    GtkAdjustment *adjustments[] = { gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(sides[i]->source)),
+                                     gtk_scrollable_get_hadjustment(GTK_SCROLLABLE(sides[i]->source)) };
     for (gsize k = 0; k < G_N_ELEMENTS(adjustments); k++) {
       if (!adjustments[k])
         continue;
-      if (other == tab) { /* it moves nothing any more */
-        g_signal_handlers_disconnect_matched(adjustments[k], G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_vscroll, NULL);
-        g_signal_handlers_disconnect_matched(adjustments[k], G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_hscroll, NULL);
-      } else { /* nothing moves it any more */
-        g_signal_handlers_disconnect_by_func(adjustments[k], on_vscroll, tab->source);
-        g_signal_handlers_disconnect_by_func(adjustments[k], on_hscroll, tab->source);
-      }
+      g_signal_handlers_disconnect_matched(adjustments[k], G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_vscroll, NULL);
+      g_signal_handlers_disconnect_matched(adjustments[k], G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_hscroll, NULL);
     }
   }
 }
 
-/* The working file on the left, its gutter compared with the commit base_rev (by name; it follows
- * new commits when that is HEAD) or else with old_path; on the right old_path read-only ("name @
- * label"), its gutter compared with the working file. */
+/* Opens path (an old version, read-only) in a tab of the active group titled "name @ label", compared
+ * with working; a tab showing it already goes first (the file may have been written again). */
+static Tab *open_version(App *t, const char *path, const char *label, const char *working)
+{
+  char *name = g_path_get_basename(working);
+  Tab *tab;
+
+  for (int i = tab_count(t) - 1; i >= 0; i--) {
+    Tab *other = tab_nth(t, i);
+    if (g_strcmp0(other->path, path) == 0)
+      remove_tab(other); /* an old version: nothing to save */
+    else if (other->old_side && g_strcmp0(other->old_side->path, path) == 0)
+      stop_comparing_tab(other);
+  }
+  tab = open_editor(t, path, 0, 0, TRUE);
+  tab->title = g_strdup_printf("%s @ %s", name, label);
+  tab->compare_with = g_strdup(working);
+  update_tab_label(tab);
+  g_free(name);
+  return tab;
+}
+
+/* left and right in one tab, each gutter marking what differs from the other, scrolling together. */
+static void show_side_by_side(Tab *left, Tab *right)
+{
+  join_tabs(left, right);
+  diff_gutter_pair(left, right);
+  sync_scroll(left, right);
+  select_tab(left);
+}
+
+/* The working file next to old_path (read-only, "name @ label") in one tab: the working file's
+ * gutter compared with the commit base_rev (by name; it follows new commits when that is HEAD) or
+ * else with old_path, the old version's with the working file. */
 static void compare_working(App *t, const char *path, const char *old_path, const char *label, const char *base_rev)
 {
-  char *name = g_path_get_basename(path);
-  Tab *work = find_tab(t, TAB_EDITOR, path);
-  Tab *old = find_tab(t, TAB_EDITOR, old_path);
+  Tab *work = find_tab(t, TAB_EDITOR, path), *old;
 
-  close_comparisons(t, path, old_path);
-  if (work) {
-    if (tab_group(work) == 1)
-      move_tab(work, 0);
-  } else {
-    t->active = 0;
+  if (!work)
     work = open_editor(t, path, 0, 0, FALSE);
-  }
-
-  if (!old) {
-    set_split(t, TRUE);
-    t->active = 1;
-    old = open_editor(t, old_path, work->line, 1, TRUE);
-    old->title = g_strdup_printf("%s @ %s", name, label);
-    old->compare_with = g_strdup(path);
-    update_tab_label(old);
-  } else {
-    if (tab_group(old) == 0) {
-      set_split(t, TRUE);
-      move_tab(old, 1);
-    }
-    refresh_version(old);
-  }
-  /* Each gutter marks what differs from the other side: the working file's from the commit (by
-     * name, so HEAD follows new commits) or the old copy, the old version's from the working file. */
+  stop_comparing_tab(work); /* one comparison per file at a time */
+  keep_tab(work);           /* a click in Files must not replace it while it is compared */
+  t->active = tab_group(work);
+  old = open_version(t, old_path, label, path);
   if (base_rev && strcmp(base_rev, "HEAD") != 0)
     diff_gutter_compare_rev(work, base_rev);
   else if (base_rev)
@@ -230,11 +211,7 @@ static void compare_working(App *t, const char *path, const char *old_path, cons
   else
     diff_gutter_compare_file(work, old_path);
   diff_gutter_compare_file(old, path);
-  diff_gutter_pair(work, old);
-  sync_scroll(work, old);
-  select_tab(old);
-  select_tab(work);
-  g_free(name);
+  show_side_by_side(work, old);
 }
 
 /* path next to its version in rev (a commit, "HEAD"): compare_with_head() and the File History
@@ -319,32 +296,10 @@ static char *write_revision(App *t, const char *rev, const char *rel, char **lab
   return path;
 }
 
-/* Opens a read-only old version in group (titled "name @ label"), its gutter compared with base
- * (NULL: no gutter marks); reuses a tab that shows it already. */
-static Tab *open_version(App *t, const char *path, const char *label, const char *base, const char *working, int group)
-{
-  Tab *tab = find_tab(t, TAB_EDITOR, path);
-
-  if (!tab) {
-    char *name = g_path_get_basename(working);
-    t->active = group;
-    tab = open_editor(t, path, 0, 0, TRUE);
-    tab->title = g_strdup_printf("%s @ %s", name, label);
-    tab->compare_with = g_strdup(working);
-    update_tab_label(tab);
-    g_free(name);
-  } else {
-    if (tab_group(tab) != group)
-      move_tab(tab, group);
-    refresh_version(tab);
-  }
-  diff_gutter_compare_file(tab, base); /* NULL: the other side is missing, no marks */
-  return tab;
-}
-
-/* Shows a file in two versions side by side: new_rev's on the left, old_rev's on the right, each
- * gutter marking what differs from the other. Paths are relative to the work tree top (they differ
- * after a rename); a NULL rev or path is a missing side (the file was added or deleted). */
+/* Shows a file in two versions side by side in one tab: new_rev's on the left, old_rev's on the
+ * right, each gutter marking what differs from the other. Paths are relative to the work tree top
+ * (they differ after a rename); a NULL rev or path is a missing side (the file was added or
+ * deleted): the other one shows alone. */
 void compare_revisions(App *t, const char *old_rev, const char *old_rel, const char *new_rev, const char *new_rel)
 {
   char *old_label = NULL, *new_label = NULL;
@@ -356,20 +311,18 @@ void compare_revisions(App *t, const char *old_rev, const char *old_rel, const c
   if (!old_path && !new_path) {
     show_message(t, "Nothing to compare", "git has no such version of this file.");
   } else {
-    if (old_path && new_path)
-      set_split(t, TRUE);
     if (new_path)
-      left = open_version(t, new_path, new_label, old_path, working, 0);
+      left = open_version(t, new_path, new_label, working);
     if (old_path)
-      right = open_version(t, old_path, old_label, new_path, working, new_path ? 1 : 0);
-    if (left && right) {
-      diff_gutter_pair(left, right);
-      sync_scroll(left, right);
-    }
-    if (right)
-      select_tab(right);
+      right = open_version(t, old_path, old_label, working);
     if (left)
-      select_tab(left);
+      diff_gutter_compare_file(left, old_path); /* NULL: the other side is missing, no marks */
+    if (right)
+      diff_gutter_compare_file(right, new_path);
+    if (left && right)
+      show_side_by_side(left, right);
+    else
+      select_tab(left ? left : right);
   }
   g_free(working);
   g_free(new_path);
@@ -378,51 +331,28 @@ void compare_revisions(App *t, const char *old_rev, const char *old_rel, const c
   g_free(old_label);
 }
 
-/* An old version's tab closed: unless another old version still compares with the same file,
- * its gutter goes back to following HEAD. */
-void forget_comparison(Tab *old_version)
+void stop_comparing_tab(Tab *tab)
 {
-  App *t = old_version->app;
-  int n = tab_count(t);
-
-  for (int i = 0; i < n; i++) {
-    Tab *other = tab_nth(t, i);
-    if (other != old_version && g_strcmp0(other->compare_with, old_version->compare_with) == 0)
-      return;
-  }
-  Tab *work = find_tab(t, TAB_EDITOR, old_version->compare_with);
-
-  if (work) {
-    diff_gutter_pair(work, NULL);
-    diff_gutter_follow_head(work);
+  if (!tab->old_side)
+    return;
+  part_tabs(tab);
+  if (!tab->compare_with) { /* the working file: its gutter follows HEAD again */
+    diff_gutter_pair(tab, NULL);
+    diff_gutter_follow_head(tab);
   }
 }
 
-/* Closes the old versions of the current file (their editors are read-only, so nothing is lost). */
+/* Ends the current tab's comparison: an old version closes, the working file stays. */
 void stop_comparing(App *t)
 {
-  const char *path = comparable_path(t);
-  int n = tab_count(t);
-  gboolean closed = FALSE;
+  Tab *tab = current_tab(t);
 
-  if (!path)
+  if (!tab || tab->kind != TAB_EDITOR)
     return;
-  char *working = g_strdup(path);
-  for (int i = n - 1; i >= 0; i--) { /* from the end: closing shifts the ones after */
-    Tab *tab = tab_nth(t, i);
-    if (g_strcmp0(tab->compare_with, working) == 0) {
-      quit_editor(tab);
-      closed = TRUE;
-    }
-  }
-  if (!closed) {
-    Tab *work = find_tab(t, TAB_EDITOR, working);
-    if (work) {
-      diff_gutter_pair(work, NULL);
-      diff_gutter_follow_head(work);
-    }
-  }
-  g_free(working);
+  if (tab->compare_with) /* two old versions, or one: nothing to keep */
+    remove_tab(tab);
+  else
+    stop_comparing_tab(tab);
 }
 
 /* File history ------------------------------------------------------------------------------- */
