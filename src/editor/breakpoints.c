@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define CATEGORY "tcode-breakpoint"
-#define DOT_WIDTH 16 /* pixels */
+#define DOT_WIDTH 28 /* pixels: up to the line numbers, so a click left of them lands here */
 
 struct Breakpoints {
   Tab *tab;
@@ -363,7 +363,7 @@ static void draw_dot(GtkSnapshot *snapshot, double y, double height, GdkRGBA col
 static void draw_arrow(GtkSnapshot *snapshot, double y, double height)
 {
   GskPathBuilder *builder = gsk_path_builder_new();
-  double h = MIN(10, height - 4), top = y + (height - h) / 2, left = 2, tip = DOT_WIDTH - 2;
+  double h = MIN(10, height - 4), top = y + (height - h) / 2, left = DOT_WIDTH / 2.0 - 7, tip = DOT_WIDTH / 2.0 + 7;
   GskPath *path;
 
   gsk_path_builder_move_to(builder, left, top);

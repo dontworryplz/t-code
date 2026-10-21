@@ -503,7 +503,9 @@ static void fit_numbers(Folding *f)
   memset(sample, '0', digits);
   sample[digits] = '\0';
   gtk_source_gutter_renderer_text_measure(GTK_SOURCE_GUTTER_RENDERER_TEXT(f->numbers), sample, &width, NULL);
-  gtk_widget_set_size_request(f->numbers, width + 20, -1); /* VS Code's gap before the marks */
+  /* A little room left of the digits: the breakpoints' column (breakpoints.c) has the rest, so a click
+   * left of a number puts a breakpoint instead of selecting the line. */
+  gtk_widget_set_size_request(f->numbers, width + 8, -1);
 }
 
 /* A click on a number selects its line. */
