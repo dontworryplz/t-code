@@ -8,6 +8,8 @@ A light C/C++ IDE for Linux in one GTK4 window, with a dark look (Dark Classic) 
 
 <sub>t-code 0.3: Dark Classic, rounded (top) and Gruvbox, square (bottom).</sub>
 
+## Jump => [Install](https://github.com/suacayipkisi/t-code#install) | [Usage and Keys](https://github.com/suacayipkisi/t-code#usage) | [Performance](https://github.com/suacayipkisi/t-code#performance)
+
 **New in 0.3:** a debugger (gdb: breakpoints, stepping, variables, call stack, watch, conditional
 breakpoints, values under the pointer, disassembly), quick fixes, code folding, sticky scroll, color
 themes, panels that move between docks, a second window, right-click menus everywhere, and Run for
@@ -89,6 +91,8 @@ sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-dev
 ## Install
 
 ### With a package (Fedora, Arch Linux, Debian, Void Linux)
+
+#### [Latest Release v0.3](https://github.com/suacayipkisi/t-code/releases/tag/v0.3)
 
 t-code 0.3.0 has packages for Fedora 44, Arch Linux, Debian 13 (trixie) and Void Linux (glibc and
 musl), x86_64. Install the one for your distribution; the package manager pulls in what it needs
