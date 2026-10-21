@@ -5,6 +5,7 @@
 #include "editor/editorview.h"
 
 #include "editor/detect.h"
+#include "debug/debughover.h"
 #include "editor/breakpoints.h"
 #include "editor/diffgutter.h"
 #include "editor/editing.h"
@@ -433,6 +434,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   folding_attach(tab);
   breakpoints_attach(tab);
   hover_attach(tab);
+  debug_hover_attach(tab);
   completion_attach(tab);
   navigate_attach(tab);
 

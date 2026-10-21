@@ -26,7 +26,8 @@ void session_save_settings(App *t);
 void session_apply_window(App *t);
 
 /* Reads what the current project keeps besides its tabs: the indentation chosen for it into
- * t->project.indent (none: width 0), its breakpoints into t->debug.breakpoints. */
+ * t->project.indent (none: width 0), its breakpoints into t->debug.breakpoints, its watch expressions
+ * into the Run and Debug panel. */
 void session_load_project(App *t);
 
 /* Writes t->project.indent for the current project (width 0 forgets it). */

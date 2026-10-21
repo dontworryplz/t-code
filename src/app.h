@@ -145,6 +145,8 @@ struct App {
     GHashTable *breakpoints; /* path -> GArray of line numbers, 1-based and ascending (editor/breakpoints.c) */
     char *stop_path;         /* where the program is stopped (its innermost frame with a file), or NULL */
     int stop_line;
+    char *disassembly;    /* the Disassembly View's file (debug/disassembly.c), or NULL */
+    int disassembly_line; /* its line of the instruction that runs next (1-based), or 0 */
     Debugger *session; /* gdb, while debugging (debug/debugger.c) */
     GtkWidget *panel;  /* the Debug panel: its buttons over the program's terminal */
     VteTerminal *term; /* the program's terminal */

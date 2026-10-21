@@ -14,6 +14,9 @@ GtkWidget *debug_panel(App *t);
 /* Whether a program is being debugged (the step keys work only then). */
 gboolean debug_active(App *t);
 
+/* A line of t-code's own in the program's terminal, in red: why something cannot be done. */
+void debug_say(App *t, const char *text);
+
 /* gdb, for the Run and Debug panel's requests; NULL when not debugging. */
 struct Dap *debug_dap(App *t);
 
@@ -40,6 +43,9 @@ void debug_select_program(App *t);
 /* The build for debugging is done (the control socket's "debug <path>", project/run.c): path is
  * the program, or the folder of a Makefile, whose program is asked for once. */
 void debug_launch(App *t, const char *path);
+
+/* The build for debugging failed (the control socket's "debug-failed <dir>"). */
+void debug_build_failed(App *t);
 
 /* The breakpoints in path changed (editor/breakpoints.c): gdb hears of them. */
 void debug_breakpoints_changed(App *t, const char *path);

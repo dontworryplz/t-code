@@ -3,13 +3,15 @@
  *   [window]            size, pane sizes, which panes are shown, text size
  *   [recent]            the last opened project folders
  *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, the
- *                       indentation chosen for it in the status bar, its breakpoints and the
- *                       program it debugs (a Makefile's)
+ *                       indentation chosen for it in the status bar, its breakpoints (and their
+ *                       conditions), the debugger's watch expressions and the program it debugs
+ *                       (a Makefile's)
  * and the settings in ~/.config/t-code/settings.ini ([settings], with a comment over each one, for
  * editing by hand). Before 0.3 the settings were in session.ini's [settings].
  */
 #include "project/session.h"
 
+#include "debug/debugview.h"
 #include "editor/breakpoints.h"
 #include "editor/editor.h"
 #include "editor/preview.h"
@@ -303,8 +305,14 @@ void session_load_project(App *t)
   t->project.indent.width = CLAMP(get_int(kf, group, "indent-width", 0), 0, 16);
   t->project.indent.tabs = get_bool(kf, group, "indent-tabs", FALSE);
   char **breakpoints = g_key_file_get_string_list(kf, group, "breakpoints", NULL, NULL);
-  breakpoints_restore(t, breakpoints);
+  char **conditions = g_key_file_get_string_list(kf, group, "breakpoint-conditions", NULL, NULL);
+  breakpoints_restore(t, breakpoints, conditions);
+  debug_view_breakpoints_changed(t);
+  g_strfreev(conditions);
   g_strfreev(breakpoints);
+  char **watches = g_key_file_get_string_list(kf, group, "watch", NULL, NULL);
+  debug_view_set_watches(watches);
+  g_strfreev(watches);
   g_free(group);
   g_key_file_free(kf);
 }
@@ -494,12 +502,27 @@ void session_save(App *t)
     g_key_file_set_integer(kf, group, active_keys[g], active);
     g_strfreev(tabs);
   }
-  char **breakpoints = breakpoints_save(t);
+  char **conditions = NULL, **breakpoints = breakpoints_save(t, &conditions);
+  gboolean any_condition = FALSE;
+  for (int i = 0; conditions[i]; i++)
+    any_condition |= *conditions[i] != '\0';
   if (breakpoints)
     g_key_file_set_string_list(kf, group, "breakpoints", (const char *const *)breakpoints, g_strv_length(breakpoints));
   else
     g_key_file_remove_key(kf, group, "breakpoints", NULL);
+  if (any_condition) /* in the same order as breakpoints, "" for none */
+    g_key_file_set_string_list(kf, group, "breakpoint-conditions", (const char *const *)conditions,
+                               g_strv_length(conditions));
+  else
+    g_key_file_remove_key(kf, group, "breakpoint-conditions", NULL);
+  g_strfreev(conditions);
   g_strfreev(breakpoints);
+  char **watches = debug_view_watches();
+  if (watches && *watches)
+    g_key_file_set_string_list(kf, group, "watch", (const char *const *)watches, g_strv_length(watches));
+  else
+    g_key_file_remove_key(kf, group, "watch", NULL);
+  g_strfreev(watches);
 
   store(kf);
   g_free(group);

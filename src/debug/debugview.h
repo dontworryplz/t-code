@@ -3,8 +3,10 @@
  *   Variables   the paused function's arguments and local variables with their values; arrays,
  *               structs and pointers open like folders; a value that changed since the last pause is
  *               colored
+ *   Watch       expressions evaluated at each pause ("a[i]", "sum / n"): "+" adds one
  *   Call Stack  how the program got there: the paused function, the one that called it, and so on
  *               up to main; a click shows that function's line and its variables
+ *   Breakpoints every breakpoint with its condition; a click shows it, x takes it away
  */
 #pragma once
 
@@ -25,7 +27,22 @@ void debug_view_running(App *t);
 /* Debugging ended. */
 void debug_view_ended(App *t);
 
-/* What the lists show, a line each (for the tests): the variables as "name = value", "*" after a
- * changed one; the call stack's rows as "function file:line". */
+/* The breakpoints changed (debug_breakpoints_changed): the list follows. */
+void debug_view_breakpoints_changed(App *t);
+
+/* Adds expression to the Watch ("Debug: Add to Watch"). */
+void debug_view_add_watch(App *t, const char *expression);
+
+/* The watch expressions, for the session (free with g_strfreev), and putting them back. */
+char **debug_view_watches(void);
+void debug_view_set_watches(char **expressions);
+
+/* The id of the frame whose variables show (gdb's frameId, for evaluating in it), or -1 when the
+ * program is not paused. */
+gint64 debug_view_frame_id(void);
+
+/* What the lists show, a line each (for the tests): the variables and the watch as "name = value",
+ * "*" after a changed one; the call stack's rows as "function file:line". */
 char *debug_view_variables_text(void);
+char *debug_view_watch_text(void);
 char *debug_view_stack_text(void);

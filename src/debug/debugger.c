@@ -17,6 +17,7 @@
 
 #include "debug/dap.h"
 #include "debug/debugview.h"
+#include "debug/disassembly.h"
 #include "editor/breakpoints.h"
 #include "editor/editor.h"
 #include "lsp/json.h"
@@ -54,6 +55,7 @@ struct Debugger {
   gint64 thread;       /* the thread that stopped last, which the steps go on with */
   char *reason;        /* why it stopped last ("breakpoint", "step", "signal") */
   gboolean crashed;    /* it stopped on a crash: its end is that crash's */
+  GHashTable *sent;    /* gdb's breakpoint id -> Sent: where it was asked for */
   gboolean restart;    /* build and start again once ended */
   guint end_id;        /* gdb is killed when it does not end the program in time */
 };
@@ -61,7 +63,7 @@ struct Debugger {
 /* The Debug panel, and what is between F5 and the start. One per window (one window per process). */
 static struct {
   GtkWidget *status;
-  GtkWidget *start, *pause, *over, *into, *out, *restart, *stop;
+  GtkWidget *start, *pause, *over, *into, *out, *restart, *stop, *assembly;
   char *tty;     /* the terminal's device: the program's stdin, stdout and stderr */
   char *cwd;     /* where the program being built for debugging will run; NULL: none is */
   char *pick_in; /* the folder the program picker lists */
@@ -110,6 +112,11 @@ static void say_later(App *t, gboolean error, char *text)
   g_timeout_add(LATER_MS, say_now, line);
 }
 
+void debug_say(App *t, const char *text)
+{
+  say(t, TRUE, text);
+}
+
 /* The panel's buttons and status follow the session. */
 static void update_ui(App *t, const char *status)
 {
@@ -126,6 +133,7 @@ static void update_ui(App *t, const char *status)
   gtk_widget_set_sensitive(ui.out, stopped);
   gtk_widget_set_sensitive(ui.restart, s != NULL);
   gtk_widget_set_sensitive(ui.stop, s != NULL);
+  gtk_widget_set_sensitive(ui.assembly, stopped);
   if (status)
     gtk_label_set_text(GTK_LABEL(ui.status), status);
 }
@@ -142,6 +150,7 @@ static void finish(Debugger *s)
   if (s->end_id)
     g_source_remove(s->end_id);
   dap_free(s->dap);
+  g_hash_table_destroy(s->sent);
   g_free(s->reason);
   g_free(s);
   if (t->closing) { /* the tabs are gone */
@@ -149,6 +158,7 @@ static void finish(Debugger *s)
   } else {
     breakpoints_show_stop(t, NULL, 0);
     debug_view_ended(t);
+    disassembly_ended(t);
   }
   update_ui(t, "Not debugging");
   if (again && !t->closing)
@@ -196,6 +206,87 @@ void debug_end(App *t)
 
 /* Breakpoints -------------------------------------------------------------------------------- */
 
+/* A breakpoint as it was sent to gdb. */
+typedef struct {
+  char *path;
+  int line;
+} Sent;
+
+static void sent_free(gpointer data)
+{
+  Sent *sent = data;
+
+  g_free(sent->path);
+  g_free(sent);
+}
+
+/* gdb says where breakpoint id is: when that is another line (the asked one has no code, like a blank
+ * line or a function's head), the dot moves there. */
+static void placed(App *t, gint64 id, JsonNode *breakpoint)
+{
+  Debugger *s = t->debug.session;
+  Sent *sent = s ? g_hash_table_lookup(s->sent, &id) : NULL;
+  JsonNode *verified = json_at(breakpoint, "verified");
+  int line = (int)json_int_at(breakpoint, "line", 0);
+
+  if (!sent || !verified || !json_node_get_boolean(verified) || line <= 0 || line == sent->line)
+    return;
+  char *path = g_strdup(sent->path);
+  int from = sent->line;
+  sent->line = line;
+  breakpoint_move(t, path, from, line); /* sends the file's breakpoints again */
+  g_free(path);
+}
+
+/* The lines asked for in one setBreakpoints: its answer lists the breakpoints in the same order. */
+typedef struct {
+  App *app;
+  char *path;
+  GArray *lines; /* int */
+} Asked;
+
+static void asked_free(gpointer data)
+{
+  Asked *a = data;
+
+  g_free(a->path);
+  g_array_free(a->lines, TRUE);
+  g_free(a);
+}
+
+static void on_breakpoints_set(gpointer data, JsonNode *body, const char *error G_GNUC_UNUSED)
+{
+  Asked *a = data;
+  Debugger *s = a->app->debug.session;
+  JsonNode *list = json_at(body, "breakpoints");
+  guint n = list && JSON_NODE_HOLDS_ARRAY(list) ? json_array_get_length(json_node_get_array(list)) : 0;
+
+  for (guint i = 0; s && i < n && i < a->lines->len; i++) {
+    JsonNode *breakpoint = json_array_get_element(json_node_get_array(list), i);
+    gint64 id = json_int_at(breakpoint, "id", -1);
+    const char *reason = json_string_at(breakpoint, "reason"), *message = json_string_at(breakpoint, "message");
+    if (id >= 0) {
+      Sent *sent = g_new(Sent, 1);
+      gint64 *key = g_new(gint64, 1);
+      *sent = (Sent){ g_strdup(a->path), g_array_index(a->lines, int, i) };
+      *key = id;
+      g_hash_table_replace(s->sent, key, sent);
+    }
+    if (g_strcmp0(reason, "failed") == 0 && message) { /* a condition gdb cannot read */
+      char *name = g_path_get_basename(a->path);
+      char *line =
+          g_strdup_printf("The breakpoint at %s:%d does not work: %s", name, g_array_index(a->lines, int, i), message);
+      say(a->app, TRUE, line);
+      g_free(line);
+      g_free(name);
+    }
+  }
+  for (guint i = 0; s && i < n && i < a->lines->len; i++) { /* last: it may send again */
+    JsonNode *breakpoint = json_array_get_element(json_node_get_array(list), i);
+    placed(a->app, json_int_at(breakpoint, "id", -1), breakpoint);
+  }
+}
+
 /* Tells gdb the breakpoints in path (none: it takes its own away). */
 static void send_breakpoints(Debugger *s, const char *path)
 {
@@ -204,10 +295,23 @@ static void send_breakpoints(Debugger *s, const char *path)
   char *quoted = json_quote(path);
 
   g_string_append_printf(args, "%s},\"breakpoints\":[", quoted);
-  for (guint i = 0; lines && i < lines->len; i++)
-    g_string_append_printf(args, "%s{\"line\":%d}", i ? "," : "", g_array_index(lines, int, i));
+  for (guint i = 0; lines && i < lines->len; i++) {
+    Breakpoint *b = &g_array_index(lines, Breakpoint, i);
+    char *condition = b->condition ? json_quote(b->condition) : NULL;
+    g_string_append_printf(args, "%s{\"line\":%d", i ? "," : "", b->line);
+    if (condition)
+      g_string_append_printf(args, ",\"condition\":%s", condition);
+    g_string_append(args, "}");
+    g_free(condition);
+  }
   g_string_append(args, "]}");
-  dap_request(s->dap, "setBreakpoints", args->str, NULL, NULL);
+  Asked *a = g_new0(Asked, 1);
+  a->app = s->app;
+  a->path = g_strdup(path);
+  a->lines = g_array_new(FALSE, FALSE, sizeof(int));
+  for (guint i = 0; lines && i < lines->len; i++)
+    g_array_append_val(a->lines, g_array_index(lines, Breakpoint, i).line);
+  dap_request_full(s->dap, "setBreakpoints", args->str, on_breakpoints_set, a, asked_free);
   g_string_free(args, TRUE);
   g_free(quoted);
 }
@@ -218,6 +322,7 @@ void debug_breakpoints_changed(App *t, const char *path)
 
   if (s && s->configured && s->state != ENDING)
     send_breakpoints(s, path);
+  debug_view_breakpoints_changed(t);
 }
 
 /* Stopping ----------------------------------------------------------------------------------- */
@@ -315,7 +420,8 @@ static void on_stack(gpointer data, JsonNode *body, const char *error)
     char *status = g_strdup_printf("%s: %s:%d", crash ? "Crashed" : pause_reason(s->reason), name, line);
     where = g_strdup_printf("%s:%d (in %s)", name, line, function ? function : "?");
     breakpoints_show_stop(t, path, line);
-    open_file_at(t, path, line, 1);
+    if (!disassembly_shown(t)) /* stepping by instruction there: it stays in front */
+      open_file_at(t, path, line, 1);
     update_ui(t, status);
     g_free(status);
     g_free(name);
@@ -328,6 +434,7 @@ static void on_stack(gpointer data, JsonNode *body, const char *error)
     g_free(status);
   }
   debug_view_paused(t, frames, shown);
+  disassembly_update(t);
   if (crash) {
     s->crashed = TRUE;
     if (sanitizer) {
@@ -384,6 +491,8 @@ static void on_event(gpointer owner, const char *event, JsonNode *body)
     dap_request(s->dap, "configurationDone", NULL, NULL, NULL);
   } else if (strcmp(event, "stopped") == 0) {
     stopped(s, body);
+  } else if (strcmp(event, "breakpoint") == 0) { /* verified once the program loaded */
+    placed(t, json_int_at(body, "breakpoint.id", -1), json_at(body, "breakpoint"));
   } else if (strcmp(event, "continued") == 0 && s->state != ENDING) {
     s->state = RUNNING;
     breakpoints_show_stop(t, NULL, 0);
@@ -444,7 +553,11 @@ static void on_launched(gpointer data, JsonNode *body G_GNUC_UNUSED, const char 
 static void start(App *t, const char *program, const char *cwd)
 {
   char *tty = g_strdup_printf("set inferior-tty %s", ui.tty ? ui.tty : "");
-  const char *argv[] = { "gdb", "-q", "-iex", "set debuginfod enabled off", "-iex", tty, "-i", "dap", NULL };
+  /* Intel's syntax ("mov eax, 1"), as most teaching material has it */
+  const char *argv[] = {
+    "gdb", "-q",  "-iex", "set debuginfod enabled off", "-iex", "set disassembly-flavor intel", "-iex", tty,
+    "-i",  "dap", NULL
+  };
   char **env = sanitizer_env(g_get_environ());
   GError *error = NULL;
   Debugger *s = g_new0(Debugger, 1);
@@ -453,6 +566,7 @@ static void start(App *t, const char *program, const char *cwd)
   s->app = t;
   s->state = STARTING;
   s->thread = 1;
+  s->sent = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, sent_free);
   s->dap = dap_start(argv, cwd, env, on_event, s, &error);
   if (t->debug.term) /* this run's output alone */
     vte_terminal_reset(t->debug.term, TRUE, TRUE);
@@ -462,6 +576,7 @@ static void start(App *t, const char *program, const char *cwd)
     line = g_strdup_printf("Could not start gdb: %s", error->message);
     say(t, TRUE, line);
     g_free(line);
+    g_hash_table_destroy(s->sent);
     g_free(s);
     update_ui(t, "Not debugging");
   } else {
@@ -637,6 +752,8 @@ Dap *debug_dap(App *t)
 static void go(App *t, const char *command)
 {
   Debugger *s = t->debug.session;
+  /* In front of the Disassembly View, a step is one instruction (stepOut and continue have no steps) */
+  gboolean instruction = disassembly_shown(t) && (strcmp(command, "next") == 0 || strcmp(command, "stepIn") == 0);
   char *args;
 
   if (!s || s->state != STOPPED)
@@ -645,7 +762,8 @@ static void go(App *t, const char *command)
   breakpoints_show_stop(t, NULL, 0);
   debug_view_running(t);
   update_ui(t, "Running");
-  args = g_strdup_printf("{\"threadId\":%" G_GINT64_FORMAT "}", s->thread);
+  args = g_strdup_printf("{\"threadId\":%" G_GINT64_FORMAT "%s}", s->thread,
+                         instruction ? ",\"granularity\":\"instruction\"" : "");
   dap_request(s->dap, command, args, NULL, NULL);
   g_free(args);
 }
@@ -703,6 +821,62 @@ void debug_restart(App *t)
   }
 }
 
+/* The build for debugging failed (the control socket's "debug-failed"): its errors are in the
+ * Terminal. */
+void debug_build_failed(App *t)
+{
+  if (!ui.cwd || t->debug.session)
+    return;
+  g_clear_pointer(&ui.cwd, g_free);
+  update_ui(t, "The build failed: its errors are in the Terminal");
+}
+
+/* The evaluate line ---------------------------------------------------------------------------- */
+
+static void on_evaluated(gpointer data, JsonNode *body, const char *error)
+{
+  App *t = data;
+  const char *result = json_string_at(body, "result");
+
+  if (error)
+    say(t, TRUE, error);
+  else if (result) {
+    char *text = g_strdup_printf("= %s", result);
+    say(t, FALSE, text);
+    g_free(text);
+  }
+}
+
+/* Enter in the line under the terminal: the expression is evaluated in the paused frame ("-exec ..."
+ * runs a gdb command, like VS Code's Debug Console). */
+static void on_evaluate(GtkEntry *entry, App *t)
+{
+  const char *text = gtk_editable_get_text(GTK_EDITABLE(entry));
+  gint64 frame = debug_view_frame_id();
+  gboolean command = g_str_has_prefix(text, "-exec ");
+  char *quoted, *args, *echo;
+
+  if (!*text)
+    return;
+  echo = g_strdup_printf("› %s", text);
+  say(t, FALSE, echo);
+  g_free(echo);
+  if (!debug_dap(t) || (frame < 0 && !command)) {
+    say(t, TRUE, "Pause the program first (a breakpoint, or Pause): an expression is evaluated where it is paused.");
+    return;
+  }
+  quoted = json_quote(command ? text + 6 : text);
+  if (frame >= 0)
+    args = g_strdup_printf("{\"expression\":%s,\"frameId\":%" G_GINT64_FORMAT ",\"context\":\"%s\"}", quoted, frame,
+                           command ? "repl" : "watch");
+  else
+    args = g_strdup_printf("{\"expression\":%s,\"context\":\"repl\"}", quoted);
+  dap_request(debug_dap(t), "evaluate", args, on_evaluated, t);
+  gtk_editable_set_text(GTK_EDITABLE(entry), "");
+  g_free(args);
+  g_free(quoted);
+}
+
 /* The panel ---------------------------------------------------------------------------------- */
 
 static GtkWidget *tool_button(App *t, GtkWidget *bar, const char *icon, const char *tip, void (*run)(App *))
@@ -720,7 +894,7 @@ static GtkWidget *tool_button(App *t, GtkWidget *bar, const char *icon, const ch
 /* The window is going: nothing touches the panel any more. */
 static void on_panel_destroyed(GtkWidget *box G_GNUC_UNUSED, App *t)
 {
-  ui.status = ui.start = ui.pause = ui.over = ui.into = ui.out = ui.restart = ui.stop = NULL;
+  ui.status = ui.start = ui.pause = ui.over = ui.into = ui.out = ui.restart = ui.stop = ui.assembly = NULL;
   t->debug.panel = NULL;
   t->debug.term = NULL;
 }
@@ -759,6 +933,13 @@ GtkWidget *debug_panel(App *t)
   ui.out = tool_button(t, bar, "go-up-symbolic", "Step Out: back to the caller (Shift+F11)", debug_step_out);
   ui.restart = tool_button(t, bar, "view-refresh-symbolic", "Restart (Ctrl+Shift+F5)", debug_restart);
   ui.stop = tool_button(t, bar, "media-playback-stop-symbolic", "Stop (Shift+F5)", debug_stop);
+  ui.assembly = gtk_button_new_with_label("ASM");
+  gtk_widget_set_tooltip_text(ui.assembly, "Open Disassembly View: the paused function's machine instructions; while "
+                                           "it is in front, F10 / F11 step one instruction");
+  gtk_widget_add_css_class(ui.assembly, "flat");
+  gtk_widget_set_focus_on_click(ui.assembly, FALSE);
+  g_signal_connect_swapped(ui.assembly, "clicked", G_CALLBACK(disassembly_open), t);
+  gtk_box_append(GTK_BOX(bar), ui.assembly);
   ui.status = gtk_label_new("Not debugging");
   gtk_label_set_xalign(GTK_LABEL(ui.status), 0);
   gtk_label_set_ellipsize(GTK_LABEL(ui.status), PANGO_ELLIPSIZE_END);
@@ -773,6 +954,12 @@ GtkWidget *debug_panel(App *t)
   vte_terminal_set_clear_background(t->debug.term, FALSE);
   open_pty(t);
   gtk_box_append(GTK_BOX(box), GTK_WIDGET(t->debug.term));
+  GtkWidget *evaluate = gtk_entry_new();
+  gtk_entry_set_placeholder_text(GTK_ENTRY(evaluate),
+                                 "Evaluate while paused: a[i], sum / n, *p   (-exec runs a gdb command)");
+  gtk_widget_add_css_class(evaluate, "tcode-debug-evaluate");
+  g_signal_connect(evaluate, "activate", G_CALLBACK(on_evaluate), t);
+  gtk_box_append(GTK_BOX(box), evaluate);
   say(t, FALSE,
       "F5 builds the project and runs it here under the debugger; click left of a line number (or F9) "
       "to stop at that line.");

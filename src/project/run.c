@@ -5,8 +5,8 @@
  *                  (named after the project, else the newest one that is not a test)
  *   Makefile        make; run uses "make run" when the Makefile has a run target
  *   neither         compile the current C/C++ file alone (with ASan/UBSan) into build/
- * A build for debugging ends with "t-code --send 'debug <program>'": the control socket hands the
- * program to the debugger (for a Makefile, which builds who knows what, the folder: the debugger
+ * A build for debugging ends with "t-code --send 'debug <program>'" (or "debug-failed <dir>" when it
+ * failed): the control socket hands the program to the debugger (for a Makefile, which builds who knows what, the folder: the debugger
  * asks which program, once).
  */
 #include "project/run.h"
@@ -91,13 +91,13 @@ static Project find_project(App *t)
   return p;
 }
 
-/* The shell command that gives the debugger what (already a shell word: '/a/b', "$exe") through the
- * control socket. */
-static char *send_debug(const char *what)
+/* The shell command that sends "<verb> <what>" (what already a shell word: '/a/b', "$exe") to this
+ * t-code through the control socket. */
+static char *send_verb(const char *verb, const char *what)
 {
   char *exe = g_file_read_link("/proc/self/exe", NULL);
   char *quoted = g_shell_quote(exe ? exe : "t-code");
-  char *command = g_strdup_printf("%s --send \"debug \"%s", quoted, what);
+  char *command = g_strdup_printf("%s --send \"%s \"%s", quoted, verb, what);
 
   g_free(quoted);
   g_free(exe);
@@ -119,7 +119,7 @@ static char *cmake_command(const char *root, Goal goal)
                       src, build, ninja ? "-G Ninja " : "", build);
 
   if (goal != GOAL_BUILD) {
-    char *debug = goal == GOAL_DEBUG ? send_debug("\"$exe\"") : NULL;
+    char *debug = goal == GOAL_DEBUG ? send_verb("debug", "\"$exe\"") : NULL;
     /* The executable named after the project (CMAKE_PROJECT_NAME) anywhere under build/
          * (targets may sit in build/bin, build/src); else the newest one that is not a test, else
          * the newest one. CMake's own checks and shared libraries are left out. */
@@ -149,7 +149,7 @@ static char *cmake_command(const char *root, Goal goal)
 static char *make_command(const char *root, Goal goal)
 {
   char *dir = g_shell_quote(root);
-  char *debug = goal == GOAL_DEBUG ? send_debug(dir) : NULL;
+  char *debug = goal == GOAL_DEBUG ? send_verb("debug", dir) : NULL;
   char *cmd =
       debug ? g_strdup_printf("make --no-print-directory -C %s && %s", dir, debug)
       : goal == GOAL_RUN
@@ -186,7 +186,7 @@ static char *file_command(const char *file, Goal goal)
     g_free(cmd);
     cmd = with_run;
   } else if (goal == GOAL_DEBUG) {
-    char *debug = send_debug(qout);
+    char *debug = send_verb("debug", qout);
     char *with_debug = g_strdup_printf("%s && %s", cmd, debug);
     g_free(cmd);
     g_free(debug);
@@ -269,6 +269,16 @@ static char *goal_command(App *t, Goal goal, char **cwd)
   }
   if (cwd) /* the file's folder, as run does; the project's otherwise */
     *cwd = p.kind == PROJECT_FILE ? g_path_get_dirname(p.root) : g_strdup(p.root ? p.root : t->project.root);
+  if (goal == GOAL_DEBUG && p.kind != PROJECT_NONE) { /* a failed build says so: the debugger stops waiting */
+    char *dir = p.kind == PROJECT_FILE ? g_path_get_dirname(p.root) : g_strdup(p.root);
+    char *qdir = g_shell_quote(dir), *failed = send_verb("debug-failed", qdir);
+    char *with_failed = g_strdup_printf("%s || %s", command, failed);
+    g_free(command);
+    command = with_failed;
+    g_free(failed);
+    g_free(qdir);
+    g_free(dir);
+  }
   g_free(p.root);
   return command;
 }

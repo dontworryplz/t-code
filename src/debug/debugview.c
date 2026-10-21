@@ -2,13 +2,16 @@
  * The Run and Debug panel (see debugview.h). A pause asks gdb for the shown frame's scopes, then each
  * scope's variables (Arguments, then Locals; not Registers); a variable with a variablesReference has
  * children, asked for when its row is shown, and at once when gdb gave no value for it (an array, a
- * struct): its value is then made from theirs, "{70, 85, 90}". Every answer carries the pause it was
- * asked in (generation): answers from before a step are dropped.
+ * struct): its value is then made from theirs, "{70, 85, 90}". Watch expressions are evaluated in the
+ * shown frame at each pause (evaluate, context "watch") and become rows the same way. Every answer
+ * carries the pause it was asked in (generation): answers from before a step are dropped.
  */
 #include "debug/debugview.h"
 
 #include "debug/dap.h"
 #include "debug/debugger.h"
+#include "debug/disassembly.h"
+#include "editor/breakpoints.h"
 #include "editor/editor.h"
 #include "lsp/json.h"
 
@@ -25,7 +28,12 @@ static const char *const css =
     ".tcode-debug-view .value { color: var(--tc-fg); }"
     ".tcode-debug-view .value.changed { color: var(--tc-warning); font-weight: bold; }"
     ".tcode-debug-view .where { color: var(--tc-fg-dim); font-size: 0.9em; }"
-    ".tcode-debug-view row.no-source .function { color: var(--tc-fg-faint); }";
+    ".tcode-debug-view row.no-source .function { color: var(--tc-fg-faint); }"
+    ".tcode-debug-view .value.missing, .tcode-debug-view .condition { color: var(--tc-fg-faint); }"
+    ".tcode-debug-view .heading button { min-height: 20px; min-width: 20px; padding: 0 4px; margin-right: 6px; }"
+    ".tcode-debug-view .remove { min-height: 18px; min-width: 18px; padding: 0; opacity: 0.6; }"
+    ".tcode-debug-view .remove:hover { opacity: 1; }"
+    ".tcode-debug-view entry { margin: 2px 10px 4px 10px; }";
 
 /* A variable ------------------------------------------------------------------------------------ */
 
@@ -38,6 +46,8 @@ struct _TcodeVar {
   gboolean changed; /* its value is not the last pause's */
   gboolean asked;   /* its children were asked for */
   gboolean preview; /* its value is made from its children's */
+  gboolean missing; /* no value: a watch expression that cannot be evaluated now */
+  gboolean waiting; /* Registers: its row is added once its children came (after the variables) */
   GListStore *children;
 };
 
@@ -71,16 +81,23 @@ static void tcode_var_init(TcodeVar *self G_GNUC_UNUSED)
 
 /* The panel ------------------------------------------------------------------------------------- */
 
+#define NOT_PAUSED "not available: the program is not paused"
+
 static struct {
   App *app;
-  GtkWidget *note;  /* instead of the lists: not debugging, running */
-  GtkWidget *lists; /* Variables over Call Stack */
-  GListStore *root; /* the shown frame's variables */
+  GtkWidget *note;      /* instead of the variables: not debugging, running */
+  GtkWidget *variables; /* the variables' list (scrolled) */
+  GListStore *root;     /* the shown frame's variables */
+  GListStore *watch;    /* the watch expressions' values */
+  GPtrArray *watches;   /* the watch expressions (char *) */
+  GtkWidget *watch_entry;
   GtkListBox *stack;
+  GtkListBox *breakpoints;
   JsonNode *frames;    /* the last pause's (a copy) */
   int shown;           /* the frame whose variables are listed */
   gboolean all_frames; /* the frames without source are listed one by one, not as one row */
   guint generation;    /* counts pauses and frame changes: older answers are dropped */
+  guint watch_round;   /* counts the watch list's changes, the same way for its answers */
   GHashTable *last;    /* key -> value at the last pause */
   GHashTable *now;     /* the same for this one */
 } view;
@@ -88,8 +105,9 @@ static struct {
 /* What an answer was asked for. */
 typedef struct {
   guint generation;
-  TcodeVar *parent; /* NULL: the frame's top level */
-  char *prefix;     /* the keys' start */
+  guint watch_round; /* the watch rows are made again after an expression is added or removed */
+  TcodeVar *parent;  /* NULL: the frame's top level */
+  char *prefix;      /* the keys' start */
 } Asked;
 
 static Asked *asked_new(TcodeVar *parent, const char *prefix)
@@ -97,6 +115,7 @@ static Asked *asked_new(TcodeVar *parent, const char *prefix)
   Asked *a = g_new0(Asked, 1);
 
   a->generation = view.generation;
+  a->watch_round = view.watch_round;
   a->parent = parent ? g_object_ref(parent) : NULL;
   a->prefix = g_strdup(prefix);
   return a;
@@ -112,13 +131,13 @@ static void asked_free(gpointer data)
   g_free(a);
 }
 
-/* Shows the lists, or a note instead (NULL: the lists). */
+/* Shows the variables, or a note instead (NULL: the variables). */
 static void show_note(const char *note)
 {
   if (!view.note)
     return;
   gtk_widget_set_visible(view.note, note != NULL);
-  gtk_widget_set_visible(view.lists, note == NULL);
+  gtk_widget_set_visible(view.variables, note == NULL);
   if (note)
     gtk_label_set_text(GTK_LABEL(view.note), note);
 }
@@ -189,6 +208,10 @@ static void on_variables(gpointer data, JsonNode *body, const char *error)
     g_list_store_append(into, var);
     g_object_unref(var);
   }
+  if (a->parent && a->parent->waiting) {
+    a->parent->waiting = FALSE;
+    g_list_store_append(view.root, a->parent);
+  }
   if (a->parent && a->parent->preview) {
     g_free(a->parent->value);
     a->parent->value = preview_of(a->parent->children);
@@ -222,11 +245,24 @@ static void on_scopes(gpointer data, JsonNode *body, const char *error)
     return;
   if (error || n == 0)
     show_note("No variables here (no debugging information for this function).");
-  for (int pass = 0; pass < 2; pass++) /* arguments first */
+  for (int pass = 0; pass < 3; pass++) /* arguments, locals, registers */
     for (guint i = 0; i < n; i++) {
       JsonNode *scope = json_array_get_element(json_node_get_array(scopes), i);
       const char *hint = json_string_at(scope, "presentationHint");
-      if (g_strcmp0(hint, pass == 0 ? "arguments" : "locals") != 0)
+      if (pass == 2 && g_strcmp0(hint, "registers") == 0) { /* last and closed: for the Disassembly View */
+        TcodeVar *registers = g_object_new(TCODE_TYPE_VAR, NULL);
+        registers->name = g_strdup("Registers");
+        registers->value = g_strdup("the CPU's: rip, rsp, rax, …");
+        registers->missing = TRUE;
+        registers->key = g_strdup_printf("%s/Registers", a->prefix);
+        registers->reference = json_int_at(scope, "variablesReference", 0);
+        registers->children = g_list_store_new(TCODE_TYPE_VAR);
+        registers->waiting = TRUE;
+        ask_children(registers); /* its answer comes after the variables': the row goes last */
+        g_object_unref(registers);
+        continue;
+      }
+      if (pass == 2 || g_strcmp0(hint, pass == 0 ? "arguments" : "locals") != 0)
         continue;
       char *args =
           g_strdup_printf("{\"variablesReference\":%" G_GINT64_FORMAT "}", json_int_at(scope, "variablesReference", 0));
@@ -236,6 +272,7 @@ static void on_scopes(gpointer data, JsonNode *body, const char *error)
 }
 
 static GtkListBoxRow *row_of_frame(int index);
+static void evaluate_watches(void);
 
 /* The frame at index (of view.frames) is listed: its variables are asked for. */
 static void list_frame(int index)
@@ -248,12 +285,160 @@ static void list_frame(int index)
   view.generation++;
   view.shown = index;
   g_list_store_remove_all(view.root);
+  evaluate_watches();
   if (!frame || !dap)
     return;
   args = g_strdup_printf("{\"frameId\":%" G_GINT64_FORMAT "}", json_int_at(frame, "id", 0));
   dap_request_full(dap, "scopes", args, on_scopes, asked_new(NULL, function ? function : "?"), asked_free);
   g_free(args);
   gtk_list_box_select_row(view.stack, row_of_frame(index));
+}
+
+/* Watch --------------------------------------------------------------------------------------- */
+
+/* The shown frame's id, or -1 when the program is not paused. */
+gint64 debug_view_frame_id(void)
+{
+  JsonNode *frame = view.frames ? json_array_get_element(json_node_get_array(view.frames), view.shown) : NULL;
+
+  return frame && debug_dap(view.app) ? json_int_at(frame, "id", -1) : -1;
+}
+
+/* A watch row: expression = value (or why there is none). */
+static TcodeVar *watch_var(const char *expression, const char *value, gint64 reference, gboolean missing)
+{
+  TcodeVar *var = g_object_new(TCODE_TYPE_VAR, NULL);
+
+  var->name = g_strdup(expression);
+  var->value = g_strdup(value ? value : "");
+  var->key = g_strdup_printf("watch/%s", expression);
+  var->reference = reference;
+  var->missing = missing;
+  if (reference > 0)
+    var->children = g_list_store_new(TCODE_TYPE_VAR);
+  return var;
+}
+
+/* An expression's value came (or why there is none: "No symbol "x" in current context."). */
+static void on_watch(gpointer data, JsonNode *body, const char *error)
+{
+  Asked *a = data;
+  TcodeVar *var;
+
+  if (a->generation != view.generation || a->watch_round != view.watch_round)
+    return;
+  var = watch_var(a->prefix, error ? error : json_string_at(body, "result"), json_int_at(body, "variablesReference", 0),
+                  error != NULL);
+  if (!error && !*var->value && var->reference > 0) { /* an array or a struct */
+    var->preview = TRUE;
+    ask_children(var);
+  } else if (!error) {
+    var->changed = changed(var->key, var->value);
+  }
+  g_list_store_append(view.watch, var);
+  g_object_unref(var);
+}
+
+/* The watch expressions are evaluated in the shown frame (each answer adds its row, in order). */
+static void evaluate_watches(void)
+{
+  gint64 frame = debug_view_frame_id();
+  Dap *dap = debug_dap(view.app);
+
+  if (!view.watch)
+    return;
+  g_list_store_remove_all(view.watch);
+  for (guint i = 0; i < view.watches->len; i++) {
+    const char *expression = g_ptr_array_index(view.watches, i);
+    if (frame < 0 || !dap) {
+      TcodeVar *var = watch_var(expression, NOT_PAUSED, 0, TRUE);
+      g_list_store_append(view.watch, var);
+      g_object_unref(var);
+      continue;
+    }
+    char *quoted = json_quote(expression);
+    char *args =
+        g_strdup_printf("{\"expression\":%s,\"frameId\":%" G_GINT64_FORMAT ",\"context\":\"watch\"}", quoted, frame);
+    dap_request_full(dap, "evaluate", args, on_watch, asked_new(NULL, expression), asked_free);
+    g_free(args);
+    g_free(quoted);
+  }
+}
+
+void debug_view_add_watch(App *t G_GNUC_UNUSED, const char *expression)
+{
+  char *clean = g_strstrip(g_strdup(expression ? expression : ""));
+
+  if (!view.watches || !*clean) {
+    g_free(clean);
+    return;
+  }
+  for (guint i = 0; i < view.watches->len; i++)
+    if (strcmp(g_ptr_array_index(view.watches, i), clean) == 0) {
+      g_free(clean);
+      return;
+    }
+  g_ptr_array_add(view.watches, clean);
+  view.watch_round++; /* the rows are made again: answers still on the way would add theirs too */
+  evaluate_watches();
+}
+
+static void remove_watch(const char *expression)
+{
+  for (guint i = 0; i < view.watches->len; i++)
+    if (strcmp(g_ptr_array_index(view.watches, i), expression) == 0) {
+      g_ptr_array_remove_index(view.watches, i);
+      break;
+    }
+  view.watch_round++;
+  evaluate_watches();
+}
+
+char **debug_view_watches(void)
+{
+  GStrvBuilder *builder = g_strv_builder_new();
+
+  for (guint i = 0; view.watches && i < view.watches->len; i++)
+    g_strv_builder_add(builder, g_ptr_array_index(view.watches, i));
+  char **list = g_strv_builder_end(builder);
+  g_strv_builder_unref(builder);
+  return list;
+}
+
+void debug_view_set_watches(char **expressions)
+{
+  if (!view.watches)
+    return;
+  g_ptr_array_set_size(view.watches, 0);
+  for (int i = 0; expressions && expressions[i]; i++)
+    if (*expressions[i])
+      g_ptr_array_add(view.watches, g_strdup(expressions[i]));
+  evaluate_watches();
+}
+
+static void on_watch_entry(GtkEntry *entry, gpointer data G_GNUC_UNUSED)
+{
+  debug_view_add_watch(view.app, gtk_editable_get_text(GTK_EDITABLE(entry)));
+  gtk_editable_set_text(GTK_EDITABLE(entry), "");
+  gtk_widget_set_visible(GTK_WIDGET(entry), FALSE);
+}
+
+/* Escape: no expression after all. */
+static gboolean on_watch_entry_key(GtkEventControllerKey *keys G_GNUC_UNUSED, guint key, guint code G_GNUC_UNUSED,
+                                   GdkModifierType state G_GNUC_UNUSED, GtkWidget *entry)
+{
+  if (key != GDK_KEY_Escape)
+    return FALSE;
+  gtk_editable_set_text(GTK_EDITABLE(entry), "");
+  gtk_widget_set_visible(entry, FALSE);
+  return TRUE;
+}
+
+/* "+": an entry for the expression. */
+static void on_add_watch(GtkButton *button G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+  gtk_widget_set_visible(view.watch_entry, TRUE);
+  gtk_widget_grab_focus(view.watch_entry);
 }
 
 /* Variables' rows ------------------------------------------------------------------------------- */
@@ -268,7 +453,17 @@ static GListModel *children_of(gpointer item, gpointer data G_GNUC_UNUSED)
   return G_LIST_MODEL(g_object_ref(var->children));
 }
 
-static void setup_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListItem *item, gpointer data G_GNUC_UNUSED)
+static void on_remove_watch(GtkButton *button, gpointer data G_GNUC_UNUSED)
+{
+  char *expression = g_strdup(g_object_get_data(G_OBJECT(button), "expression"));
+
+  if (expression)
+    remove_watch(expression);
+  g_free(expression);
+}
+
+/* A row: an arrow, name = value; the Watch's (data non-NULL) also a button that takes it away. */
+static void setup_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListItem *item, gpointer data)
 {
   GtkWidget *expander = gtk_tree_expander_new();
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -283,6 +478,14 @@ static void setup_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListIt
   gtk_box_append(GTK_BOX(box), name);
   gtk_box_append(GTK_BOX(box), equals);
   gtk_box_append(GTK_BOX(box), value);
+  if (data) {
+    GtkWidget *remove = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_add_css_class(remove, "flat");
+    gtk_widget_add_css_class(remove, "remove");
+    gtk_widget_set_tooltip_text(remove, "Remove this expression");
+    g_signal_connect(remove, "clicked", G_CALLBACK(on_remove_watch), NULL);
+    gtk_box_append(GTK_BOX(box), remove);
+  }
   gtk_tree_expander_set_child(GTK_TREE_EXPANDER(expander), box);
   gtk_list_item_set_child(item, expander);
 }
@@ -291,7 +494,7 @@ static void setup_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListIt
 static void show_value(TcodeVar *var, GtkWidget *box)
 {
   GtkWidget *name = gtk_widget_get_first_child(box);
-  GtkWidget *equals = gtk_widget_get_next_sibling(name), *value = gtk_widget_get_last_child(box);
+  GtkWidget *equals = gtk_widget_get_next_sibling(name), *value = gtk_widget_get_next_sibling(equals);
 
   gtk_label_set_text(GTK_LABEL(name), var->name);
   gtk_widget_set_visible(equals, *var->name != '\0');
@@ -301,6 +504,10 @@ static void show_value(TcodeVar *var, GtkWidget *box)
     gtk_widget_add_css_class(value, "changed");
   else
     gtk_widget_remove_css_class(value, "changed");
+  if (var->missing)
+    gtk_widget_add_css_class(value, "missing");
+  else
+    gtk_widget_remove_css_class(value, "missing");
 }
 
 static void bind_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListItem *item, gpointer data G_GNUC_UNUSED)
@@ -310,8 +517,14 @@ static void bind_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListIte
   GtkWidget *box = gtk_tree_expander_get_child(GTK_TREE_EXPANDER(expander));
   TcodeVar *var = gtk_tree_list_row_get_item(row);
 
+  GtkWidget *remove = gtk_widget_get_last_child(box);
+
   gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(expander), row);
   show_value(var, box);
+  if (GTK_IS_BUTTON(remove)) { /* the Watch's: on its expressions, not on their children */
+    gtk_widget_set_visible(remove, gtk_tree_list_row_get_depth(row) == 0);
+    g_object_set_data_full(G_OBJECT(remove), "expression", g_strdup(var->name), g_free);
+  }
   g_signal_connect_object(var, "value-changed", G_CALLBACK(show_value), box, G_CONNECT_DEFAULT);
   g_object_set_data_full(G_OBJECT(item), "var", var, g_object_unref);
 }
@@ -425,8 +638,115 @@ static void on_frame_activated(GtkListBox *box G_GNUC_UNUSED, GtkListBoxRow *row
   if (!frame || !path)
     return;
   open_file_at(view.app, path, (int)json_int_at(frame, "line", 1), 1);
-  if (index != view.shown)
+  if (index != view.shown) {
     list_frame(index);
+    disassembly_update(view.app);
+  }
+}
+
+/* Breakpoints ---------------------------------------------------------------------------------- */
+
+typedef struct {
+  const char *path;
+  Breakpoint *b;
+} Listed;
+
+static int by_place(gconstpointer x, gconstpointer y)
+{
+  const Listed *a = x, *b = y;
+  int paths = strcmp(a->path, b->path);
+
+  return paths ? paths : a->b->line - b->b->line;
+}
+
+static void on_remove_breakpoint(GtkButton *button, gpointer data G_GNUC_UNUSED)
+{
+  char *path = g_strdup(g_object_get_data(G_OBJECT(button), "path"));
+
+  breakpoint_remove(view.app, path, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "line")));
+  g_free(path);
+}
+
+/* A click on a breakpoint: its line in the editor. */
+static void on_breakpoint_activated(GtkListBox *box G_GNUC_UNUSED, GtkListBoxRow *row, gpointer data G_GNUC_UNUSED)
+{
+  const char *path = g_object_get_data(G_OBJECT(row), "path");
+
+  if (path)
+    open_file_at(view.app, path, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "line")), 1);
+}
+
+void debug_view_breakpoints_changed(App *t)
+{
+  GArray *all = g_array_new(FALSE, FALSE, sizeof(Listed));
+  GHashTableIter iter;
+  gpointer path, list;
+
+  if (!view.breakpoints) {
+    g_array_free(all, TRUE);
+    return;
+  }
+  gtk_list_box_remove_all(view.breakpoints);
+  if (t->debug.breakpoints) {
+    g_hash_table_iter_init(&iter, t->debug.breakpoints);
+    while (g_hash_table_iter_next(&iter, &path, &list))
+      for (guint i = 0; i < ((GArray *)list)->len; i++) {
+        Listed l = { path, &g_array_index((GArray *)list, Breakpoint, i) };
+        g_array_append_val(all, l);
+      }
+  }
+  g_array_sort(all, by_place);
+  for (guint i = 0; i < all->len; i++) {
+    Listed *l = &g_array_index(all, Listed, i);
+    char *name = g_path_get_basename(l->path), *where = g_strdup_printf("%s:%d", name, l->b->line);
+    GtkWidget *row = gtk_list_box_row_new(), *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *place = gtk_label_new(where), *condition = gtk_label_new(NULL);
+    GtkWidget *remove = gtk_button_new_from_icon_name("window-close-symbolic");
+
+    if (l->b->condition) {
+      char *text = g_strdup_printf("when %s", l->b->condition);
+      gtk_label_set_text(GTK_LABEL(condition), text);
+      g_free(text);
+    }
+    gtk_widget_add_css_class(condition, "condition");
+    gtk_label_set_xalign(GTK_LABEL(condition), 0);
+    gtk_label_set_ellipsize(GTK_LABEL(condition), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_hexpand(condition, TRUE);
+    gtk_widget_add_css_class(remove, "flat");
+    gtk_widget_add_css_class(remove, "remove");
+    gtk_widget_set_tooltip_text(remove, "Remove this breakpoint");
+    g_object_set_data_full(G_OBJECT(remove), "path", g_strdup(l->path), g_free);
+    g_object_set_data(G_OBJECT(remove), "line", GINT_TO_POINTER(l->b->line));
+    g_signal_connect(remove, "clicked", G_CALLBACK(on_remove_breakpoint), NULL);
+    gtk_box_append(GTK_BOX(box), place);
+    gtk_box_append(GTK_BOX(box), condition);
+    gtk_box_append(GTK_BOX(box), remove);
+    gtk_widget_set_margin_start(box, 10);
+    gtk_widget_set_margin_end(box, 4);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+    gtk_widget_set_tooltip_text(row, l->path);
+    g_object_set_data_full(G_OBJECT(row), "path", g_strdup(l->path), g_free);
+    g_object_set_data(G_OBJECT(row), "line", GINT_TO_POINTER(l->b->line));
+    gtk_list_box_append(view.breakpoints, row);
+    g_free(where);
+    g_free(name);
+  }
+  if (all->len == 0) {
+    GtkWidget *row = gtk_list_box_row_new(), *label = gtk_label_new("None: click left of a line number to add one.");
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_widget_add_css_class(label, "condition");
+    gtk_widget_set_margin_start(label, 10);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_append(view.breakpoints, row);
+  }
+  g_array_free(all, TRUE);
+}
+
+static void on_remove_all(GtkButton *button G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+  breakpoints_remove_all(view.app);
 }
 
 /* From the debugger -------------------------------------------------------------------------- */
@@ -455,6 +775,8 @@ void debug_view_running(App *t G_GNUC_UNUSED)
   view.generation++;
   g_list_store_remove_all(view.root);
   gtk_list_box_remove_all(view.stack);
+  g_clear_pointer(&view.frames, json_node_unref);
+  evaluate_watches();
   show_note("Running… The variables show here when the program pauses: at a breakpoint, after a step, or with "
             "Pause (F6).");
 }
@@ -469,21 +791,33 @@ void debug_view_ended(App *t G_GNUC_UNUSED)
   g_clear_pointer(&view.frames, json_node_unref);
   g_hash_table_remove_all(view.last);
   g_hash_table_remove_all(view.now);
+  evaluate_watches();
   show_note("Not debugging.\n\nClick left of a line number (or F9) to put a breakpoint there, then F5: the program "
             "pauses at that line, and its variables show here.");
 }
 
-char *debug_view_variables_text(void)
+/* store's rows as "name = value" lines, "*" after a changed one. */
+static char *text_of(GListStore *store)
 {
   GString *text = g_string_new("");
-  guint n = view.root ? g_list_model_get_n_items(G_LIST_MODEL(view.root)) : 0;
+  guint n = store ? g_list_model_get_n_items(G_LIST_MODEL(store)) : 0;
 
   for (guint i = 0; i < n; i++) {
-    TcodeVar *var = g_list_model_get_item(G_LIST_MODEL(view.root), i);
+    TcodeVar *var = g_list_model_get_item(G_LIST_MODEL(store), i);
     g_string_append_printf(text, "%s = %s%s\n", var->name, var->value, var->changed ? "*" : "");
     g_object_unref(var);
   }
   return g_string_free(text, FALSE);
+}
+
+char *debug_view_variables_text(void)
+{
+  return text_of(view.root);
+}
+
+char *debug_view_watch_text(void)
+{
+  return text_of(view.watch);
 }
 
 char *debug_view_stack_text(void)
@@ -499,20 +833,46 @@ char *debug_view_stack_text(void)
   return g_string_free(text, FALSE);
 }
 
-static GtkWidget *heading(const char *text)
+/* A section's heading, with a button on its right (icon NULL: none). */
+static GtkWidget *heading(const char *text, const char *icon, const char *tip, GCallback clicked)
 {
-  GtkWidget *label = gtk_label_new(text);
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0), *label = gtk_label_new(text);
 
   gtk_label_set_xalign(GTK_LABEL(label), 0);
+  gtk_widget_set_hexpand(label, TRUE);
   gtk_widget_add_css_class(label, "section");
-  return label;
+  gtk_widget_add_css_class(box, "heading");
+  gtk_box_append(GTK_BOX(box), label);
+  if (icon) {
+    GtkWidget *button = gtk_button_new_from_icon_name(icon);
+    gtk_widget_add_css_class(button, "flat");
+    gtk_widget_set_tooltip_text(button, tip);
+    g_signal_connect(button, "clicked", clicked, NULL);
+    gtk_box_append(GTK_BOX(box), button);
+  }
+  return box;
+}
+
+/* A list view of store's rows (and their children), made by the row functions above. */
+static GtkWidget *var_list(GListStore *store, gboolean watch)
+{
+  GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
+  GtkTreeListModel *tree =
+      gtk_tree_list_model_new(G_LIST_MODEL(g_object_ref(store)), FALSE, FALSE, children_of, NULL, NULL);
+
+  g_signal_connect(factory, "setup", G_CALLBACK(setup_row), GINT_TO_POINTER(watch));
+  g_signal_connect(factory, "bind", G_CALLBACK(bind_row), NULL);
+  g_signal_connect(factory, "unbind", G_CALLBACK(unbind_row), NULL);
+  return gtk_list_view_new(GTK_SELECTION_MODEL(gtk_no_selection_new(G_LIST_MODEL(tree))), factory);
 }
 
 static void on_view_destroyed(GtkWidget *widget G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
 {
-  view.note = view.lists = NULL;
-  view.stack = NULL;
+  view.note = view.variables = view.watch_entry = NULL;
+  view.stack = view.breakpoints = NULL;
   g_clear_object(&view.root);
+  g_clear_object(&view.watch);
+  g_clear_pointer(&view.watches, g_ptr_array_unref);
   g_clear_pointer(&view.frames, json_node_unref);
   g_clear_pointer(&view.last, g_hash_table_destroy);
   g_clear_pointer(&view.now, g_hash_table_destroy);
@@ -523,11 +883,9 @@ GtkWidget *debug_view(App *t)
   GtkCssProvider *provider = gtk_css_provider_new();
   GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-  GtkWidget *top = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0), *bottom = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-  GtkWidget *vars_scroll = gtk_scrolled_window_new(), *stack_scroll = gtk_scrolled_window_new();
-  GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
-  GtkTreeListModel *tree;
-  GtkWidget *list;
+  GtkWidget *top = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0), *rest = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  GtkWidget *rest_scroll = gtk_scrolled_window_new();
+  GtkEventController *keys = gtk_event_controller_key_new();
 
   gtk_css_provider_load_from_string(provider, css);
   gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
@@ -535,40 +893,59 @@ GtkWidget *debug_view(App *t)
   g_object_unref(provider);
   view.app = t;
   view.root = g_list_store_new(TCODE_TYPE_VAR);
+  view.watch = g_list_store_new(TCODE_TYPE_VAR);
+  view.watches = g_ptr_array_new_with_free_func(g_free);
   view.last = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
   view.now = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
   gtk_widget_add_css_class(panel, "tcode-debug-view");
 
-  tree = gtk_tree_list_model_new(G_LIST_MODEL(g_object_ref(view.root)), FALSE, FALSE, children_of, NULL, NULL);
-  g_signal_connect(factory, "setup", G_CALLBACK(setup_row), NULL);
-  g_signal_connect(factory, "bind", G_CALLBACK(bind_row), NULL);
-  g_signal_connect(factory, "unbind", G_CALLBACK(unbind_row), NULL);
-  list = gtk_list_view_new(GTK_SELECTION_MODEL(gtk_no_selection_new(G_LIST_MODEL(tree))), factory);
-  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(vars_scroll), list);
-  gtk_widget_set_vexpand(vars_scroll, TRUE);
-  gtk_box_append(GTK_BOX(top), heading("VARIABLES"));
-  gtk_box_append(GTK_BOX(top), vars_scroll);
-
-  view.stack = GTK_LIST_BOX(gtk_list_box_new());
-  g_signal_connect(view.stack, "row-activated", G_CALLBACK(on_frame_activated), NULL);
-  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(stack_scroll), GTK_WIDGET(view.stack));
-  gtk_widget_set_vexpand(stack_scroll, TRUE);
-  gtk_box_append(GTK_BOX(bottom), heading("CALL STACK"));
-  gtk_box_append(GTK_BOX(bottom), stack_scroll);
-
-  gtk_paned_set_start_child(GTK_PANED(paned), top);
-  gtk_paned_set_end_child(GTK_PANED(paned), bottom);
-  gtk_paned_set_position(GTK_PANED(paned), 360);
-  gtk_widget_set_vexpand(paned, TRUE);
-  view.lists = paned;
+  /* Variables, or a note while there are none */
+  view.variables = gtk_scrolled_window_new();
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(view.variables), var_list(view.root, FALSE));
+  gtk_widget_set_vexpand(view.variables, TRUE);
   view.note = gtk_label_new(NULL);
   gtk_label_set_wrap(GTK_LABEL(view.note), TRUE);
   gtk_label_set_xalign(GTK_LABEL(view.note), 0);
   gtk_widget_set_valign(view.note, GTK_ALIGN_START);
+  gtk_widget_set_vexpand(view.note, TRUE);
   gtk_widget_add_css_class(view.note, "note");
-  gtk_box_append(GTK_BOX(panel), view.note);
+  gtk_box_append(GTK_BOX(top), heading("VARIABLES", NULL, NULL, NULL));
+  gtk_box_append(GTK_BOX(top), view.note);
+  gtk_box_append(GTK_BOX(top), view.variables);
+
+  /* Watch, Call Stack, Breakpoints */
+  view.watch_entry = gtk_entry_new();
+  gtk_entry_set_placeholder_text(GTK_ENTRY(view.watch_entry), "An expression: a[i], sum / n, *p");
+  gtk_widget_set_visible(view.watch_entry, FALSE);
+  g_signal_connect(view.watch_entry, "activate", G_CALLBACK(on_watch_entry), NULL);
+  g_signal_connect(keys, "key-pressed", G_CALLBACK(on_watch_entry_key), view.watch_entry);
+  gtk_widget_add_controller(view.watch_entry, keys);
+  gtk_box_append(GTK_BOX(rest),
+                 heading("WATCH", "list-add-symbolic", "Add an expression to watch", G_CALLBACK(on_add_watch)));
+  gtk_box_append(GTK_BOX(rest), view.watch_entry);
+  gtk_box_append(GTK_BOX(rest), var_list(view.watch, TRUE));
+
+  view.stack = GTK_LIST_BOX(gtk_list_box_new());
+  g_signal_connect(view.stack, "row-activated", G_CALLBACK(on_frame_activated), NULL);
+  gtk_box_append(GTK_BOX(rest), heading("CALL STACK", NULL, NULL, NULL));
+  gtk_box_append(GTK_BOX(rest), GTK_WIDGET(view.stack));
+
+  view.breakpoints = GTK_LIST_BOX(gtk_list_box_new());
+  gtk_list_box_set_selection_mode(view.breakpoints, GTK_SELECTION_NONE);
+  g_signal_connect(view.breakpoints, "row-activated", G_CALLBACK(on_breakpoint_activated), NULL);
+  gtk_box_append(GTK_BOX(rest), heading("BREAKPOINTS", "edit-clear-all-symbolic", "Remove all breakpoints",
+                                        G_CALLBACK(on_remove_all)));
+  gtk_box_append(GTK_BOX(rest), GTK_WIDGET(view.breakpoints));
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(rest_scroll), rest);
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(rest_scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+  gtk_paned_set_start_child(GTK_PANED(paned), top);
+  gtk_paned_set_end_child(GTK_PANED(paned), rest_scroll);
+  gtk_paned_set_position(GTK_PANED(paned), 300);
+  gtk_widget_set_vexpand(paned, TRUE);
   gtk_box_append(GTK_BOX(panel), paned);
   g_signal_connect(panel, "destroy", G_CALLBACK(on_view_destroyed), NULL);
   debug_view_ended(t);
+  debug_view_breakpoints_changed(t);
   return panel;
 }

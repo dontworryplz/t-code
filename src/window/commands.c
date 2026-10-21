@@ -5,6 +5,8 @@
 #include "window/commands.h"
 
 #include "debug/debugger.h"
+#include "debug/debugview.h"
+#include "debug/disassembly.h"
 #include "dialogs/about.h"
 #include "dialogs/keybinds.h"
 #include "dialogs/settings.h"
@@ -137,6 +139,30 @@ static void parameter_hints(App *t) { Tab *tab = current_editor(t); if (tab) sig
 static void toggle_breakpoint(App *t) { Tab *tab = current_editor(t); if (tab) breakpoint_toggle_at_cursor(tab); }
 /* clang-format on */
 
+/* The selection, or the name at the cursor, goes to the Run and Debug panel's Watch. */
+static void add_to_watch(App *t)
+{
+  Tab *tab = current_editor(t);
+  GtkTextBuffer *buffer = tab ? GTK_TEXT_BUFFER(tab->buffer) : NULL;
+  GtkTextIter start, end;
+  char *text = NULL;
+
+  if (!buffer)
+    return;
+  if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end))
+    text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+  else {
+    gtk_text_buffer_get_iter_at_mark(buffer, &start, gtk_text_buffer_get_insert(buffer));
+    if (editor_word_at(&start, &start, &end))
+      text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+  }
+  if (text) {
+    debug_view_add_watch(t, text);
+    show_sidebar_page(t, "run");
+  }
+  g_free(text);
+}
+
 /* Go to Line: the picker offers the line typed so far. */
 static void line_query(App *t, const char *text, guint generation)
 {
@@ -242,6 +268,8 @@ static const Command commands[] = {
   { "Debug: Stop", "<Shift>F5", "Shift+F5", debug_stop, FALSE, FALSE, TRUE },
   { "Debug: Restart", "<Control><Shift>F5", "Ctrl+Shift+F5", debug_restart, FALSE, FALSE, TRUE },
   { "View: Run and Debug", "<Control><Shift>d", "Ctrl+Shift+D", show_run, FALSE, FALSE, FALSE },
+  { "Debug: Add to Watch", NULL, NULL, add_to_watch, TRUE, FALSE, FALSE },
+  { "Debug: Open Disassembly View", NULL, NULL, disassembly_open, FALSE, FALSE, FALSE },
   { "Debug: Remove All Breakpoints", NULL, NULL, breakpoints_remove_all, FALSE, FALSE, FALSE },
   { "Debug: Select Program to Debug…", NULL, NULL, debug_select_program, FALSE, FALSE, FALSE },
   { "Git: Compare with HEAD", "<Control><Alt>d", "Ctrl+Alt+D", compare_head, FALSE, FALSE, FALSE },

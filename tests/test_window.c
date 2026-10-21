@@ -8,6 +8,7 @@
 #include "editor/editor.h"
 #include "debug/debugger.h"
 #include "debug/debugview.h"
+#include "debug/disassembly.h"
 #include "dialogs/settings.h"
 #include "editor/breakpoints.h"
 #include "editor/editorview.h"
@@ -786,8 +787,8 @@ static void wait_stop(int line)
   g_assert_cmpint(app.debug.stop_line, ==, line);
 }
 
-/* Waits until the Variables list holds line ("m = 6*"). */
-static void wait_variable(const char *line)
+/* Waits until list() (the Variables or the Watch) holds line ("m = 6*"). */
+static void wait_line(char *(*list)(void), const char *line)
 {
   gint64 end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
   char *text = NULL;
@@ -795,11 +796,16 @@ static void wait_variable(const char *line)
   do {
     g_free(text);
     g_main_context_iteration(NULL, FALSE);
-    text = debug_view_variables_text();
+    text = list();
   } while (!strstr(text, line) && g_get_monotonic_time() < end);
   if (!strstr(text, line))
-    g_error("no \"%s\" in the variables:\n%s", line, text);
+    g_error("no \"%s\" in:\n%s", line, text);
   g_free(text);
+}
+
+static void wait_variable(const char *line)
+{
+  wait_line(debug_view_variables_text, line);
 }
 
 static void wait_end(void)
@@ -886,6 +892,174 @@ static void test_debugging(void)
   g_free(gcc);
 }
 
+/* A breakpoint on a line without code moves to the line gdb stops at; a condition set while paused
+ * stops only when it is true; a watch expression is evaluated at each pause. */
+static void test_debugging_conditions(void)
+{
+  static const char source[] = "#include <stdio.h>\n"            /* 1 */
+                               "int main(void)\n"                /* 2 */
+                               "{\n"                             /* 3 */
+                               "  int total = 0;\n"              /* 4 */
+                               "\n"                              /* 5 */
+                               "  for (int i = 0; i < 5; i++)\n" /* 6 */
+                               "    total += i;\n"               /* 7 */
+                               "  printf(\"%d\\n\", total);\n"   /* 8 */
+                               "  return 0;\n"                   /* 9 */
+                               "}\n";                            /* 10 */
+  char *gdb = g_find_program_in_path("gdb"), *gcc = g_find_program_in_path("gcc");
+
+  if (!gdb || !gcc) {
+    g_test_skip("no gdb or gcc");
+    g_free(gdb);
+    g_free(gcc);
+    return;
+  }
+  char *path = g_build_filename(app.project.root, "loop.c", NULL),
+       *exe = g_build_filename(app.project.root, "loop", NULL);
+  const char *cc[] = { "gcc", "-g", "-O0", "-o", exe, path, NULL };
+  int status = -1;
+  g_assert_true(g_file_set_contents(path, source, -1, NULL));
+  g_assert_true(g_spawn_sync(NULL, (char **)cc, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, NULL));
+  g_assert_cmpint(status, ==, 0);
+
+  open_file(&app, path);
+  run_until(has_tab, path);
+  Tab *tab = find_tab(&app, TAB_EDITOR, path);
+  while (tab->view->loading)
+    g_main_context_iteration(NULL, FALSE);
+  breakpoint_toggle(tab, 4); /* line 5: blank */
+  debug_view_add_watch(&app, "total * 10");
+  char *watch = debug_view_watch_text();
+  g_assert_cmpstr(watch, ==, "total * 10 = not available: the program is not paused\n");
+  g_free(watch);
+
+  debug_launch(&app, exe);
+  wait_stop(6); /* gdb put it on the next line with code, and so does the editor */
+  GArray *list = breakpoints_in(&app, path);
+  g_assert_cmpint(list->len, ==, 1);
+  g_assert_cmpint(g_array_index(list, Breakpoint, 0).line, ==, 6);
+
+  breakpoint_toggle(tab, 5);                  /* off */
+  breakpoint_set_condition(tab, 6, "i == 3"); /* line 7, while paused */
+  debug_start_or_continue(&app);
+  wait_stop(7);
+  wait_variable("i = 3\n");
+  wait_line(debug_view_watch_text, "total * 10 = 30\n"); /* 0 + 1 + 2 */
+  debug_stop(&app);
+  wait_end();
+
+  breakpoints_remove_all(&app);
+  char *none[] = { NULL };
+  debug_view_set_watches(none);
+  close_everything();
+  g_free(exe);
+  g_free(path);
+  g_free(gdb);
+  g_free(gcc);
+}
+
+/* An editor's whole text (free it). */
+static char *text_of(Tab *tab)
+{
+  GtkTextIter start, end;
+
+  gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+  return gtk_text_buffer_get_text(GTK_TEXT_BUFFER(tab->buffer), &start, &end, FALSE);
+}
+
+static gboolean disassembly_ready(gconstpointer data G_GNUC_UNUSED)
+{
+  Tab *tab = app.debug.disassembly ? find_tab(&app, TAB_EDITOR, app.debug.disassembly) : NULL;
+
+  return tab && !tab->view->loading && app.debug.disassembly_line > 0;
+}
+
+/* The line of the Disassembly View's text the arrow is on. */
+static char *disassembly_line_text(void)
+{
+  Tab *tab = find_tab(&app, TAB_EDITOR, app.debug.disassembly);
+  GtkTextIter start, end;
+
+  gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(tab->buffer), &start, app.debug.disassembly_line - 1);
+  end = start;
+  gtk_text_iter_forward_to_line_end(&end);
+  return gtk_text_buffer_get_text(GTK_TEXT_BUFFER(tab->buffer), &start, &end, FALSE);
+}
+
+/* The Disassembly View shows the paused function's instructions with its source lines, the arrow on
+ * the next one; in front, F10 steps one instruction (the source line stays); the Registers are listed
+ * after the variables. */
+static void test_disassembly(void)
+{
+  static const char source[] = "int main(void)\n"   /* 1 */
+                               "{\n"                /* 2 */
+                               "  int x = 2;\n"     /* 3 */
+                               "  x = x * 21;\n"    /* 4 */
+                               "  return x - 42;\n" /* 5 */
+                               "}\n";               /* 6 */
+  char *gdb = g_find_program_in_path("gdb"), *gcc = g_find_program_in_path("gcc");
+
+  if (!gdb || !gcc) {
+    g_test_skip("no gdb or gcc");
+    g_free(gdb);
+    g_free(gcc);
+    return;
+  }
+  char *path = g_build_filename(app.project.root, "asm.c", NULL),
+       *exe = g_build_filename(app.project.root, "asm", NULL);
+  const char *cc[] = { "gcc", "-g", "-O0", "-o", exe, path, NULL };
+  int status = -1;
+  g_assert_true(g_file_set_contents(path, source, -1, NULL));
+  g_assert_true(g_spawn_sync(NULL, (char **)cc, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, NULL));
+  g_assert_cmpint(status, ==, 0);
+
+  open_file(&app, path);
+  run_until(has_tab, path);
+  Tab *tab = find_tab(&app, TAB_EDITOR, path);
+  while (tab->view->loading)
+    g_main_context_iteration(NULL, FALSE);
+  breakpoint_toggle(tab, 3); /* line 4 */
+  debug_launch(&app, exe);
+  wait_stop(4);
+  wait_variable("Registers = ");
+  disassembly_open(&app);
+  gint64 end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+  while (!disassembly_ready(NULL) && g_get_monotonic_time() < end)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_true(disassembly_ready(NULL));
+  Tab *view = find_tab(&app, TAB_EDITOR, app.debug.disassembly);
+  g_assert_true(view->view->readonly);
+  char *text = text_of(view);
+  g_assert_nonnull(strstr(text, "x = x * 21;")); /* the source lines between the instructions */
+  g_assert_null(strstr(text, "=>"));
+  g_free(text);
+  char *first = disassembly_line_text();
+  g_assert_true(g_str_has_prefix(first, "   0x"));
+
+  select_tab(view); /* in front: F10 is one instruction */
+  int before = app.debug.disassembly_line;
+  debug_step_over(&app);
+  end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+  while (app.debug.disassembly_line <= before && g_get_monotonic_time() < end)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_cmpint(app.debug.disassembly_line, >, before);
+  g_assert_cmpint(app.debug.stop_line, ==, 4); /* x = x * 21 takes more than one instruction */
+  char *second = disassembly_line_text();
+  g_assert_cmpstr(first, !=, second);
+  g_free(second);
+  g_free(first);
+
+  debug_stop(&app);
+  wait_end();
+  g_assert_cmpint(app.debug.disassembly_line, ==, 0);
+  breakpoints_remove_all(&app);
+  close_everything();
+  g_free(exe);
+  g_free(path);
+  g_free(gdb);
+  g_free(gcc);
+}
+
 int main(int argc, char **argv)
 {
   char *home = g_dir_make_tmp("t-code-window-XXXXXX", NULL);
@@ -925,6 +1099,8 @@ int main(int argc, char **argv)
   g_test_add_func("/window/open-tabs", test_open_tabs);
   g_test_add_func("/window/theme-preview", test_theme_preview);
   g_test_add_func("/window/debugging", test_debugging);
+  g_test_add_func("/window/debugging-conditions", test_debugging_conditions);
+  g_test_add_func("/window/disassembly", test_disassembly);
 
   gapp = gtk_application_new("io.github.tcode.test", G_APPLICATION_NON_UNIQUE);
   g_object_set_data(G_OBJECT(gapp), "status", &status);
