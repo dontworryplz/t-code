@@ -12,6 +12,8 @@
 
 #include <string.h>
 
+#define INACTIVE_TAG "tcode-inactive" /* lines the preprocessor leaves out */
+
 #define UPDATE_MS 300 /* after the last change */
 
 typedef struct TokensRequest TokensRequest;
@@ -83,6 +85,9 @@ void semantic_recolor(Tab *tab)
       g_object_set(tag, "foreground", palette_hex(kind_colors[k]), NULL);
     g_free(name);
   }
+  GtkTextTag *inactive = gtk_text_tag_table_lookup(table, INACTIVE_TAG);
+  if (inactive)
+    g_object_set(inactive, "foreground-rgba", palette_rgba(PAL_FG_FAINT), NULL);
 }
 
 /* GtkTextTagTableForeach: collects the semantic tags. */
@@ -106,6 +111,9 @@ static void raise_tags(GtkTextTagTable *table)
   for (guint i = 0; i < tags->len; i++)
     gtk_text_tag_set_priority(g_ptr_array_index(tags, i), gtk_text_tag_table_get_size(table) - 1);
   g_ptr_array_free(tags, TRUE);
+  GtkTextTag *inactive = gtk_text_tag_table_lookup(table, INACTIVE_TAG); /* dims them too */
+  if (inactive)
+    gtk_text_tag_set_priority(inactive, gtk_text_tag_table_get_size(table) - 1);
 }
 
 static void on_tag_added(GtkTextTagTable *table, GtkTextTag *tag, gpointer data G_GNUC_UNUSED)
@@ -442,4 +450,27 @@ void semantic_free(Semantic *s)
     g_array_unref(s->data);
   g_free(s->result_id);
   g_free(s); /* the marks go with the buffer */
+}
+
+void semantic_inactive(Tab *tab, JsonNode *regions)
+{
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+  GtkTextTagTable *table = gtk_text_buffer_get_tag_table(buffer);
+  GtkTextTag *tag = gtk_text_tag_table_lookup(table, INACTIVE_TAG);
+  JsonArray *array = regions && JSON_NODE_HOLDS_ARRAY(regions) ? json_node_get_array(regions) : NULL;
+  GtkTextIter start, end;
+
+  if (!tag) {
+    tag = gtk_text_buffer_create_tag(buffer, INACTIVE_TAG, NULL);
+    semantic_recolor(tab);
+  }
+  gtk_text_tag_set_priority(tag, gtk_text_tag_table_get_size(table) - 1); /* over every color */
+  gtk_text_buffer_get_bounds(buffer, &start, &end);
+  gtk_text_buffer_remove_tag(buffer, tag, &start, &end);
+  for (guint i = 0; array && i < json_array_get_length(array); i++) {
+    JsonNode *range = json_array_get_element(array, i);
+    lsp_iter_at(tab, json_at(range, "start"), &start);
+    lsp_iter_at(tab, json_at(range, "end"), &end);
+    gtk_text_buffer_apply_tag(buffer, tag, &start, &end);
+  }
 }

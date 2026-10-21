@@ -686,6 +686,10 @@ static void on_message(gpointer owner, const char *body)
       doc_of(tab)->include_missing = include_not_found(json_at(message, "params.diagnostics"));
       diagnostics_show(tab, json_at(message, "params.diagnostics")); /* updates the status bar */
     }
+  } else if (g_strcmp0(method, "textDocument/inactiveRegions") == 0) { /* clangd's: #if branches left out */
+    Tab *tab = tab_of_uri(l, json_string_at(message, "params.textDocument.uri"));
+    if (tab)
+      semantic_inactive(tab, json_at(message, "params.regions"));
   } else if (!method && id && JSON_NODE_HOLDS_VALUE(id)) {
     gint64 number = json_node_get_int(id);
     Pending *p = g_hash_table_lookup(l->pending, &number);
@@ -757,6 +761,7 @@ static void server_start(Lsp *l)
       "\"textDocument\":{"
       "\"synchronization\":{\"didSave\":true},"
       "\"publishDiagnostics\":{\"relatedInformation\":false},"
+      "\"inactiveRegionsCapabilities\":{\"inactiveRegions\":true},"
       "\"completion\":{\"contextSupport\":true,\"completionItem\":{\"snippetSupport\":true,"
       "\"documentationFormat\":[\"plaintext\"],\"labelDetailsSupport\":true}},"
       "\"hover\":{\"contentFormat\":[\"plaintext\"]},"

@@ -7,6 +7,8 @@
 
 #include "app.h"
 
+#include <json-glib/json-glib.h>
+
 typedef struct Semantic Semantic;
 
 /* Asks for the editor's colors again a moment from now (the text changed, the server opened the
@@ -18,3 +20,6 @@ void semantic_free(Semantic *semantic);
 
 /* The color theme changed: the semantic colors follow it. */
 void semantic_recolor(Tab *tab);
+
+/* Dims the lines the preprocessor leaves out (#if 0, an #ifdef not defined): clangd's list of ranges. */
+void semantic_inactive(Tab *tab, JsonNode *regions);

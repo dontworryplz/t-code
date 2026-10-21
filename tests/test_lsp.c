@@ -159,6 +159,15 @@ static int fake_server(void)
         fake_publish(uri, text);
     } else if (g_strcmp0(method, "textDocument/didClose") == 0) {
       g_hash_table_remove(fake_docs, uri);
+    } else if (g_strcmp0(method, "textDocument/documentHighlight") == 0) {
+      /* The first character of lines 0 and 2. */
+      char *reply =
+          g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":["
+                          "{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":1}}},"
+                          "{\"range\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":2,\"character\":1}}}]}",
+                          json_int_at(message, "id", 0));
+      fake_send(reply);
+      g_free(reply);
     } else if (g_strcmp0(method, "textDocument/signatureHelp") == 0) {
       /* Where it was asked from, told as the file's one diagnostic; the answer is "no signature". */
       char *quoted_uri = json_quote(uri), *reply;
@@ -365,6 +374,54 @@ static void test_hover(void)
   g_free(answer.value);
   g_free(params);
   g_free(position);
+  free_tab(tab);
+}
+
+/* The cursor resting on a name, with no selection, highlights the server's uses of it. */
+static void test_document_highlight(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/highlight.c", "x = 1;\ny = 2;\nx = 3;\n");
+  GArray *lines = g_array_new(FALSE, FALSE, sizeof(int));
+  GtkTextIter iter;
+  gint64 end = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  iter = iter_at(tab, 2, 0);
+  gtk_text_buffer_place_cursor(GTK_TEXT_BUFFER(tab->buffer), &iter);
+  while (lines->len == 0 && g_get_monotonic_time() < end) {
+    g_main_context_iteration(NULL, FALSE);
+    occurrences_lines(tab, lines);
+  }
+  g_assert_cmpint(lines->len, ==, 2);
+  g_assert_cmpint(g_array_index(lines, int, 0), ==, 0);
+  g_assert_cmpint(g_array_index(lines, int, 1), ==, 2);
+  g_array_free(lines, TRUE);
+  free_tab(tab);
+}
+
+/* clangd's inactive regions dim their lines, over the semantic colors; a new list replaces the old. */
+static void test_inactive_regions(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/inactive.c", "#if 0\nint a;\n#endif\nint b;\n");
+  GtkTextTag *tag;
+  GtkTextIter iter;
+  JsonNode *regions =
+      json_from_string("[{\"start\":{\"line\":1,\"character\":0},\"end\":{\"line\":1,\"character\":6}}]", NULL);
+  JsonNode *none = json_from_string("[]", NULL);
+
+  semantic_inactive(tab, regions);
+  tag = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer)), "tcode-inactive");
+  g_assert_nonnull(tag);
+  iter = iter_at(tab, 1, 2);
+  g_assert_true(gtk_text_iter_has_tag(&iter, tag));
+  iter = iter_at(tab, 3, 2);
+  g_assert_false(gtk_text_iter_has_tag(&iter, tag));
+  semantic_inactive(tab, none);
+  iter = iter_at(tab, 1, 2);
+  g_assert_false(gtk_text_iter_has_tag(&iter, tag));
+  json_node_unref(none);
+  json_node_unref(regions);
   free_tab(tab);
 }
 
@@ -953,6 +1010,8 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/sync-utf16", test_sync_utf16);
   g_test_add_func("/lsp/reload", test_reload);
   g_test_add_func("/lsp/hover", test_hover);
+  g_test_add_func("/lsp/document-highlight", test_document_highlight);
+  g_test_add_func("/lsp/inactive-regions", test_inactive_regions);
   g_test_add_func("/lsp/cancel", test_cancel);
   g_test_add_func("/lsp/close-waiting", test_close_waiting);
   g_test_add_func("/lsp/idle-stop", test_idle_stop);
