@@ -1,5 +1,5 @@
 /*
- * The find bar over an editor's top right corner, like VS Code's find widget: the text to find
+ * The find bar over an editor's top right corner: the text to find
  * (Match Case, Whole Word and Regex toggles), "3 of 12", previous / next, and a second row to
  * replace one match or all of them. Every match in the file is highlighted while it shows.
  */

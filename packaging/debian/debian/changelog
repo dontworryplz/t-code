@@ -3,7 +3,7 @@ t-code (0.2.1-1) unstable; urgency=medium
   * The Files panel is a native folder tree (GtkListView) instead of a
     terminal file manager: lazy folders, git colors, drag and drop, create /
     rename / delete / copy / move.
-  * Temporary tabs like VS Code's preview editor, and a comparison is one tab.
+  * Temporary tabs (a click in the file tree previews a file), and a comparison is one tab.
   * Indentation from .editorconfig, .clang-format or the file itself, shown
     and changeable per project in the status bar.
   * clangd can be restarted from the Command Palette; a status bar hint when

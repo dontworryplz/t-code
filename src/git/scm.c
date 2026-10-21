@@ -1,5 +1,5 @@
 /*
- * The Source Control panel, a tab next to the file manager (Ctrl+Shift+G), like VS Code's:
+ * The Source Control panel, a tab next to the file manager (Ctrl+Shift+G):
  *   a commit message and Commit / Push buttons
  *   Staged Changes and Changes: click a file to see its changes side by side; + stages, − unstages,
  *     ↶ discards (after asking)
@@ -354,7 +354,7 @@ static void on_committed(gboolean ok, const char *out, const char *err, gpointer
   set_note("Committed", FALSE);
 }
 
-/* With nothing staged, the commit takes every change (like VS Code's smart commit). */
+/* With nothing staged, the commit takes every change. */
 static void on_staged_all(gboolean ok, const char *out G_GNUC_UNUSED, const char *err, gpointer data)
 {
   const char *args[] = { "commit", "-q", "-F", "-", NULL };
@@ -868,7 +868,7 @@ static void show_changes(App *t)
   gtk_label_set_text(scm.staged_title, title);
   g_free(title);
   update_buttons();
-  /* The tab shows how many files changed, like VS Code's badge. */
+  /* The tab shows how many files changed. */
   title = scm.staged->len + scm.changes->len ? g_strdup_printf("SOURCE CONTROL  %u", scm.staged->len + scm.changes->len)
                                              : g_strdup("SOURCE CONTROL");
   gtk_stack_page_set_title(gtk_stack_get_page(t->dock.scm_stack, t->scm), title);
@@ -907,7 +907,7 @@ static void set_section_open(GtkWidget *box, gboolean open)
   }
 }
 
-/* A click on a section's heading (not on its buttons) opens or folds it, like VS Code's. */
+/* A click on a section's heading (not on its buttons) opens or folds it. */
 static void on_section_click(GtkGestureClick *click, int n G_GNUC_UNUSED, double x G_GNUC_UNUSED,
                              double y G_GNUC_UNUSED, GtkWidget *box)
 {

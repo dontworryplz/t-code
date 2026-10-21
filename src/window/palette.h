@@ -85,6 +85,9 @@ const char *palette_hex(PalColor color);
 /* The terminal's 16 colors. */
 const GdkRGBA *palette_terminal(void);
 
+/* The id of the theme id names now (a theme's old id gives its new one; an unknown one Dark Classic's). */
+const char *palette_known_id(const char *id);
+
 /* The current theme's id, and whether it is a light one. */
 const char *palette_id(void);
 gboolean palette_light(void);

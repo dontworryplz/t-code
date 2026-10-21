@@ -69,7 +69,7 @@ void unless_unsaved(App *t, const char *question, const char *button, ConfirmedF
 
 /* Switching ---------------------------------------------------------------------------------- */
 
-/* Like VS Code: the folder's name, then the program's. */
+/* The folder's name, then the program's. */
 void update_title(App *t)
 {
   char *name = g_path_get_basename(t->project.root);

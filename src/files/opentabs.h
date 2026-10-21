@@ -1,5 +1,5 @@
 /*
- * Open Tabs, the top of the Files panel (VS Code's Open Editors): the open tabs of every group, the
+ * Open Tabs, the top of the Files panel: the open tabs of every group, the
  * current one highlighted; a click shows one, a middle click or its × closes it. It folds from its
  * heading, and is open by default.
  */

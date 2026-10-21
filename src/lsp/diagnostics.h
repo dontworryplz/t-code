@@ -1,6 +1,6 @@
 /*
  * The language server's diagnostics in an editor: errors underlined with a red wave, warnings
- * yellow, notes blue, like VS Code; their counts in the status bar, their messages when the
+ * yellow, notes blue; their counts in the status bar, their messages when the
  * pointer rests on them (lsp/hover.c).
  */
 #pragma once

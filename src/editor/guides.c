@@ -149,7 +149,7 @@ static int indent_of(GtkTextBuffer *buffer, int line, int tab_size)
   return -1;
 }
 
-/* Guides on a blank line follow the lines around it, like VS Code's. */
+/* Guides on a blank line follow the lines around it. */
 static int guide_count(GtkTextBuffer *buffer, int line, int tab_size)
 {
   int indent = indent_of(buffer, line, tab_size), above = -1, below = -1;
@@ -214,9 +214,8 @@ static void draw_gap(GtkSnapshot *snapshot, const GdkRGBA *fill, const GdkRGBA *
   gtk_snapshot_append_color(snapshot, edge, &GRAPHENE_RECT_INIT(x, (float)(y + height - 1), width, 1));
 }
 
-/* A comparison's changed lines, tinted (green on the new side, red on the old one, VS Code's
- * diffEditor line backgrounds), and its gap rows: on the new side red where lines were deleted, on
- * the old side black where lines were added. */
+/* A comparison's changed lines, tinted (green on the new side, red on the old one), and its gap
+ * rows: on the new side red where lines were deleted, on the old side black where lines were added. */
 static void draw_diff_gaps(TcodeView *self, GtkSnapshot *snapshot)
 {
   GdkRGBA deleted_fill = *palette_rgba(PAL_DIFF_DELETED), deleted_edge = deleted_fill;

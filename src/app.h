@@ -46,7 +46,7 @@ typedef struct Tab {
   GtkLabel *label;
   GtkWidget *item; /* its tab in the group's tab strip (editor/tabs.c): the label and a close button */
   char *path;
-  gboolean temporary; /* VS Code's preview editor: a click in Files opens it, the next one replaces it */
+  gboolean temporary; /* a click in Files opens it, the next one replaces it */
   gboolean modified;
   EditorView *view; /* editors only: loading, saving, the minimap (editor/editorview.h) */
   struct {
@@ -147,11 +147,11 @@ struct App {
     int stop_line;
     char *disassembly;    /* the Disassembly View's file (debug/disassembly.c), or NULL */
     int disassembly_line; /* its line of the instruction that runs next (1-based), or 0 */
-    Debugger *session; /* gdb, while debugging (debug/debugger.c) */
-    GtkWidget *panel;  /* the Debug panel: its buttons over the program's terminal */
-    VteTerminal *term; /* the program's terminal */
+    Debugger *session;    /* gdb, while debugging (debug/debugger.c) */
+    GtkWidget *panel;     /* the Debug panel: its buttons over the program's terminal */
+    VteTerminal *term;    /* the program's terminal */
   } debug;
-  
+
   double font_scale;
   gboolean closing;
   gboolean plain; /* syntax coloring off (F7) */

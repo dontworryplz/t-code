@@ -9,7 +9,7 @@
 typedef struct {
   const char *text;
   gboolean match_case, whole_word, regex;
-  const char *include, *exclude; /* comma separated globs, like VS Code's "files to include" */
+  const char *include, *exclude; /* comma separated globs */
 } SearchQuery;
 
 typedef struct {

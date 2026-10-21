@@ -1,5 +1,5 @@
 /*
- * Debugging with gdb, like VS Code: F5 builds the project in the shell and starts the program under
+ * Debugging with gdb: F5 builds the project in the shell and starts the program under
  * gdb, which stops it at the breakpoints (editor/breakpoints.c) or where it crashes; the editor
  * then shows that line, and F10 / F11 / Shift+F11 go on one step at a time, F5 to the next stop.
  * The Debug panel holds the buttons for all that over a terminal the program reads and writes.

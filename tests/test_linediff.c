@@ -172,7 +172,7 @@ static void check_spans(const char *old, const char *new, const char *new_side, 
   g_free(a);
 }
 
-/* Changed words, like VS Code: only what differs in a changed line; a line without a pair is all
+/* Changed words: only what differs in a changed line; a line without a pair is all
  * changed; words with only spaces between them make one span. */
 static void test_spans(void)
 {

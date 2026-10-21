@@ -12,7 +12,7 @@
 #define OCCURRENCES_MS 100     /* after the selection settles */
 #define MAX_NAME 200           /* longer selections are not looked for */
 #define MAX_OCCURRENCES 10000  /* highlighted at most */
-#define TAG "tcode-occurrence" /* VS Code's editor.selectionHighlightBackground */
+#define TAG "tcode-occurrence" /* the selection highlight's background */
 
 struct Occurrences {
   Tab *tab;
@@ -112,7 +112,7 @@ static void on_occurrence_mark_set(GtkTextBuffer *buffer, const GtkTextIter *ite
   o->update_id = g_timeout_add(OCCURRENCES_MS, find_occurrences, o);
 }
 
-/* An edit: the highlights would no longer be the name's (VS Code clears them too). */
+/* An edit: the highlights would no longer be the name's. */
 static void on_occurrence_edit(GtkTextBuffer *buffer G_GNUC_UNUSED, Occurrences *o)
 {
   clear_occurrences(o);
@@ -121,7 +121,7 @@ static void on_occurrence_edit(GtkTextBuffer *buffer G_GNUC_UNUSED, Occurrences 
 void occurrences_recolor(Tab *tab)
 {
   GtkTextTag *tag = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer)), TAG);
-  GdkRGBA background = *palette_rgba(PAL_OCCURRENCE); /* VS Code's #add6ff26 */
+  GdkRGBA background = *palette_rgba(PAL_OCCURRENCE); /* #add6ff26 in Dark Classic */
 
   background.alpha = 0.15f;
   if (tag)

@@ -1,5 +1,5 @@
 /*
- * Editing commands on the lines around the cursor, like VS Code's: comment, duplicate, move and
+ * Editing commands on the lines around the cursor: comment, duplicate, move and
  * delete lines, redo; and typing help: closing brackets and quotes, Enter after an opening bracket
  * (one level deeper); a double click selects a name without the punctuation around it.
  */

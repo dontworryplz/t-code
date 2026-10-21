@@ -776,7 +776,7 @@ void debug_start_or_continue(App *t)
     go(t, "continue");
     return;
   }
-  if (project_is_script(t)) {
+  if (!project_can_debug(t)) {
     show_sidebar_page(t, "debug");
     say(t, TRUE, "Debugging is for C and C++ programs: Ctrl+F5 runs this file.");
     return;
@@ -853,7 +853,7 @@ static void on_evaluated(gpointer data, JsonNode *body, const char *error)
 }
 
 /* Enter in the line under the terminal: the expression is evaluated in the paused frame ("-exec ..."
- * runs a gdb command, like VS Code's Debug Console). */
+ * runs a gdb command). */
 static void on_evaluate(GtkEntry *entry, App *t)
 {
   const char *text = gtk_editable_get_text(GTK_EDITABLE(entry));

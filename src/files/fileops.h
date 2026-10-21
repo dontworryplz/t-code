@@ -1,7 +1,7 @@
 /*
  * The file tree's file operations and rules, GLib-only (tested without a display, also under ASan):
  * which names show, their order, creating, renaming, deleting, and copying or moving into a folder
- * like VS Code ("name copy.ext" when the name is taken). Errors say what went wrong in *error.
+ * ("name copy.ext" when the name is taken). Errors say what went wrong in *error.
  */
 #pragma once
 

@@ -26,8 +26,8 @@ Recommends:     gdb
 %description
 t-code is a lightweight C/C++ IDE: a file tree,
 GtkSourceView editor tabs sharing one clangd (errors underlined, completion,
-parameter hints, go to definition) and a shell, in a GTK4 window with VS Code
-Dark Classic colors. It also has a Search panel, Source Control, git comparisons
+parameter hints, go to definition) and a shell, in a GTK4 window with
+Dark Classic and other color themes. It also has a Search panel, Source Control, git comparisons
 and Markdown previews.
 
 %prep
@@ -49,7 +49,7 @@ build/test-detect
 build/test-linediff
 
 %files
-%license LICENSE
+%license LICENSE THIRD-PARTY.md
 %doc README.md
 %{_bindir}/t-code
 %{_datadir}/t-code/
@@ -61,7 +61,7 @@ build/test-linediff
 - The Files panel is a native folder tree (GtkListView) instead of a terminal
   file manager: lazy folders, git colors, drag and drop, create / rename /
   delete / copy / move
-- Temporary tabs like VS Code's preview editor, and a comparison is one tab
+- Temporary tabs (a click in the file tree previews a file), and a comparison is one tab
 - Indentation from .editorconfig, .clang-format or the file itself, shown and
   changeable per project in the status bar
 - clangd can be restarted from the Command Palette; a status bar hint when no

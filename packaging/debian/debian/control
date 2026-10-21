@@ -27,6 +27,6 @@ Recommends: ripgrep,
 Description: lightweight C/C++ IDE
  t-code is a lightweight C/C++ IDE: a file tree,
  GtkSourceView editor tabs sharing one clangd (errors underlined, completion,
- parameter hints, go to definition) and a shell, in a GTK4 window with VS Code
- Dark Classic colors. It also has a Search panel, Source Control, git comparisons
+ parameter hints, go to definition) and a shell, in a GTK4 window with
+ Dark Classic and other color themes. It also has a Search panel, Source Control, git comparisons
  and Markdown previews.

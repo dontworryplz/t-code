@@ -55,7 +55,7 @@ char **search_argv(const SearchQuery *q, gboolean ripgrep)
       add(argv, "--fixed-strings");
     if (q->whole_word)
       add(argv, "--word-regexp");
-    /* A folder name (no wildcards in its last part) includes what is in it, as in VS Code. */
+    /* A folder name (no wildcards in its last part) includes what is in it. */
     for (int i = 0; include[i]; i++) {
       const char *last = strrchr(include[i], '/');
       add(argv, "--glob");

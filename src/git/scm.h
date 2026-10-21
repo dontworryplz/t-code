@@ -1,5 +1,5 @@
 /*
- * The Source Control panel, the second sidebar page (Ctrl+Shift+G), like VS Code's: a commit
+ * The Source Control panel, the second sidebar page (Ctrl+Shift+G): a commit
  * message with Commit and Push, the Staged Changes and Changes lists, and the last commits.
  */
 #pragma once

@@ -1,5 +1,5 @@
 /*
- * Sticky scroll, like VS Code's: the first lines of the blocks the editor's top is inside
+ * Sticky scroll: the first lines of the blocks the editor's top is inside
  * (namespace, function, loop, ...) stay at the top of the editor while their insides scroll by, in
  * their colors, with their line numbers. A click on one goes to it.
  */

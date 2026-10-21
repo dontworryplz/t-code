@@ -1,5 +1,5 @@
 /*
- * The diff gutter right of the line numbers, like VS Code's: green for added lines, blue for
+ * The diff gutter right of the line numbers: green for added lines, blue for
  * changed ones, a red mark where lines were deleted. It compares with the last commit (HEAD,
  * followed as new commits come), or in a comparison with an older version (a commit, a file).
  */

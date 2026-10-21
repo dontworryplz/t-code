@@ -29,9 +29,9 @@ static const char *const css =
     ".tcode-shell { padding: 6px 8px; }"
 
     /* Title bar: flat rounded buttons, and window controls of our own instead of the theme's
-     * circles (the close button turns red, like on Windows and in VS Code). */
+     * circles (the close button turns red under the pointer). */
     "headerbar { min-height: 30px; padding: 0 4px 0 6px; background: var(--tc-frame); box-shadow: none; border: none; }"
-    /* As thin as VS Code's: the theme's own heights and paddings (46px in all) go. */
+    /* Thin: the theme's own heights and paddings (46px in all) go. */
     "headerbar * { min-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }"
     "headerbar .title { font-size: 0.9em; font-weight: normal; color: var(--tc-fg); }"
     "headerbar button { min-height: 22px; min-width: 24px; padding: 0 5px; margin: 4px 1px;"
@@ -59,7 +59,7 @@ static const char *const css =
     ".tcode-tab:hover button, .tcode-tab:checked button { opacity: 1; }"
     ".tcode-tab button:hover { background: color-mix(in srgb, var(--tc-fg) 12%, transparent); }"
     ".tcode-tab label.temporary { font-style: italic; }"
-    /* The strip's scrollbar: thin, over the tabs' bottom edge, like VS Code's. */
+    /* The strip's scrollbar: thin, over the tabs' bottom edge. */
     ".tcode-tabs scrollbar.horizontal slider { min-height: 3px; border-radius: 0; background: rgba(121, 121, 121, .4); }"
     ".tcode-tabs scrollbar.horizontal:hover slider { min-height: 5px; background: rgba(100, 100, 100, .7); }"
     ".tcode-tabs scrollbar { background: none; border: none; }"
@@ -72,7 +72,7 @@ static const char *const css =
     "popover > contents { border-radius: 10px; }"
     "popover modelbutton { border-radius: 6px; }";
 
-/* The square theme: VS Code's flat panels, side by side with a line between them, square tabs with
+/* The square theme: flat panels, side by side with a line between them, square tabs with
  * the accent line on top of the current one, and small corners on the controls. Over the panels'
  * own CSS, so their corners go too. */
 static const char *const square_css =
@@ -89,7 +89,7 @@ static const char *const square_css =
     ".tcode-tab { min-height: 37px; margin: 0; border-radius: 0;"
     "  box-shadow: inset -1px 0 var(--tc-border), inset 0 -1px var(--tc-border); }"
     ".tcode-tab:hover { background: var(--tc-panel); }"
-    /* The current tab keeps the line under the tabs too: flowing into the editor (VS Code's way), it
+    /* The current tab keeps the line under the tabs too: flowing into the editor, it
      * looked a pixel or two taller than the others. */
     ".tcode-tab:checked { box-shadow: inset 0 1px var(--tc-accent), inset -1px 0 var(--tc-border), inset 0 -1px var(--tc-border); }"
     ".tcode-tab button { border-radius: 4px; }"

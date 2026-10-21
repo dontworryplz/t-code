@@ -1,6 +1,6 @@
 /*
  * The file tree's git colors, GLib-only: `git status --porcelain=v1 -z --untracked-files=all
- * --ignored=matching` read into a table of states, with VS Code's colors and letters. A state is
+ * --ignored=matching` read into a table of states, with their colors and letters. A state is
  * 0 or one of M(odified) A(dded) U(ntracked) D(eleted) C(onflict) I(gnored).
  */
 #pragma once
@@ -15,7 +15,7 @@ GHashTable *git_marks_parse(const char *top, const char *out, gsize len);
  * is inside an ignored folder. marks may be NULL (outside a repository). */
 char git_marks_state(GHashTable *marks, const char *path);
 
-/* VS Code's color for a state ("#cccccc" for none). */
+/* The color for a state ("#cccccc" for none). */
 const char *git_marks_color(char state);
 
 /* The letter at the end of a file's row: "M", "A", "U", "D" or "!" (a conflict); NULL for none. */

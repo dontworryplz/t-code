@@ -1,5 +1,5 @@
 /*
- * VS Code's selection highlight: when the selection is a whole name ("count", by a double click
+ * Selection highlight: when the selection is a whole name ("count", by a double click
  * or otherwise), its other occurrences in the file get a faint background, and the strip right of
  * the minimap marks their lines. An edit clears them until the selection changes again.
  */

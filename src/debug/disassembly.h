@@ -1,5 +1,5 @@
 /*
- * The Disassembly View, VS Code's: the paused function's machine instructions with its source lines
+ * The Disassembly View: the paused function's machine instructions with its source lines
  * between them, in a read-only editor tab beside the source ("Debug: Open Disassembly View", the Debug
  * panel's ASM button). A yellow arrow marks the instruction that runs next; while that tab is the
  * current one, F10 / F11 go one instruction at a time; a click left of an instruction puts a

@@ -1,5 +1,5 @@
 /*
- * Talking to a debugger with the Debug Adapter Protocol (DAP), the way VS Code does: gdb runs as
+ * Talking to a debugger with the Debug Adapter Protocol (DAP): gdb runs as
  * "gdb -i dap", gets requests ({"seq": 3, "type": "request", "command": "next", "arguments": {...}})
  * on its stdin, framed like the language server's messages (lsp/channel.c), answers each one and
  * sends events of its own ("stopped", "exited", "output"). GLib and json-glib only.

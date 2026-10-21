@@ -1,5 +1,5 @@
 /*
- * The status bar at the bottom, like VS Code's:
+ * The status bar at the bottom:
  *   left   git branch ("*" when there are changes), clangd errors and warnings in the open files,
  *          a warning when clangd has no compile flags, Build and Run buttons and what they would build
  *   right  the current editor's indentation ("Spaces: 4", a click chooses the project's), cursor

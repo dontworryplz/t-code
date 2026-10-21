@@ -382,7 +382,7 @@ static gboolean can_fold(Folding *f)
   return f && f->tab->view && !f->tab->view->loading && !f->tab->compare.old_side && !f->tab->compare.with;
 }
 
-/* A chevron like VS Code's: pointing down (open) or right (folded), in a box size wide. */
+/* A chevron: pointing down (open) or right (folded), in a box size wide. */
 static void draw_chevron(GtkSnapshot *snapshot, double x, double y, double size, gboolean folded)
 {
   const GdkRGBA *ink = palette_rgba(PAL_FG);
@@ -564,7 +564,7 @@ static void on_lines_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, Folding *f)
   fit_numbers(f);
 }
 
-/* The arrows of unfolded blocks show while the pointer is over the gutter, like VS Code's. */
+/* The arrows of unfolded blocks show while the pointer is over the gutter. */
 static void on_gutter_enter(GtkEventControllerMotion *motion G_GNUC_UNUSED, double x G_GNUC_UNUSED,
                             double y G_GNUC_UNUSED, Folding *f)
 {

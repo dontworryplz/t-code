@@ -64,7 +64,7 @@ static void update_count(FindBar *f)
   g_free(text);
 }
 
-/* Selects a match and scrolls to it, the cursor at its end like VS Code. */
+/* Selects a match and scrolls to it, the cursor at its end. */
 static void show_match(FindBar *f, GtkTextIter *start, GtkTextIter *end)
 {
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(f->tab->buffer);
@@ -203,7 +203,7 @@ static gboolean on_bar_key(GtkEventControllerKey *keys G_GNUC_UNUSED, guint key,
   return FALSE;
 }
 
-/* Escape in the text closes the bar too, like VS Code. */
+/* Escape in the text closes the bar too. */
 static gboolean on_view_key(GtkEventControllerKey *keys G_GNUC_UNUSED, guint key, guint code G_GNUC_UNUSED,
                             GdkModifierType state G_GNUC_UNUSED, FindBar *f)
 {

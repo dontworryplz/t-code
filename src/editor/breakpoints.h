@@ -43,7 +43,7 @@ const char *breakpoint_condition(Tab *tab, int line);
 void breakpoint_remove(App *t, const char *path, int line);
 
 /* The debugger put the breakpoint on line from (1-based) of path on line to (from has no code): the dot
- * moves there, like VS Code's. */
+ * moves there. */
 void breakpoint_move(App *t, const char *path, int from, int to);
 
 /* path's breakpoints (Breakpoint, ascending lines), or NULL when it has none. Owned by t. */

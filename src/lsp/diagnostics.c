@@ -19,7 +19,7 @@ typedef struct {
   char *message;
 } Diagnostic;
 
-/* VS Code's editorError / editorWarning / editorInfo foregrounds, from the color theme. */
+/* The error, warning and info colors, from the color theme. */
 static const PalColor colors[] = { PAL_ERROR, PAL_ERROR, PAL_WARNING, PAL_INFO, PAL_INFO };
 static const char *const tag_names[] = { NULL, "lsp-error", "lsp-warning", "lsp-info", "lsp-info" };
 static const char *const labels[] = { NULL, "error", "warning", "note", "hint" };
@@ -103,7 +103,7 @@ void diagnostics_show(Tab *tab, JsonNode *list)
     widen(&start, &end);
     d->start = gtk_text_buffer_create_mark(buffer, NULL, &start, TRUE);
     d->end = gtk_text_buffer_create_mark(buffer, NULL, &end, TRUE); /* text typed right after is not in it */
-    if (d->severity != SEVERITY_HINT)                               /* VS Code draws hints as faint dots: none here */
+    if (d->severity != SEVERITY_HINT)                               /* hints: none */
       gtk_text_buffer_apply_tag(buffer, tag_for(tab, d->severity), &start, &end);
     tab->problems.errors += d->severity == SEVERITY_ERROR;
     tab->problems.warnings += d->severity == SEVERITY_WARNING;

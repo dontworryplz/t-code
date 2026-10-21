@@ -1,5 +1,5 @@
 /*
- * Colors by meaning, like VS Code with clangd: the language server's semantic tokens color
+ * Colors by meaning with clangd: the language server's semantic tokens color
  * functions yellow, types teal, macros blue, enum members and constants bright blue, variables and
  * parameters light blue, over GtkSourceView's own coloring (which only knows the words' shapes).
  */

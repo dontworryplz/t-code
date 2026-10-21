@@ -1,5 +1,5 @@
 /*
- * The popup list at the top of the window, like VS Code's quick pick: a search entry and a list
+ * The popup list at the top of the window: a search entry and a list
  * of results. Go to File, the command palette and File History all use it; each gives a query
  * function that fills the list and a choose function for the picked row.
  */

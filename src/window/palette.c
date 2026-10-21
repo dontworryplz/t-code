@@ -1,7 +1,7 @@
 /*
- * Color theme_table (see palette.h). A theme is its base pal_colors; palette_compute() works out the rest by
+ * Color themes (see palette.h). A theme is its base colors; pal_compute() works out the rest by
  * mixing them (a border is the background with a little of the text in it, ...), unless the theme
- * gives a color itself (Dark Classic gives all of VS Code's own dark ones).
+ * gives a color itself (Dark Classic gives all of its own).
  */
 #include "window/palette.h"
 
@@ -18,7 +18,7 @@ typedef struct {
   const char *const *given; /* "name", "#color" pairs, NULL-ended: colors not worked out */
 } Theme;
 
-/* VS Code's own dark colors, exactly (t-code's colors before themes). */
+/* Dark Classic's own colors, every one (t-code's colors before themes). */
 static const char *const dark_classic_given[] = { "frame",
                                                   "#181818",
                                                   "raised",
@@ -107,16 +107,17 @@ static const char *const dark_classic_given[] = { "frame",
                                                   "#f85149",
                                                   NULL };
 
-static const char *const game_boy_given[] = { "accent-fg", "#9bbc0f",          "selection", "#306230", "fg-strong",
-                                              "#0f380f",   "editor-selection", "#8bac0f",   NULL };
-static const char *const windows_95_given[] = { "raised",           "#c0c0c0",   "selection",
+static const char *const handheld_green_given[] = { "accent-fg",        "#9bbc0f",   "selection",
+                                                    "#306230",          "fg-strong", "#0f380f",
+                                                    "editor-selection", "#8bac0f",   NULL };
+static const char *const retro_gray_given[] = { "raised",           "#c0c0c0",   "selection",
                                                 "#000080",          "accent-fg", "#ffffff",
                                                 "editor-selection", "#a6caf0",   "inactive-selection",
                                                 "#c0c0c0",          NULL };
 
-static const char *const hotdog_given[] = { "accent-fg", "#000000",          "selection", "#000000",      "hover",
-                                            "#cc0000",   "editor-selection", "#000000",   "current-line", "#e00000",
-                                            NULL };
+static const char *const hot_red_given[] = { "accent-fg", "#000000",          "selection", "#000000",      "hover",
+                                             "#cc0000",   "editor-selection", "#000000",   "current-line", "#e00000",
+                                             NULL };
 
 /* clang-format off */
 static const Theme theme_table[] = {
@@ -205,30 +206,30 @@ static const Theme theme_table[] = {
     { "#8a5f00", "#ffcc00", "#ffd966", "#ffc24d", "#ffe08a", "#ffb000", "#ffd27f", "#ffc966", "#ffcc00", "#fff0c0", "#ffb000" },
     { "#1a0f00", "#cc7a00", "#ffb000", "#ffcc33", "#996600", "#e69500", "#ffc24d", "#ffd27f",
       "#4d3300", "#ff9900", "#ffb000", "#ffe066", "#b37700", "#ffaa33", "#ffd27f", "#fff0c0" }, NULL },
-  { "commodore-64", "Commodore 64 (READY.)", FALSE, "#352879", "#6c5eb5", "#a8a0f0", "#7869c4",
+  { "8-bit-blue", "8-bit Blue", FALSE, "#352879", "#6c5eb5", "#a8a0f0", "#7869c4",
     { "#6c5eb5", "#ffffff", "#bfce72", "#94e089", "#67b6bd", "#a8a0f0", "#b86962", "#94e089", "#ffff9d", "#ffffff", "#ffffff" },
     { "#000000", "#883932", "#55a049", "#bfce72", "#40318d", "#8b3f96", "#67b6bd", "#ffffff",
       "#505050", "#b86962", "#94e089", "#ffff9d", "#7869c4", "#9f4e44", "#adadad", "#ffffff" }, NULL },
-  { "game-boy", "Game Boy (DMG-01)", TRUE, "#9bbc0f", "#8bac0f", "#0f380f", "#306230",
+  { "handheld-green", "Handheld Green", TRUE, "#9bbc0f", "#8bac0f", "#0f380f", "#306230",
     { "#306230", "#0f380f", "#0f380f", "#306230", "#0f380f", "#0f380f", "#306230", "#306230", "#0f380f", "#0f380f", "#306230" },
     { "#0f380f", "#306230", "#306230", "#306230", "#0f380f", "#306230", "#306230", "#8bac0f",
-      "#0f380f", "#306230", "#306230", "#306230", "#0f380f", "#306230", "#306230", "#9bbc0f" }, game_boy_given },
-  { "windows-95", "Windows 95", TRUE, "#ffffff", "#c0c0c0", "#000000", "#000080",
+      "#0f380f", "#306230", "#306230", "#306230", "#0f380f", "#306230", "#306230", "#9bbc0f" }, handheld_green_given },
+  { "retro-gray", "Retro Gray", TRUE, "#ffffff", "#c0c0c0", "#000000", "#000080",
     { "#008000", "#000080", "#800080", "#008080", "#800000", "#000000", "#808000", "#800000", "#0000ff", "#ff00ff", "#000000" },
     { "#000000", "#800000", "#008000", "#808000", "#000080", "#800080", "#008080", "#c0c0c0",
-      "#808080", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "#00ffff", "#ffffff" }, windows_95_given },
-  { "matrix", "Matrix (wake up, Neo)", FALSE, "#000000", "#000000", "#00ff41", "#00ff41",
+      "#808080", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "#00ffff", "#ffffff" }, retro_gray_given },
+  { "green-rain", "Green Rain", FALSE, "#000000", "#000000", "#00ff41", "#00ff41",
     { "#008f11", "#00ff41", "#39ff14", "#00d832", "#7cff7c", "#00c82c", "#adffad", "#9aff9a", "#00ff41", "#ccffcc", "#00ff41" },
     { "#000000", "#00aa22", "#00ff41", "#66ff66", "#008f11", "#22cc44", "#33ff77", "#00dd33",
       "#003b00", "#00cc33", "#00ff41", "#99ff99", "#00aa22", "#44ff66", "#66ff99", "#ccffcc" }, NULL },
-  { "barbie", "Barbie", TRUE, "#ffe4f1", "#ffc9e3", "#8b0a50", "#e0218a",
+  { "pink", "Pink", TRUE, "#ffe4f1", "#ffc9e3", "#8b0a50", "#e0218a",
     { "#d87093", "#e0218a", "#ff1493", "#c71585", "#da1884", "#8b0a50", "#ff69b4", "#b03060", "#ff6ec7", "#ff00ff", "#e0218a" },
     { "#8b0a50", "#e0218a", "#da1884", "#ff69b4", "#c71585", "#ff1493", "#ff6ec7", "#ffe4f1",
       "#b03060", "#ff1493", "#ff69b4", "#ffb6c1", "#db7093", "#ff00ff", "#ff77ff", "#ffffff" }, NULL },
-  { "hotdog-stand", "Hotdog Stand (Windows 3.1)", FALSE, "#ff0000", "#cc0000", "#ffffff", "#ffff00",
+  { "hot-red", "Hot Red", FALSE, "#ff0000", "#cc0000", "#ffffff", "#ffff00",
     { "#ffff99", "#ffff00", "#ffff00", "#ffffff", "#ffff00", "#ffffff", "#ffff00", "#ffff66", "#ffff00", "#000000", "#ffff00" },
     { "#000000", "#ffff00", "#ffffff", "#ffff00", "#ffffff", "#ffff00", "#ffffff", "#ffffff",
-      "#000000", "#ffff00", "#ffffff", "#ffff00", "#ffffff", "#ffff00", "#ffffff", "#ffffff" }, hotdog_given },
+      "#000000", "#ffff00", "#ffffff", "#ffff00", "#ffffff", "#ffff00", "#ffffff", "#ffffff" }, hot_red_given },
 };
 /* clang-format on */
 
@@ -387,10 +388,21 @@ static void pal_compute(const Theme *theme)
 
 static const Theme *pal_find(const char *id)
 {
-  if (g_strcmp0(id, "dark-modern") == 0) /* their names before 0.3 */
-    id = "dark-classic";
-  else if (g_strcmp0(id, "light-modern") == 0)
-    id = "light-classic";
+  static const char *const renamed[][2] = {
+    /* themes' ids before 0.3 */
+    { "dark-modern", "dark-classic" },
+    { "light-modern", "light-classic" },
+    { "commodore-64", "8-bit-blue" },
+    { "game-boy", "handheld-green" },
+    { "windows-95", "retro-gray" },
+    { "matrix", "green-rain" },
+    { "barbie", "pink" },
+    { "hotdog-stand", "hot-red" },
+  };
+
+  for (size_t i = 0; id && i < G_N_ELEMENTS(renamed); i++)
+    if (strcmp(id, renamed[i][0]) == 0)
+      id = renamed[i][1];
   for (size_t i = 0; id && i < G_N_ELEMENTS(theme_table); i++)
     if (strcmp(theme_table[i].id, id) == 0)
       return &theme_table[i];
@@ -579,6 +591,11 @@ const GdkRGBA *palette_terminal(void)
 {
   palette_rgba(PAL_FG);
   return pal_terminal;
+}
+
+const char *palette_known_id(const char *id)
+{
+  return pal_find(id)->id;
 }
 
 const char *palette_id(void)

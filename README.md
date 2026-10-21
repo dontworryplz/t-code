@@ -1,6 +1,6 @@
 # <img src="desktop/io.github.tcode.svg" alt="" width="48" align="top"> t-code
 
-A light C/C++ IDE for Linux in one GTK4 window, with VS Code's dark look (Dark Classic) and other color themes.
+A light C/C++ IDE for Linux in one GTK4 window, with a dark look (Dark Classic) and other color themes.
 
 > **Since 0.2 the editor is GtkSourceView.** The editor tabs are no longer terminals running
 > [micro](https://micro-editor.github.io): they are [GtkSourceView 5](https://gitlab.gnome.org/GNOME/gtksourceview)
@@ -24,7 +24,7 @@ One window, one process (besides clangd and your shell):
 ### The editor
 
 Like a plain text editor, without modes: `Ctrl+C` / `Ctrl+V`, `Ctrl+Z`, `Shift`+arrows to select,
-the mouse. On top of that, like VS Code:
+the mouse. On top of that:
 
 - **clangd's problems** are underlined with a wave (red errors, yellow warnings); resting the
   pointer on them shows the message, and on a symbol its type and signature. The status bar counts
@@ -39,7 +39,7 @@ the mouse. On top of that, like VS Code:
   the project's `.clang-format`).
 - **Colors by meaning**: clangd tells functions (yellow), types (teal), macros (blue), constants and
   enum members (bright blue) and variables (light blue) apart; GtkSourceView colors keywords,
-  strings, comments and the rest from VS Code's own theme (`styles/dark-classic.xml`). `.h` files
+  strings, comments and the rest from its theme (`styles/dark-classic.xml`). `.h` files
   open as C++ when they contain C++.
 - Find and replace (`Ctrl+F`, `Ctrl+H`; case, whole word, regular expressions), go to line
   (`Ctrl+G`), comment lines (`Ctrl+/`), duplicate (`Ctrl+D`), move (`Alt+↑` / `Alt+↓`) and delete
@@ -154,7 +154,7 @@ If you want to contribute, all contributions will be gladly accepted. Please ope
 
 ## AI Usage in Project  
 
-Most of the structure and code written with using AI coding agent. Every single line of code is reviewed or currently under review. I did not spend enough time to write just myself because I just want an ide that uses not much ram as immediately as possible, vscode was using too much then I got angry and tada... BUT I will review every detail of this project and after than I will continue to add new features as I wish.
+Most of the structure and code written with using AI coding agent. Every single line of code is reviewed or currently under review. I did not spend enough time to write just myself because I just want an ide that uses not much ram as immediately as possible, the editor I used was using too much then I got angry and tada... BUT I will review every detail of this project and after than I will continue to add new features as I wish.
 
 ## Usage
 
@@ -216,7 +216,7 @@ palette) finds any command by name.
 asks whether to save. A file changed on disk (a `git checkout`, another program) is loaded again
 when the editor has nothing unsaved.
 
-**Status bar**, like VS Code's: the git branch (`*` when there are changes), clangd's errors and
+**Status bar**: the git branch (`*` when there are changes), clangd's errors and
 warnings in the open files, **⚠ No compile flags** when clangd lacks them, **⚙ Build** and
 **▶ Run** with what they would build, the file's indentation (**Spaces: 4**, **Tab Size: 8**), the
 cursor's line and column, and **⌨ Keybinds**.
@@ -234,7 +234,7 @@ building), looking upwards from the current file: a `CMakeLists.txt` is configur
 a `run` target; otherwise the current C or C++ file is compiled on its own (with AddressSanitizer
 and UBSan) into `build/` and run. Ctrl+click a `file.c:12:5` in the compiler's output to go there.
 
-**Git.** The editor marks changed lines in the gutter like VS Code (blue changed, green added, red
+**Git.** The editor marks changed lines in the gutter (blue changed, green added, red
 where lines were deleted), following new commits by itself. **Compare with HEAD** (`Ctrl+Alt+D`)
 and **File History** (`Ctrl+Alt+H`, pick a commit) open one tab ("file ↔ commit") with the file
 on the left and the old version read-only on the right, scrolling together and lined up (also with
@@ -247,7 +247,7 @@ added, untracked, conflicted, ignored) with the letter at the end of the row.
 itself; the git colors follow commits and saves. Files and folders can be cut, copied and pasted
 (a name that is taken gets " copy"), dragged onto a folder (from another file manager they are
 copied), or dragged onto the editors to open them. A new file opens in the editor.
-Like VS Code, a click opens a file in a temporary tab (its name in italics) that the next click
+A click opens a file in a temporary tab (its name in italics) that the next click
 replaces, so browsing does not pile up tabs; editing the file or double-clicking it (in the tree or
 on the tab) keeps it, and a middle click opens it to the side.
 
@@ -264,7 +264,7 @@ Switching remembers and closes the current project's tabs, shows the new folder 
 panel, restarts the shell there, and brings back that folder's tabs from last time. t-code also remembers
 the window size, pane sizes, hidden panes and text size (in `~/.config/t-code/session.ini`).
 
-**Search** (`Ctrl+Shift+F`), a tab next to Files and Source Control, like VS Code's: results
+**Search** (`Ctrl+Shift+F`), a tab next to Files and Source Control: results
 come as you type, grouped by file with the matches marked. **Aa**, **ab** and **.\*** next to the
 text turn on Match Case, Match Whole Word and regular expressions; **⋯** shows "files to include"
 and "files to exclude" (comma separated globs such as `*.c, src`). Click a file to fold its
@@ -372,7 +372,7 @@ src/                 t-code, the window (src/app.h: the shared types and a map o
   files/             the Files panel (files.c): a folder's entries read and watched (folder.c), file
                      operations (fileops.c), git colors (gitmarks.c), file icons (icons.c)
   ipc/               requests from scripts and tools over $TCODE_SOCKET (socket.c)
-styles/              the editor's colors: Dark Classic (VS Code's dark) as a GtkSourceView style scheme
+styles/              the editor's colors: Dark Classic as a GtkSourceView style scheme
 tests/               make test: editing and the find bar, the language server client (with a fake
                      server), detect.c and indentconf.c, linediff.c, searchmatch.c, the Files panel
                      and its GIO half, the Search panel, Source Control, tabs in a whole window and
@@ -391,4 +391,5 @@ Makefile             VERSION, make install; also writes build/compile_commands.j
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The color themes' sources and their licenses are in
+[THIRD-PARTY.md](THIRD-PARTY.md).

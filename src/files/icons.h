@@ -1,6 +1,6 @@
 /*
  * The Files panel's file icons, GLib-only: a Nerd Font glyph (Cascadia Code has none; fontconfig
- * falls back to an installed Nerd Font) and a VS Code-like color, by file name or extension.
+ * falls back to an installed Nerd Font) and a color, by file name or extension.
  */
 #pragma once
 

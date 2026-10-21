@@ -495,7 +495,7 @@ G_DECLARE_FINAL_TYPE(TcodeBreakpointRenderer, tcode_breakpoint_renderer, TCODE, 
                      GtkSourceGutterRenderer)
 G_DEFINE_FINAL_TYPE(TcodeBreakpointRenderer, tcode_breakpoint_renderer, GTK_SOURCE_TYPE_GUTTER_RENDERER)
 
-/* A dot; a conditional breakpoint's has "=" in it, like VS Code's. */
+/* A dot; a conditional breakpoint's has "=" in it. */
 static void draw_dot(GtkSnapshot *snapshot, double y, double height, GdkRGBA color, gboolean conditional)
 {
   double size = MIN(10, height - 4), left = (DOT_WIDTH - size) / 2, top = y + (height - size) / 2;
@@ -512,7 +512,7 @@ static void draw_dot(GtkSnapshot *snapshot, double y, double height, GdkRGBA col
   }
 }
 
-/* VS Code's arrow at the stopped line: a box pointing right. */
+/* The arrow at the stopped line: a box pointing right. */
 static void draw_arrow(GtkSnapshot *snapshot, double y, double height)
 {
   GskPathBuilder *builder = gsk_path_builder_new();
@@ -654,8 +654,7 @@ static void on_ask_activate(GtkEntry *entry, Breakpoints *b)
   gtk_popover_popdown(GTK_POPOVER(b->ask));
 }
 
-/* A right click in the column: a popover asks for the condition the breakpoint on that line stops on,
- * like VS Code's conditional breakpoints. */
+/* A right click in the column: a popover asks for the condition the breakpoint on that line stops on. */
 static void on_right_click(GtkGestureClick *click, int n G_GNUC_UNUSED, double x G_GNUC_UNUSED, double y,
                            Breakpoints *b)
 {

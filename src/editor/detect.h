@@ -6,7 +6,7 @@
 
 #include <glib.h>
 
-/* The indentation text uses, like VS Code's "Detect Indentation": tabs when more lines start with
+/* The indentation text uses: tabs when more lines start with
  * a tab than with spaces; else spaces, in the most common step between neighboring lines' indents
  * (2 to 8; *width stays when there is none). Single spaces (" * " in block comments) and blank lines
  * do not count. FALSE without any indented line: the settings stay. */

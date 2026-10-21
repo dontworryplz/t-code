@@ -36,7 +36,7 @@ static const char *icon_for(gint64 kind)
   }
 }
 
-#define MAX_TEXT 60   /* characters of a name with its parameters in the list, like VS Code's */
+#define MAX_TEXT 60   /* characters of a name with its parameters in the list */
 #define MAX_DETAIL 30 /* characters of the type on the right */
 
 /* text, at most max characters: longer ones end in "…" (a long signature would make the list as
@@ -345,7 +345,7 @@ static void display(GtkSourceCompletionProvider *provider G_GNUC_UNUSED, GtkSour
       char *full = g_strconcat(p->label, p->params, NULL);
       char *text = shorten(full, MAX_TEXT);
       PangoAttrList *attrs = gtk_source_completion_fuzzy_highlight(p->label, word);
-      if (p->params && *p->params) { /* the parameters dimmed, as in VS Code */
+      if (p->params && *p->params) { /* the parameters dimmed */
         PangoAttribute *dim = pango_attr_foreground_alpha_new(0.6 * G_MAXUINT16);
         dim->start_index = strlen(p->label);
         if (!attrs)

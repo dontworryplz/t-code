@@ -6,6 +6,26 @@ Files: *
 Copyright: 2026 suacayipkisi
 License: MIT
 
+Files: src/window/palette.c styles/dark-classic.xml
+Copyright: 2026 suacayipkisi
+ 2015-present Microsoft Corporation
+ 2023 Dracula Theme
+ 2016 GitHub Inc.
+ 2020 Primer
+ 2018-present Enkia
+ 2021 Catppuccin
+ 2016-present Sven Greb
+ 2018 Pavel Pertsev
+ 2011 Ethan Schoonover
+ Konstantin Pschera
+ 2018 Sarah Drasner
+ 2023 Rosé Pine
+ 2019 sainnhe
+ 2021 Tommaso Laurenzi
+Comment: The color themes' values come from these authors' themes; see THIRD-PARTY.md.
+ Monokai's colors are Wimer Hazenberg's, credited there (no license was published for them).
+License: MIT
+
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal

@@ -1,6 +1,6 @@
 /*
- * The Files panel: the project's folder tree (a GtkListView over GtkDirectoryLists), with VS Code's
- * file icons and git colors, a right-click menu (open, open to the side, preview, compare, history,
+ * The Files panel: the project's folder tree (a GtkListView over folder.c's lists), with file icons
+ * and git colors, a right-click menu (open, open to the side, preview, compare, history,
  * new file / folder, cut / copy / paste, copy path, rename, delete, open in terminal) and drag and
  * drop. Only open folders are read and watched; a closed folder's rows are freed.
  */

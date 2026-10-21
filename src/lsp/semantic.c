@@ -39,7 +39,7 @@ typedef enum { KIND_FUNCTION, KIND_TYPE, KIND_MACRO, KIND_CONSTANT, KIND_VARIABL
 static const char *const kind_names[KINDS] = { "function", "type", "macro", "constant", "variable" };
 static const PalColor kind_colors[KINDS] = { PAL_FUNCTION, PAL_TYPE, PAL_KEYWORD, PAL_CONSTANT, PAL_VARIABLE };
 
-/* clangd's token types, VS Code's way; a readonly variable is a constant. */
+/* clangd's token types; a readonly variable is a constant. */
 typedef struct {
   const char *type;
   Kind kind;

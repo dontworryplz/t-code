@@ -1,5 +1,5 @@
 /*
- * VS Code's indent guides, drawn under the text: a line at each indentation level, and the one of
+ * Indent guides, drawn under the text: a line at each indentation level, and the one of
  * the bracket pair around the cursor in its bracket pair color. The editor's view is a GtkSourceView
  * with that one more layer.
  */

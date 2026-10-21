@@ -56,7 +56,7 @@ struct _TcodeDiffRenderer {
 G_DECLARE_FINAL_TYPE(TcodeDiffRenderer, tcode_diff_renderer, TCODE, DIFF_RENDERER, GtkSourceGutterRenderer)
 G_DEFINE_FINAL_TYPE(TcodeDiffRenderer, tcode_diff_renderer, GTK_SOURCE_TYPE_GUTTER_RENDERER)
 
-/* VS Code's editorGutter.addedBackground, .modifiedBackground, .deletedBackground. */
+/* The gutter's added, modified and deleted colors. */
 
 static void snapshot_line(GtkSourceGutterRenderer *renderer, GtkSnapshot *snapshot, GtkSourceGutterLines *lines,
                           guint line)
@@ -334,11 +334,11 @@ static int *line_heights(Tab *tab, const char *text, int *width_out)
   return heights;
 }
 
-/* Marks the changed lines (guides.c tints them) and colors their changed words, like VS Code: green
+/* Marks the changed lines (guides.c tints them) and colors their changed words: green
  * on the new side, red on the old one. */
 static void apply_side_changes(DiffGutter *g, GArray *spans)
 {
-  /* VS Code's diffEditor.insertedTextBackground / removedTextBackground. */
+  /* Inserted and removed text backgrounds. */
   GdkRGBA inserted = *palette_rgba(PAL_DIFF_ADDED), removed = *palette_rgba(PAL_DIFF_DELETED);
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(g->tab->buffer);
   GtkTextTag *words = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(buffer), CHANGED_WORDS);

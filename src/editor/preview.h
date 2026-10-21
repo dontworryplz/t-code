@@ -1,7 +1,7 @@
 /*
  * Markdown preview tabs (Ctrl+Shift+V, or "Open Preview" in the file manager): md4c parses the
- * file and it is shown as styled text in a read-only GtkTextView (no browser engine), looking like
- * VS Code's preview. It follows the file as it is saved.
+ * file and it is shown as styled text in a read-only GtkTextView (no browser engine). It follows
+ * the file as it is saved.
  */
 #pragma once
 

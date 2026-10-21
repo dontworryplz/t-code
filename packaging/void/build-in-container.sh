@@ -32,6 +32,7 @@ test "$(build/t-code --version)" = "t-code $VERSION"
 
 make install DESTDIR="$dest" PREFIX=/usr
 install -Dm644 LICENSE "$dest/usr/share/licenses/t-code/LICENSE"
+install -Dm644 THIRD-PARTY.md "$dest/usr/share/licenses/t-code/THIRD-PARTY.md"
 desktop-file-validate "$dest/usr/share/applications/io.github.tcode.desktop"
 strip --strip-unneeded "$dest/usr/bin/t-code"
 

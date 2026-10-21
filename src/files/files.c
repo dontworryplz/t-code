@@ -156,7 +156,7 @@ static void set_colored(GtkWidget *label, const char *text, const char *color)
   g_free(markup);
 }
 
-/* A git state's color in the color theme (gitmarks.c has VS Code's Dark Classic ones). */
+/* A git state's color in the color theme (gitmarks.c has Dark Classic's). */
 static const char *git_color(char state)
 {
   switch (state) {
@@ -410,7 +410,7 @@ static FileRow *shown_row(const char *path)
 }
 
 /* A small entry next to the row of path (or at the top): then(t, path, answer) on Enter. With
- * select_stem the name before its extension is selected, like VS Code's rename. */
+ * select_stem the name before its extension is selected. */
 static void ask(const char *question, const char *path, const char *initial, gboolean select_stem, AskFunc then)
 {
   FileRow *r = shown_row(path);
@@ -460,7 +460,7 @@ static void create_answered(App *t, const char *dir, const char *name, gboolean 
   reveal(made);
   schedule_git();
   if (!folder && !g_str_has_suffix(name, "/"))
-    open_file(t, made); /* like VS Code */
+    open_file(t, made);
   g_free(made);
 }
 

@@ -1,5 +1,5 @@
 /*
- * Ctrl+P: open a file by typing part of its name, like VS Code's Go to File.
+ * Ctrl+P: open a file by typing part of its name.
  * The file list comes from git when the project is a repository (so .gitignore applies),
  * otherwise from walking the project, skipping hidden folders and build output. It is built
  * on a worker thread; the picker shows the previous list of the same project until then.

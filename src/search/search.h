@@ -1,5 +1,5 @@
 /*
- * The Search panel, the third sidebar page (Ctrl+Shift+F), like VS Code's: text to find (Match
+ * The Search panel, the third sidebar page (Ctrl+Shift+F): text to find (Match
  * Case, Whole Word, Regular Expression), files to include and exclude, and the results grouped by
  * file. ripgrep (or grep) does the work; searchmatch.h holds the part that needs no GTK.
  */

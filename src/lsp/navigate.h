@@ -1,5 +1,5 @@
 /*
- * Moving around the code with the language server, like VS Code: Go to Definition (F12,
+ * Moving around the code with the language server: Go to Definition (F12,
  * Ctrl+click) and back (Alt+Left), Find All References (Shift+F12, in the popup list), Format
  * Document (Shift+Alt+F) and Rename Symbol (F2, in every file it is used in).
  */

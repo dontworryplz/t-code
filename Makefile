@@ -23,7 +23,7 @@ build/t-code: $(APP_SRC) $(APP_HDR) build/license.h Makefile | build
 build/license.h: LICENSE | build
 	sed 's/\\/\\\\/g; s/"/\\"/g; s/.*/"&\\n"/' $< > $@
 
-# How each file is compiled, so clangd (in t-code, VS Code, ...) finds the GTK, VTE and md4c headers.
+# How each file is compiled, so clangd (in t-code or another editor) finds the GTK, VTE and md4c headers.
 build/compile_commands.json: Makefile $(APP_SRC) $(TEST_SRC) | build
 	@( printf '['; sep=; \
 	   for f in $(APP_SRC); do \

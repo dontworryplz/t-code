@@ -5,9 +5,16 @@
  *                  (named after the project, else the newest one that is not a test)
  *   Makefile        make; run uses "make run" when the Makefile has a run target
  *   neither         compile the current C/C++ file alone (with ASan/UBSan) into build/
- * A script (Python, JavaScript, shell, ...: scripts[], or an executable file starting with "#!") is
- * run by its interpreter, before any CMakeLists.txt or Makefile is looked for: a tools/x.py in a C
- * project runs itself, not make. Build checks its syntax when the language has a way to.
+ * Other languages' files look for their own project files only (a tools/x.py in a C project runs
+ * itself, not make; a .py next to a package.json is not npm's):
+ *   .rs             Cargo.toml: cargo run (--bin / --example for src/bin/, examples/), else rustc
+ *   .go             go.mod: go run . in the file's folder
+ *   .js .ts ...     package.json: its start or dev script (npm, pnpm, yarn or bun by the lock file)
+ *   .java .kt       pom.xml: mvn compile, then java on the file's class; build.gradle: gradle run
+ *   .py             from the project's root (pyproject.toml, requirements.txt, a venv...), which goes
+ *                   into PYTHONPATH, with its .venv's or venv's python when it has one
+ * Without one, a script (scripts[], or an executable file starting with "#!") is run by its
+ * interpreter in its folder. Build checks the syntax when the language has a way to.
  * A build for debugging ends with "t-code --send 'debug <program>'" (or "debug-failed <dir>" when it
  * failed): the control socket hands the program to the debugger (for a Makefile, which builds who
  * knows what, the folder: the debugger asks which program, once).
@@ -17,6 +24,7 @@
 #include "debug/debugger.h"
 #include "editor/editor.h"
 #include "editor/tabs.h"
+#include "lsp/json.h"
 #include "window/terminal.h"
 
 #include <stdio.h>
@@ -25,7 +33,19 @@
 #define C_FLAGS "-std=c17 -Wall -Wextra -g -fsanitize=address,undefined"
 #define CXX_FLAGS "-std=c++20 -Wall -Wextra -g -fsanitize=address,undefined"
 
-typedef enum { PROJECT_NONE, PROJECT_CMAKE, PROJECT_MAKE, PROJECT_FILE, PROJECT_SCRIPT } ProjectKind;
+typedef enum {
+  PROJECT_NONE,
+  PROJECT_CMAKE,
+  PROJECT_MAKE,
+  PROJECT_FILE, /* a C / C++ file alone */
+  PROJECT_SCRIPT,
+  PROJECT_RUSTC, /* a Rust file alone */
+  PROJECT_CARGO,
+  PROJECT_GO,
+  PROJECT_NODE,
+  PROJECT_MAVEN,
+  PROJECT_GRADLE,
+} ProjectKind;
 
 typedef enum {
   GOAL_BUILD,
@@ -58,9 +78,17 @@ static const Script scripts[] = {
 
 typedef struct {
   ProjectKind kind;
-  char *root;           /* the folder with CMakeLists.txt / Makefile, or the file itself */
+  char *root;           /* the folder with the project file, or the file itself (FILE, SCRIPT, RUSTC) */
+  const char *file;     /* the current file */
   const Script *script; /* PROJECT_SCRIPT: how it runs */
+  char *python;         /* a Python file's project root, or NULL */
 } Project;
+
+static void project_clear(Project *p)
+{
+  g_free(p->root);
+  g_free(p->python);
+}
 
 /* The nearest directory, from start upwards, that holds one of names. */
 static char *find_up(const char *start, const char *const *names)
@@ -124,21 +152,73 @@ static char *script_program(const Script *script)
   return g_strndup(script->run, strcspn(script->run, " "));
 }
 
-/* What to build: a script runs alone; else CMake or Make from the current file's folder upwards, or
- * else the current file alone. */
+/* Whether file's extension is one of exts. */
+static gboolean has_ext(const char *file, const char *const *exts)
+{
+  const char *name = file ? strrchr(file, '/') : NULL;
+  const char *ext = name ? strrchr(name, '.') : NULL;
+
+  return ext && g_strv_contains(exts, ext);
+}
+
+/* A Python file's project root: the nearest folder upwards with a project file or a venv. */
+static char *python_root(const char *start)
+{
+  static const char *const marks[] = { "pyproject.toml", "setup.py",         "setup.cfg",       "requirements.txt",
+                                       "Pipfile",        ".venv/bin/python", "venv/bin/python", NULL };
+
+  return find_up(start, marks);
+}
+
+/* A file of another language than C / C++ in its project (Cargo, Go, Node, Maven, Gradle); FALSE when
+ * it has none. */
+static gboolean find_language_project(Project *p, const char *start)
+{
+  static const char *const rust[] = { ".rs", NULL }, *const go[] = { ".go", NULL };
+  static const char *const node[] = { ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx", NULL };
+  static const char *const jvm[] = { ".java", ".kt", NULL };
+  static const char *const cargo[] = { "Cargo.toml", NULL }, *const gomod[] = { "go.mod", NULL };
+  static const char *const package[] = { "package.json", NULL }, *const pom[] = { "pom.xml", NULL };
+  static const char *const gradle[] = { "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
+                                        NULL };
+
+  if (has_ext(p->file, rust) && (p->root = find_up(start, cargo)))
+    p->kind = PROJECT_CARGO;
+  else if (has_ext(p->file, go) && (p->root = find_up(start, gomod)))
+    p->kind = PROJECT_GO;
+  else if (has_ext(p->file, node) && (p->root = find_up(start, package)))
+    p->kind = PROJECT_NODE;
+  else if (has_ext(p->file, jvm) && (p->root = find_up(start, pom)))
+    p->kind = PROJECT_MAVEN;
+  else if (has_ext(p->file, jvm) && (p->root = find_up(start, gradle)))
+    p->kind = PROJECT_GRADLE;
+  else if (has_ext(p->file, rust)) {
+    p->kind = PROJECT_RUSTC;
+    p->root = g_strdup(p->file);
+  }
+  return p->kind != PROJECT_NONE;
+}
+
+/* What to build: another language's file in its own project or alone; else CMake or Make from the
+ * current file's folder upwards, or else the current C / C++ file alone. */
 static Project find_project(App *t)
 {
   static const char *const cmake[] = { "CMakeLists.txt", NULL };
   static const char *const make[] = { "Makefile", "makefile", "GNUmakefile", NULL };
+  static const char *const python[] = { ".py", NULL };
   Tab *tab = current_tab(t);
   const char *file = tab && tab->kind == TAB_EDITOR ? tab->path : NULL;
   char *start = file ? g_path_get_dirname(file) : g_strdup(t->project.root);
-  Project p = { PROJECT_NONE, NULL, NULL };
+  Project p = { PROJECT_NONE, NULL, file, NULL, NULL };
   gboolean cxx;
 
-  if ((p.script = script_of(file))) {
+  if (find_language_project(&p, start))
+    ;
+  else if ((p.script = script_of(file))) {
     p.kind = PROJECT_SCRIPT;
     p.root = g_strdup(file);
+    if (has_ext(file, python))
+      p.python = python_root(start);
   } else if ((p.root = find_up(start, cmake)))
     p.kind = PROJECT_CMAKE;
   else if ((p.root = find_up(start, make)))
@@ -263,34 +343,239 @@ static char *file_command(const char *file, Goal goal)
   return cmd;
 }
 
-/* The shell command that runs a script with its interpreter in its folder (Build: checks it). */
-static char *script_command(const char *file, const Script *script, Goal goal)
+/* The project's venv python, or NULL. */
+static char *venv_python(const char *root)
 {
-  char *dir = g_path_get_dirname(file);
-  char *qdir = g_shell_quote(dir), *qfile = g_shell_quote(file);
-  char *program = script->run ? script_program(script) : NULL;
-  char *what, *cmd;
+  static const char *const venvs[] = { ".venv/bin/python", "venv/bin/python", NULL };
 
-  if (goal == GOAL_DEBUG) /* the debugger does not ask (project_is_script) */
+  for (int i = 0; root && venvs[i]; i++) {
+    char *path = g_build_filename(root, venvs[i], NULL);
+    if (g_file_test(path, G_FILE_TEST_IS_EXECUTABLE))
+      return path;
+    g_free(path);
+  }
+  return NULL;
+}
+
+/* what (taken), run only when program is installed. */
+static char *if_installed(const char *program, char *what)
+{
+  char *cmd = g_strdup_printf("if command -v %s >/dev/null 2>&1; then %s; else echo 't-code: %s is not installed'; fi",
+                              program, what, program);
+
+  g_free(what);
+  return cmd;
+}
+
+/* The shell command that runs a script with its interpreter in its folder (Build: checks it). A
+ * Python file runs from its project's root, which goes into PYTHONPATH (its imports of the project's
+ * packages work from any folder), with the project's venv when it has one. */
+static char *script_command(const Project *p, Goal goal)
+{
+  const Script *script = p->script;
+  char *dir = p->python ? g_strdup(p->python) : g_path_get_dirname(p->file);
+  char *qdir = g_shell_quote(dir), *qfile = g_shell_quote(p->file);
+  char *venv = venv_python(p->python), *qvenv = venv ? g_shell_quote(venv) : NULL;
+  char *program = script->run ? script_program(script) : NULL;
+  /* The interpreter and the syntax check, which starts with it: the venv's python replaces it. */
+  char *run = qvenv ? g_strdup(qvenv) : g_strdup(script->run);
+  char *check =
+      script->check && qvenv ? g_strconcat(qvenv, script->check + strlen(script->run), NULL) : g_strdup(script->check);
+  char *path = p->python ? g_strdup_printf("PYTHONPATH=%s${PYTHONPATH:+:$PYTHONPATH} ", qdir) : g_strdup("");
+  char *what;
+
+  if (goal == GOAL_DEBUG) /* the debugger does not ask (project_can_debug) */
     what = g_strdup("echo 't-code: debugging is for C and C++ programs; Ctrl+F5 runs this file'; false");
   else if (goal == GOAL_RUN) /* in a subshell: the shell stays in its own directory */
-    what = script->run ? g_strdup_printf("(cd %s && %s %s)", qdir, script->run, qfile)
+    what = script->run ? g_strdup_printf("(cd %s && %s%s %s)", qdir, path, run, qfile)
                        : g_strdup_printf("(cd %s && %s)", qdir, qfile);
-  else if (script->check)
-    what = g_strdup_printf("(cd %s && %s %s) && echo 't-code: no syntax errors'", qdir, script->check, qfile);
+  else if (check)
+    what = g_strdup_printf("(cd %s && %s %s) && echo 't-code: no syntax errors'", qdir, check, qfile);
   else
     what = g_strdup("echo 't-code: nothing to build, Ctrl+F5 runs this file'");
-  if (program && goal != GOAL_DEBUG) {
-    cmd = g_strdup_printf("if command -v %s >/dev/null 2>&1; then %s; else echo 't-code: %s is not installed'; fi",
-                          program, what, program);
-    g_free(what);
-  } else {
-    cmd = what;
-  }
+  if (program && !venv && goal != GOAL_DEBUG)
+    what = if_installed(program, what);
+  g_free(path);
+  g_free(check);
+  g_free(run);
   g_free(program);
+  g_free(qvenv);
+  g_free(venv);
   g_free(qfile);
   g_free(qdir);
   g_free(dir);
+  return what;
+}
+
+/* A Rust file alone: compiled into build/ next to it (and run in its folder). */
+static char *rustc_command(const char *file, Goal goal)
+{
+  char *dir = g_path_get_dirname(file), *base = g_path_get_basename(file);
+  *strrchr(base, '.') = '\0';
+  char *out_dir = g_build_filename(dir, "build", NULL), *out = g_build_filename(out_dir, base, NULL);
+  char *qdir = g_shell_quote(dir), *qfile = g_shell_quote(file), *qout_dir = g_shell_quote(out_dir);
+  char *qout = g_shell_quote(out);
+  char *cmd = goal == GOAL_RUN ? g_strdup_printf("mkdir -p %s && rustc -g -o %s %s && (cd %s && %s)", qout_dir, qout,
+                                                 qfile, qdir, qout)
+                               : g_strdup_printf("mkdir -p %s && rustc -g -o %s %s", qout_dir, qout, qfile);
+
+  g_free(qout);
+  g_free(qout_dir);
+  g_free(qfile);
+  g_free(qdir);
+  g_free(out);
+  g_free(out_dir);
+  g_free(base);
+  g_free(dir);
+  return if_installed("rustc", cmd);
+}
+
+/* Cargo's target for a file: "--bin name" in src/bin/, "--example name" in examples/, else "". */
+static char *cargo_target(const char *root, const char *file)
+{
+  char *bin = g_build_filename(root, "src", "bin", NULL), *examples = g_build_filename(root, "examples", NULL);
+  char *dir = g_path_get_dirname(file), *base = g_path_get_basename(file), *target = NULL;
+  gboolean in_bin = g_str_has_prefix(file, bin) && file[strlen(bin)] == '/';
+  gboolean in_examples = g_str_has_prefix(file, examples) && file[strlen(examples)] == '/';
+
+  *strrchr(base, '.') = '\0';
+  if (in_bin || in_examples) {
+    /* src/bin/name.rs, or src/bin/name/main.rs */
+    char *name = strcmp(base, "main") == 0 && strcmp(dir, in_bin ? bin : examples) != 0 ? g_path_get_basename(dir)
+                                                                                        : g_strdup(base);
+    char *quoted = g_shell_quote(name);
+    target = g_strdup_printf(" %s %s", in_bin ? "--bin" : "--example", quoted);
+    g_free(quoted);
+    g_free(name);
+  }
+  g_free(base);
+  g_free(dir);
+  g_free(examples);
+  g_free(bin);
+  return target ? target : g_strdup("");
+}
+
+/* The Node package manager the project uses, by its lock file. */
+static const char *node_manager(const char *root)
+{
+  static const char *const locks[][2] = {
+    { "pnpm-lock.yaml", "pnpm" }, { "yarn.lock", "yarn" }, { "bun.lock", "bun" }, { "bun.lockb", "bun" }
+  };
+
+  for (size_t i = 0; i < G_N_ELEMENTS(locks); i++) {
+    char *path = g_build_filename(root, locks[i][0], NULL);
+    gboolean found = g_file_test(path, G_FILE_TEST_EXISTS);
+    g_free(path);
+    if (found)
+      return locks[i][1];
+  }
+  return "npm";
+}
+
+/* The first of names that package.json's "scripts" has, or NULL. */
+static const char *node_script(const char *root, const char *const *names)
+{
+  char *path = g_build_filename(root, "package.json", NULL);
+  JsonParser *parser = json_parser_new();
+  const char *found = NULL;
+
+  if (json_parser_load_from_file(parser, path, NULL)) {
+    JsonNode *scripts = json_at(json_parser_get_root(parser), "scripts");
+    JsonObject *object = scripts && JSON_NODE_HOLDS_OBJECT(scripts) ? json_node_get_object(scripts) : NULL;
+    for (int i = 0; object && names[i] && !found; i++)
+      if (json_object_has_member(object, names[i]))
+        found = names[i];
+  }
+  g_object_unref(parser);
+  g_free(path);
+  return found;
+}
+
+/* A Java class's full name from its package line and file name ("com.example.App"). */
+static char *java_class(const char *file)
+{
+  char *text = NULL, *base = g_path_get_basename(file), *name;
+  GMatchInfo *match = NULL;
+  static GRegex *package;
+
+  *strrchr(base, '.') = '\0';
+  if (!package)
+    package = g_regex_new("^\\s*package\\s+([\\w.]+)\\s*;", G_REGEX_MULTILINE, 0, NULL);
+  if (g_file_get_contents(file, &text, NULL, NULL) && g_regex_match(package, text, 0, &match)) {
+    char *dotted = g_match_info_fetch(match, 1);
+    name = g_strdup_printf("%s.%s", dotted, base);
+    g_free(dotted);
+  } else {
+    name = g_strdup(base);
+  }
+  g_match_info_free(match);
+  g_free(text);
+  g_free(base);
+  return name;
+}
+
+/* The shell command for another language's project: Cargo, Go, Node, Maven or Gradle. */
+static char *language_command(const Project *p, Goal goal)
+{
+  static const char *const starts[] = { "start", "dev", NULL }, *const builds[] = { "build", NULL };
+  char *qroot = g_shell_quote(p->root), *dir = g_path_get_dirname(p->file), *qdir = g_shell_quote(dir);
+  char *qfile = g_shell_quote(p->file), *cmd = NULL;
+  const char *program = NULL;
+
+  switch (p->kind) {
+    case PROJECT_CARGO: {
+      char *target = cargo_target(p->root, p->file);
+      program = "cargo";
+      cmd = g_strdup_printf("(cd %s && cargo %s%s)", qroot, goal == GOAL_RUN ? "run" : "build", target);
+      g_free(target);
+      break;
+    }
+    case PROJECT_GO: /* the file's package, which go finds the module of */
+      program = "go";
+      cmd = g_strdup_printf("(cd %s && go %s .)", qdir, goal == GOAL_RUN ? "run" : "vet");
+      break;
+    case PROJECT_NODE: {
+      const char *manager = node_manager(p->root), *script = node_script(p->root, goal == GOAL_RUN ? starts : builds);
+      program = manager;
+      if (script)
+        cmd = g_strdup_printf("(cd %s && %s run %s)", qroot, manager, script);
+      else if (goal == GOAL_RUN) { /* no start script: the file itself */
+        program = "node";
+        cmd = g_strdup_printf("(cd %s && node %s)", qroot, qfile);
+      } else
+        cmd = g_strdup("echo 't-code: no build script in package.json'");
+      break;
+    }
+    case PROJECT_MAVEN: {
+      char *class = java_class(p->file), *qclass = g_shell_quote(class);
+      program = "mvn";
+      cmd = goal == GOAL_RUN ? g_strdup_printf("(cd %s && mvn -q compile && java -cp target/classes %s)", qroot, qclass)
+                             : g_strdup_printf("(cd %s && mvn -q compile)", qroot);
+      g_free(qclass);
+      g_free(class);
+      break;
+    }
+    case PROJECT_GRADLE: {
+      char *wrapper = g_build_filename(p->root, "gradlew", NULL);
+      gboolean own = g_file_test(wrapper, G_FILE_TEST_IS_EXECUTABLE);
+      program = own ? NULL : "gradle";
+      cmd =
+          g_strdup_printf("(cd %s && %s %s)", qroot, own ? "./gradlew" : "gradle", goal == GOAL_RUN ? "run" : "build");
+      g_free(wrapper);
+      break;
+    }
+    default: break;
+  }
+  if (goal == GOAL_DEBUG) {
+    g_free(cmd);
+    cmd = g_strdup("echo 't-code: debugging is for C and C++ programs; Ctrl+F5 runs this file'; false");
+  } else if (program) {
+    cmd = if_installed(program, cmd);
+  }
+  g_free(qfile);
+  g_free(qdir);
+  g_free(dir);
+  g_free(qroot);
   return cmd;
 }
 
@@ -304,16 +589,24 @@ char *project_summary(App *t)
     case PROJECT_CMAKE: text = g_strdup_printf("CMake: %s", name); break;
     case PROJECT_MAKE: text = g_strdup_printf("Make: %s", name); break;
     case PROJECT_FILE: text = g_strdup_printf("gcc: %s", name); break;
+    case PROJECT_RUSTC: text = g_strdup_printf("rustc: %s", name); break;
+    case PROJECT_CARGO: text = g_strdup_printf("Cargo: %s", name); break;
+    case PROJECT_GO: text = g_strdup_printf("Go: %s", name); break;
+    case PROJECT_NODE: text = g_strdup_printf("%s: %s", node_manager(p.root), name); break;
+    case PROJECT_MAVEN: text = g_strdup_printf("Maven: %s", name); break;
+    case PROJECT_GRADLE: text = g_strdup_printf("Gradle: %s", name); break;
     case PROJECT_SCRIPT: {
-      char *program = p.script->run ? script_program(p.script) : g_strdup("Run");
+      char *venv = venv_python(p.python);
+      char *program = venv ? g_strdup("python (venv)") : p.script->run ? script_program(p.script) : g_strdup("Run");
       text = g_strdup_printf("%s: %s", program, name);
       g_free(program);
+      g_free(venv);
       break;
     }
     default: text = g_strdup("Nothing to build"); break;
   }
   g_free(name);
-  g_free(p.root);
+  project_clear(&p);
   return text;
 }
 
@@ -360,16 +653,22 @@ static char *goal_command(App *t, Goal goal, char **cwd)
     case PROJECT_CMAKE: command = cmake_command(p.root, goal); break;
     case PROJECT_MAKE: command = make_command(p.root, goal); break;
     case PROJECT_FILE: command = file_command(p.root, goal); break;
-    case PROJECT_SCRIPT: command = script_command(p.root, p.script, goal); break;
+    case PROJECT_SCRIPT: command = script_command(&p, goal); break;
+    case PROJECT_RUSTC: command = rustc_command(p.root, goal); break;
+    case PROJECT_CARGO:
+    case PROJECT_GO:
+    case PROJECT_NODE:
+    case PROJECT_MAVEN:
+    case PROJECT_GRADLE: command = language_command(&p, goal); break;
     default:
       command = g_strdup("echo 't-code: nothing to build here (open a C file, or add a Makefile or CMakeLists.txt)'");
       break;
   }
+  gboolean alone = p.kind == PROJECT_FILE || p.kind == PROJECT_SCRIPT || p.kind == PROJECT_RUSTC; /* root: the file */
   if (cwd) /* the file's folder, as run does; the project's otherwise */
-    *cwd = p.kind == PROJECT_FILE || p.kind == PROJECT_SCRIPT ? g_path_get_dirname(p.root)
-                                                              : g_strdup(p.root ? p.root : t->project.root);
+    *cwd = alone ? g_path_get_dirname(p.root) : g_strdup(p.root ? p.root : t->project.root);
   if (goal == GOAL_DEBUG && p.kind != PROJECT_NONE) { /* a failed build says so: the debugger stops waiting */
-    char *dir = p.kind == PROJECT_FILE ? g_path_get_dirname(p.root) : g_strdup(p.root);
+    char *dir = alone ? g_path_get_dirname(p.root) : g_strdup(p.root);
     char *qdir = g_shell_quote(dir), *failed = send_verb("debug-failed", qdir);
     char *with_failed = g_strdup_printf("%s || %s", command, failed);
     g_free(command);
@@ -378,7 +677,7 @@ static char *goal_command(App *t, Goal goal, char **cwd)
     g_free(qdir);
     g_free(dir);
   }
-  g_free(p.root);
+  project_clear(&p);
   return command;
 }
 
@@ -387,12 +686,13 @@ char *project_command(App *t, gboolean run)
   return goal_command(t, run ? GOAL_RUN : GOAL_BUILD, NULL);
 }
 
-gboolean project_is_script(App *t)
+gboolean project_can_debug(App *t)
 {
   Project p = find_project(t);
+  gboolean c = p.kind == PROJECT_NONE || p.kind == PROJECT_CMAKE || p.kind == PROJECT_MAKE || p.kind == PROJECT_FILE;
 
-  g_free(p.root);
-  return p.kind == PROJECT_SCRIPT;
+  project_clear(&p);
+  return c;
 }
 
 void build_project(App *t, gboolean run)

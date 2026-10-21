@@ -1,8 +1,8 @@
 #define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 /*
  * Tests for how tabs open and close, in a whole t-code window (every module but main.c) on a
- * temporary project with a temporary config: temporary tabs (a click in the Files panel, VS Code's
- * preview editor), comparisons in one tab, the first run's layout and fonts, the files edited by
+ * temporary project with a temporary config: temporary tabs (a click in the Files panel),
+ * comparisons in one tab, the first run's layout and fonts, the files edited by
  * hand, debugging with gdb. Needs a display; skipped without one.
  */
 #include "editor/editor.h"
@@ -653,7 +653,7 @@ static void test_run_scripts(void)
   g_assert_true(g_file_set_contents(c, "int main(void) { return 0; }\n", -1, NULL));
 
   command = command_for(py, TRUE);
-  g_assert_true(project_is_script(&app));
+  g_assert_false(project_can_debug(&app));
   summary = project_summary(&app);
   g_assert_cmpstr(summary, ==, "python3: it's.py");
   g_free(summary);
@@ -681,7 +681,7 @@ static void test_run_scripts(void)
   g_free(command);
 
   command = command_for(c, TRUE);
-  g_assert_false(project_is_script(&app));
+  g_assert_true(project_can_debug(&app));
   g_assert_nonnull(strstr(command, "make"));
   g_free(command);
 
@@ -696,6 +696,105 @@ static void test_run_scripts(void)
   g_free(py);
   g_free(makefile);
   g_free(dir);
+}
+
+/* Writes text to root/name, making its folders (mode: its permissions). */
+static char *put(const char *root, const char *name, const char *text, int mode)
+{
+  char *path = g_build_filename(root, name, NULL), *dir = g_path_get_dirname(path);
+
+  g_mkdir_with_parents(dir, 0755);
+  g_assert_true(g_file_set_contents(path, text, -1, NULL));
+  g_chmod(path, mode);
+  g_free(dir);
+  return path;
+}
+
+/* Whether Run's command for path contains part (and, when program is installed, what running it
+ * prints contains output). */
+static void check_run(const char *path, const char *part, const char *program, const char *output)
+{
+  char *command = command_for(path, TRUE), *found = program ? g_find_program_in_path(program) : NULL;
+
+  g_assert_false(project_can_debug(&app));
+  if (!strstr(command, part))
+    g_error("%s: no \"%s\" in: %s", path, part, command);
+  if (found && output) {
+    char *out = shell_output(command);
+    if (!strstr(out, output))
+      g_error("%s printed \"%s\", not \"%s\"", command, out, output);
+    g_free(out);
+  }
+  g_free(found);
+  g_free(command);
+}
+
+/* Other languages' files run in their own projects: Python from its root (its packages import, its
+ * venv's python), Node's start script, Cargo's binary, Go's package, Maven's class, Gradle's wrapper. */
+static void test_run_projects(void)
+{
+  char *root = g_build_filename(app.project.root, "run projects", NULL), *path, *summary;
+  char *py = g_build_filename(root, "py", NULL), *node = g_build_filename(root, "node", NULL);
+  char *cargo = g_build_filename(root, "cargo", NULL), *other = g_build_filename(root, "other", NULL);
+
+  g_free(put(py, "pyproject.toml", "[project]\nname = \"demo\"\n", 0644));
+  g_free(put(py, "mypkg/__init__.py", "", 0644));
+  g_free(put(py, "mypkg/util.py", "NAME = 'util'\n", 0644));
+  path = put(py, "scripts/main.py",
+             "import os\nfrom mypkg import util\nprint(util.NAME, os.path.basename(os.getcwd()))\n", 0644);
+  check_run(path, "PYTHONPATH=", "python3", "util py\n"); /* from the root, its package found */
+  g_free(put(py, ".venv/bin/python", "#!/bin/sh\necho venv python\n", 0755));
+  check_run(path, ".venv/bin/python", "sh", "venv python\n");
+  summary = project_summary(&app);
+  g_assert_cmpstr(summary, ==, "python (venv): main.py");
+  g_free(summary);
+  g_free(path);
+
+  g_free(put(node, "package.json", "{ \"scripts\": { \"start\": \"node index.js\" } }\n", 0644));
+  g_free(put(node, "index.js", "console.log('started')\n", 0644));
+  path = put(node, "lib/util.js", "module.exports = 1\n", 0644); /* not the program: the start script runs */
+  check_run(path, "npm run start", "npm", "started\n");
+  g_free(put(node, "pnpm-lock.yaml", "", 0644));
+  check_run(path, "pnpm run start", NULL, NULL);
+  g_free(path);
+  path = put(other, "plain/package.json", "{ \"name\": \"plain\" }\n", 0644);
+  g_free(path);
+  path = put(other, "plain/tool.js", "console.log('tool')\n", 0644); /* no start script: the file */
+  check_run(path, "node ", "node", "tool\n");
+  g_free(path);
+
+  g_free(put(cargo, "Cargo.toml", "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n", 0644));
+  g_free(put(cargo, "src/main.rs", "fn main() { println!(\"main ran\"); }\n", 0644));
+  path = put(cargo, "src/bin/other.rs", "fn main() { println!(\"other ran\"); }\n", 0644);
+  check_run(path, "cargo run --bin 'other'", "cargo", "other ran\n");
+  g_free(path);
+  path = put(other, "alone.rs", "fn main() { println!(\"alone ran\"); }\n", 0644);
+  check_run(path, "rustc", "rustc", "alone ran\n");
+  g_free(path);
+
+  g_free(put(other, "go/go.mod", "module demo\n\ngo 1.22\n", 0644));
+  path = put(other, "go/cmd/demo/main.go", "package main\n\nfunc main() {}\n", 0644);
+  check_run(path, "go run .", NULL, NULL);
+  g_free(path);
+  g_free(put(other, "maven/pom.xml", "<project/>\n", 0644));
+  path = put(other, "maven/src/main/java/com/example/App.java", "package com.example;\n\npublic class App {}\n", 0644);
+  check_run(path, "java -cp target/classes 'com.example.App'", NULL, NULL);
+  g_free(path);
+  g_free(put(other, "gradle/build.gradle", "", 0644));
+  g_free(put(other, "gradle/gradlew", "#!/bin/sh\n", 0755));
+  path = put(other, "gradle/src/main/java/App.java", "public class App {}\n", 0644);
+  check_run(path, "./gradlew run", NULL, NULL);
+  g_free(path);
+
+  close_all_tabs(&app);
+  run(100);
+  char *argv[] = { "rm", "-rf", root, NULL };
+  g_assert_true(g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, NULL, NULL));
+  g_free(other);
+  g_free(cargo);
+  g_free(node);
+  g_free(py);
+  g_free(root);
 }
 
 /* The text in the preview's buffer from where needle starts. */
@@ -714,7 +813,7 @@ static gboolean has_tag(GtkTextIter *iter, const char *name)
       iter, gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(gtk_text_iter_get_buffer(iter)), name));
 }
 
-/* The Markdown preview looks like VS Code's: quotes are not italic, <sub> text is smaller, a link is
+/* The Markdown preview looks: quotes are not italic, <sub> text is smaller, a link is
  * underlined only under the pointer, and nothing scrolls sideways. */
 static void test_preview_look(void)
 {
@@ -1292,6 +1391,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/theme-current-line", test_theme_current_line);
   g_test_add_func("/window/preview-look", test_preview_look);
   g_test_add_func("/window/run-scripts", test_run_scripts);
+  g_test_add_func("/window/run-projects", test_run_projects);
   g_test_add_func("/window/debugging", test_debugging);
   g_test_add_func("/window/debugging-conditions", test_debugging_conditions);
   g_test_add_func("/window/disassembly", test_disassembly);

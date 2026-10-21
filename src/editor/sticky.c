@@ -13,7 +13,7 @@
 
 #include <string.h>
 
-#define STICKY_LINES 5  /* VS Code's editor.stickyScroll.maxLineCount */
+#define STICKY_LINES 5  /* block heads shown at most */
 #define STICKY_SHADOW 4 /* pixels of shadow under them */
 
 struct Sticky {
@@ -239,7 +239,7 @@ static void snapshot_sticky(GtkWidget *widget, GtkSnapshot *snapshot)
     gtk_snapshot_pop(snapshot);
     g_object_unref(layout);
   }
-  /* VS Code's line under them, and a shadow fading into the text. */
+  /* A line under them, and a shadow fading into the text. */
   gtk_snapshot_append_color(snapshot, line, &GRAPHENE_RECT_INIT(0, s->count * s->row - 1, width, 1));
   GskColorStop stops[] = { { 0, { 0, 0, 0, 0.45f } }, { 1, { 0, 0, 0, 0 } } };
   gtk_snapshot_append_linear_gradient(snapshot, &GRAPHENE_RECT_INIT(0, s->count * s->row, width, STICKY_SHADOW),

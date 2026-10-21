@@ -1,5 +1,5 @@
 /*
- * What shows when the pointer rests on code, like VS Code's hover: the problems there (in their
+ * What shows when the pointer rests on code: the problems there (in their
  * colors) and what the language server says about the symbol (its type, signature, comment).
  */
 #pragma once

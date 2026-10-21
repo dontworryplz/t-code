@@ -1,5 +1,5 @@
 /*
- * Markdown preview (Ctrl+Shift+V, or "Open Preview" in the file manager), styled like VS Code's.
+ * Markdown preview (Ctrl+Shift+V, or "Open Preview" in the file manager).
  * md4c parses the file (GitHub flavor: tables, task lists, strikethrough, autolinks) and its blocks
  * and spans become text with tags in one read-only GtkTextView: no browser engine, so a preview
  * costs about what its text does. Code blocks are colored with GtkSourceView's language definitions
@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BODY_POINTS 10.5      /* the text at text size 1: 14 px, as VS Code's preview */
+#define BODY_POINTS 10.5      /* the text at text size 1: 14 px */
 #define MARGIN 32             /* minimum pixels left and right of the text */
 #define MAX_CONTENT_WIDTH 840 /* maximum comfortable reading width */
 #define INDENT 24             /* pixels per list or quote level */
@@ -483,7 +483,7 @@ static void fill(GtkSnapshot *snapshot, const GdkRGBA *color, float x, float y, 
 }
 
 /* Quotes (a bar and a light background), code blocks (a box), the line under h1 and h2 and horizontal
- * rules, as VS Code draws them: within the text's column, not to the view's edge. */
+ * rules: within the text's column, not to the view's edge. */
 static void draw_blocks(GtkTextView *view, Preview *p, GtkSnapshot *snapshot, int first_line, int last_line)
 {
   int margin = side_margin(p, p->width), right = p->width - margin;
@@ -540,7 +540,7 @@ static void draw_code_spans(GtkTextView *view, Preview *p, GtkSnapshot *snapshot
         row.width = at.x + at.width - row.x;
         continue;
       }
-      if (row.width > 0) /* a little above and below the letters, like VS Code */
+      if (row.width > 0) /* a little above and below the letters */
         fill(snapshot, &bg, row.x, row.y - 2, row.width, row.height + 4, 4);
       row = at;
     }
@@ -1484,7 +1484,7 @@ static void on_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press, double
   }
 }
 
-/* Underlines the link at index (-1: none) and only it, as VS Code does under the pointer. */
+/* Underlines the link at index (-1: none) and only it: the one under the pointer. */
 static void hover_link(Preview *p, int index)
 {
   GtkTextIter from, to;

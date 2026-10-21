@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  t-code's "Dark Classic" (VS Code's dark look) for GtkSourceView. The code colors come from VS Code's dark_plus theme;
-  comments, control flow and type keywords are italic, like the user's VS Code. clangd's semantic
+  t-code's "Dark Classic" for GtkSourceView. Comments, control flow and type keywords are italic. clangd's semantic
   colors (functions, types, macros by meaning) come on top of these from the language server.
 -->
 <style-scheme id="t-code-dark-classic" name="Dark Classic (t-code)" version="1.0">

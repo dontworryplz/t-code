@@ -19,7 +19,7 @@
 #include "project/session.h"
 #include "window/statusbar.h"
 
-#define AUTOSAVE_MS 1000  /* after the last change, like VS Code's "afterDelay" */
+#define AUTOSAVE_MS 1000  /* after the last change */
 #define RELOAD_MS 200     /* a burst of changes on disk is looked at once */
 #define SNIFF_BYTES 65536 /* the start of a file, enough to tell its language and indentation */
 
@@ -48,7 +48,7 @@ static char *disk_etag(const char *path)
 /* The save conflict ---------------------------------------------------------------------------- */
 
 /* The file changed on disk while the editor has changes of its own: neither side is thrown away
- * until the user says which (VS Code's "Overwrite / Revert / Compare"). */
+ * until the user says which (Overwrite / Reload / Compare). */
 static void hide_conflict(Tab *tab)
 {
   if (tab->view->conflict)
@@ -113,7 +113,7 @@ gboolean editor_in_conflict(Tab *tab)
 
 /* Following the cursor and the changes ------------------------------------------------------- */
 
-/* The cursor's line and column for the status bar (the column with tabs expanded, like VS Code's). */
+/* The cursor's line and column for the status bar (the column with tabs expanded). */
 static void update_position(Tab *tab)
 {
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);

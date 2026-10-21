@@ -40,7 +40,7 @@ static const char *const css =
     ".tcode-editor .tcode-overview { border-left: 1px solid var(--tc-border); }"
     ".tcode-conflict { background: var(--tc-warning-bg); color: var(--tc-fg); padding: 4px 8px; border-bottom: 1px solid var(--tc-warning-border); }"
     ".tcode-conflict button { padding: 2px 10px; min-height: 0; }"
-    /* Completion: square and compact like VS Code's suggest widget, not GtkSourceView's rounded
+    /* Completion: square and compact, not GtkSourceView's rounded
      * list of 28px rows. */
     "GtkSourceAssistant.completion { border-radius: 0; background: var(--tc-raised);"
     "  box-shadow: 0 0 0 1px var(--tc-border-strong), 0 2px 8px rgba(0, 0, 0, .36); outline: none; }"
@@ -58,7 +58,7 @@ static const char *const css =
     "GtkSourceAssistant.completion list row cell.after { margin: 0 8px 0 24px; opacity: .6; }"
     "GtkSourceAssistant.completion box.details { background: var(--tc-raised); border-top: 1px solid var(--tc-border-strong); }";
 
-#define OVERVIEW_WIDTH 8 /* pixels, like VS Code's overview ruler */
+#define OVERVIEW_WIDTH 8 /* pixels */
 
 static GtkCssProvider *font_provider; /* the editor font; editor_view_set_font() rewrites it */
 

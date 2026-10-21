@@ -18,6 +18,7 @@
 #include "editor/tabs.h"
 #include "files/opentabs.h"
 #include "git/scm.h"
+#include "window/palette.h"
 #include "window/secondwindow.h"
 #include "window/terminal.h"
 #include "window/window.h"
@@ -138,6 +139,8 @@ void session_load_settings(App *t)
   t->settings.color_theme = g_key_file_get_string(kf, "settings", "color-theme", NULL);
   if (!t->settings.color_theme || !*g_strstrip(t->settings.color_theme))
     g_set_str(&t->settings.color_theme, "dark-classic");
+  else /* a renamed theme's old id */
+    g_set_str(&t->settings.color_theme, palette_known_id(t->settings.color_theme));
   t->plain = !get_bool(kf, "settings", "code-coloring", TRUE);
   g_free(t->settings.font);
   g_free(t->settings.files_font);

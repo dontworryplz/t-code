@@ -1,5 +1,5 @@
 /*
- * The Run and Debug panel, VS Code's, while a program is paused:
+ * The Run and Debug panel, while a program is paused:
  *   Variables   the paused function's arguments and local variables with their values; arrays,
  *               structs and pointers open like folders; a value that changed since the last pause is
  *               colored

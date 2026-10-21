@@ -15,7 +15,7 @@ static gboolean editable(Tab *tab)
 /* Lines ------------------------------------------------------------------------------------- */
 
 /* The lines the selection touches (the cursor's alone without one). A selection that ends at a
- * line's start leaves that line out, like VS Code. */
+ * line's start leaves that line out. */
 static void selected_lines(GtkTextBuffer *buffer, int *first, int *last)
 {
   GtkTextIter start, end;
@@ -178,7 +178,7 @@ void editor_duplicate_lines(Tab *tab)
   gtk_text_buffer_insert(buffer, &end, copy, -1);
   gtk_text_buffer_end_user_action(buffer);
 
-  /* The selection moves to the copy, like VS Code's "Copy Line Down". */
+  /* The selection moves to the copy. */
   int lines = last - first + 1;
   gtk_text_buffer_get_iter_at_line_offset(buffer, &cursor, cursor_line + lines, cursor_offset);
   gtk_text_buffer_get_iter_at_line_offset(buffer, &bound, bound_line + lines, bound_offset);
@@ -305,8 +305,8 @@ static gboolean delete_pair(Tab *tab)
   return TRUE;
 }
 
-/* Whether a closer may follow here: before blanks, the line's end or other closers, like VS Code's
- * "beforeWhitespace" (so "(" before a word types just "("). */
+/* Whether a closer may follow here: before blanks, the line's end or other closers (so "(" before a
+ * word types just "("). */
 static gboolean closer_fits(const GtkTextIter *cursor)
 {
   gunichar next = gtk_text_iter_get_char(cursor);
@@ -442,7 +442,7 @@ static gboolean enter_after_open(Tab *tab)
   return TRUE;
 }
 
-/* "}" typed on a line of blanks only: one level of indentation less first, like VS Code. */
+/* "}" typed on a line of blanks only: one level of indentation less first. */
 static void outdent_brace(Tab *tab)
 {
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);

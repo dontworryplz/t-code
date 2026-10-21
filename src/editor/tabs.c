@@ -255,7 +255,7 @@ static void on_tab_middle_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_pr
   close_tab(tab);
 }
 
-/* A click on a tab shows it; a double click on a temporary one keeps it, like in VS Code. */
+/* A click on a tab shows it; a double click on a temporary one keeps it. */
 static void on_tab_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press, double x G_GNUC_UNUSED,
                          double y G_GNUC_UNUSED, Tab *tab)
 {

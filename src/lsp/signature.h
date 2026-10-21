@@ -1,5 +1,5 @@
 /*
- * The parameter hint, like VS Code's: while the cursor is in a call's arguments, the function's
+ * The parameter hint: while the cursor is in a call's arguments, the function's
  * signature shows above it with the argument being typed in bold, and its documentation. It opens on
  * "(" and ",", follows the typing, and closes outside the call or on Escape.
  */

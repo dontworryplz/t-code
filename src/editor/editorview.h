@@ -85,7 +85,7 @@ void editor_view_set_font(App *t);
 void editor_view_show_problems(Tab *tab);
 
 /* Brings the cursor into view: when it is outside, the view scrolls to have it in the middle
- * (vertically; sideways only as far as needed), like VS Code's jumps. */
+ * (vertically; sideways only as far as needed). */
 void editor_view_reveal_cursor(Tab *tab);
 
 /* The language for path, from its name and text (a .h with C++ in it is C++). NULL: plain text. */
