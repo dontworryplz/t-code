@@ -885,6 +885,20 @@ static void test_preview_look(void)
   g_free(path);
 }
 
+/* A renamed theme's old id (in a settings.ini from before) gives its new one. */
+static void test_theme_renamed(void)
+{
+  g_assert_cmpstr(palette_known_id("barbie"), ==, "pink");
+  g_assert_cmpstr(palette_known_id("windows-95"), ==, "retro-gray");
+  g_assert_cmpstr(palette_known_id("hotdog-stand"), ==, "hot-red");
+  g_assert_cmpstr(palette_known_id("game-boy"), ==, "handheld-green");
+  g_assert_cmpstr(palette_known_id("commodore-64"), ==, "8-bit-blue");
+  g_assert_cmpstr(palette_known_id("matrix"), ==, "green-rain");
+  g_assert_cmpstr(palette_known_id("dark-modern"), ==, "dark-classic");
+  g_assert_cmpstr(palette_known_id("dracula"), ==, "dracula");
+  g_assert_cmpstr(palette_known_id("no-such-theme"), ==, "dark-classic");
+}
+
 /* Every theme's editor scheme gets the theme's current line color (its key was misspelled once, so
  * every theme but Dark Classic kept Dark Classic's). */
 static void test_theme_current_line(void)
@@ -1389,6 +1403,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/open-tabs", test_open_tabs);
   g_test_add_func("/window/theme-preview", test_theme_preview);
   g_test_add_func("/window/theme-current-line", test_theme_current_line);
+  g_test_add_func("/window/theme-renamed", test_theme_renamed);
   g_test_add_func("/window/preview-look", test_preview_look);
   g_test_add_func("/window/run-scripts", test_run_scripts);
   g_test_add_func("/window/run-projects", test_run_projects);
