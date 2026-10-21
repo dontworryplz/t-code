@@ -6,8 +6,8 @@
  *   Makefile        make; run uses "make run" when the Makefile has a run target
  *   neither         compile the current C/C++ file alone (with ASan/UBSan) into build/
  * A build for debugging ends with "t-code --send 'debug <program>'" (or "debug-failed <dir>" when it
- * failed): the control socket hands the program to the debugger (for a Makefile, which builds who knows what, the folder: the debugger
- * asks which program, once).
+ * failed): the control socket hands the program to the debugger (for a Makefile, which builds who
+ * knows what, the folder: the debugger asks which program, once).
  */
 #include "project/run.h"
 

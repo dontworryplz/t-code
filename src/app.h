@@ -142,7 +142,7 @@ struct App {
 
   /* debugging */
   struct {
-    GHashTable *breakpoints; /* path -> GArray of line numbers, 1-based and ascending (editor/breakpoints.c) */
+    GHashTable *breakpoints; /* path -> GArray of Breakpoint, by line (editor/breakpoints.h) */
     char *stop_path;         /* where the program is stopped (its innermost frame with a file), or NULL */
     int stop_line;
     char *disassembly;    /* the Disassembly View's file (debug/disassembly.c), or NULL */
@@ -151,6 +151,7 @@ struct App {
     GtkWidget *panel;  /* the Debug panel: its buttons over the program's terminal */
     VteTerminal *term; /* the program's terminal */
   } debug;
+  
   double font_scale;
   gboolean closing;
   gboolean plain; /* syntax coloring off (F7) */

@@ -1,10 +1,11 @@
 /*
  * The Run and Debug panel (see debugview.h). A pause asks gdb for the shown frame's scopes, then each
- * scope's variables (Arguments, then Locals; not Registers); a variable with a variablesReference has
- * children, asked for when its row is shown, and at once when gdb gave no value for it (an array, a
- * struct): its value is then made from theirs, "{70, 85, 90}". Watch expressions are evaluated in the
- * shown frame at each pause (evaluate, context "watch") and become rows the same way. Every answer
- * carries the pause it was asked in (generation): answers from before a step are dropped.
+ * scope's variables (Arguments, then Locals, then Registers as one closed row); a variable with a
+ * variablesReference has children, asked for when its row is shown, and at once when gdb gave no value
+ * for it (an array, a struct): its value is then made from theirs, "{70, 85, 90}". Watch expressions
+ * are evaluated in the shown frame at each pause (evaluate, context "watch") and become rows the same
+ * way. Every answer carries the pause it was asked in (generation): answers from before a step are
+ * dropped.
  */
 #include "debug/debugview.h"
 
@@ -233,7 +234,7 @@ static void ask_children(TcodeVar *var)
   g_free(args);
 }
 
-/* The frame's scopes: Arguments and Locals are listed (Registers are for later). */
+/* The frame's scopes: Arguments and Locals are listed, then Registers as one closed row. */
 static void on_scopes(gpointer data, JsonNode *body, const char *error)
 {
   Asked *a = data;

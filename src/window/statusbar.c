@@ -248,7 +248,7 @@ GtkWidget *status_bar(App *t)
   gtk_widget_add_css_class(t->status.flags, "warning");
   gtk_widget_set_visible(t->status.flags, FALSE);
   status_button(bar, "⚙ Build", "Build (Ctrl+Shift+B)", G_CALLBACK(on_build), t);
-  status_button(bar, "▶ Run", "Build and run (F5)", G_CALLBACK(on_run), t);
+  status_button(bar, "▶ Run", "Build and run, without debugging (Ctrl+F5)", G_CALLBACK(on_run), t);
   t->status.build = status_label(bar, TRUE);
 
   gtk_widget_set_hexpand(spacer, TRUE);
