@@ -9,6 +9,7 @@
 #include "editor/tabs.h"
 #include "git/gitstatus.h"
 #include "lsp/client.h"
+#include "lsp/diagnostics.h"
 #include "lsp/edits.h"
 #include "popups/picker.h"
 
@@ -459,6 +460,112 @@ void go_to_symbol(Tab *tab)
   g_free(document);
 }
 
+/* Quick fixes ------------------------------------------------------------------------------ */
+
+static GPtrArray *actions; /* JSON of the last answer's CodeActions and Commands */
+static char *actions_path; /* the file they are for */
+
+static void actions_query(App *t, const char *text, guint generation)
+{
+  int shown = 0;
+
+  for (guint i = 0; actions && i < actions->len; i++) {
+    JsonNode *action = json_from_string(g_ptr_array_index(actions, i), NULL);
+    const char *title = json_string_at(action, "title");
+    if (title && (!*text || fuzzy_score(text, title) >= 0)) {
+      char *payload = g_strdup_printf("%u", i);
+      const char *kind = json_string_at(action, "kind");
+      picker_add(t, generation, title,
+                 json_at(action, "isPreferred") && json_node_get_boolean(json_at(action, "isPreferred")) ? "preferred"
+                 : g_strcmp0(kind, "quickfix") == 0                                                      ? "fix"
+                 : kind                                                                                  ? kind
+                                                                                                         : "",
+                 payload);
+      g_free(payload);
+      shown++;
+    }
+    json_node_unref(action);
+  }
+  if (!shown)
+    picker_message(t, generation, actions && actions->len ? "No matching fixes" : "No quick fixes here");
+}
+
+/* Its edit goes in; a command is run by the server, which sends the edit back (workspace/applyEdit). */
+static void actions_choose(App *t, const char *payload)
+{
+  guint i = (guint)atoi(payload);
+  Tab *tab = actions_path ? find_tab(t, TAB_EDITOR, actions_path) : NULL;
+
+  if (!tab || !actions || i >= actions->len)
+    return;
+  JsonNode *action = json_from_string(g_ptr_array_index(actions, i), NULL);
+  JsonNode *command = json_at(action, "command");
+  if (json_at(action, "edit"))
+    navigate_apply_edit(t, json_at(action, "edit"), FALSE);
+  if (command && JSON_NODE_HOLDS_VALUE(command))
+    command = action; /* a Command: {title, command, arguments} */
+  if (command && JSON_NODE_HOLDS_OBJECT(command) && json_string_at(command, "command")) {
+    JsonNode *arguments = json_at(command, "arguments");
+    char *name = json_quote(json_string_at(command, "command"));
+    char *list = arguments ? json_to_string(arguments, FALSE) : g_strdup("[]");
+    char *params = g_strdup_printf("{\"command\":%s,\"arguments\":%s}", name, list);
+    lsp_request(tab, "workspace/executeCommand", params, NULL, NULL, NULL);
+    g_free(params);
+    g_free(list);
+    g_free(name);
+  }
+  json_node_unref(action);
+}
+
+static void on_actions(JsonNode *result, gpointer data)
+{
+  Asked *asked = data;
+  JsonArray *array = result && JSON_NODE_HOLDS_ARRAY(result) ? json_node_get_array(result) : NULL;
+
+  if (!actions)
+    actions = g_ptr_array_new_with_free_func(g_free);
+  g_ptr_array_set_size(actions, 0);
+  for (guint i = 0; array && i < json_array_get_length(array); i++) {
+    JsonNode *action = json_array_get_element(array, i);
+    gboolean preferred = json_at(action, "isPreferred") && json_node_get_boolean(json_at(action, "isPreferred"));
+    char *text = json_to_string(action, FALSE);
+    if (preferred)
+      g_ptr_array_insert(actions, 0, text); /* the server's best fix first */
+    else
+      g_ptr_array_add(actions, text);
+  }
+  g_free(actions_path);
+  actions_path = g_strdup(asked->path);
+  picker_open(asked->app, "Quick fix: pick one to apply", actions_query, actions_choose);
+  asked_free(asked);
+}
+
+void quick_fix(Tab *tab)
+{
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+  GtkTextIter start, end;
+
+  if (!lsp_has(tab) || !gtk_text_view_get_editable(GTK_TEXT_VIEW(tab->source)))
+    return;
+  if (!gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) { /* the cursor's line */
+    gtk_text_iter_set_line_offset(&start, 0);
+    if (!gtk_text_iter_ends_line(&end))
+      gtk_text_iter_forward_to_line_end(&end);
+  }
+  Asked *asked = g_new0(Asked, 1);
+  char *document = lsp_document_params(tab), *range = lsp_range(tab, &start, &end);
+  char *diagnostics = diagnostics_json(tab, gtk_text_iter_get_line(&start), gtk_text_iter_get_line(&end));
+  char *params = g_strdup_printf("{%s,\"range\":%s,\"context\":{\"diagnostics\":%s}}", document, range, diagnostics);
+
+  asked->app = tab->app;
+  asked->path = g_strdup(tab->path);
+  lsp_request(tab, "textDocument/codeAction", params, NULL, on_actions, asked);
+  g_free(params);
+  g_free(diagnostics);
+  g_free(range);
+  g_free(document);
+}
+
 /* Formatting --------------------------------------------------------------------------------- */
 
 static void on_formatted(JsonNode *result, gpointer data)
@@ -515,15 +622,16 @@ static char *rename_path; /* the editor whose symbol is renamed */
 static int rename_line, rename_column;
 static char *old_name;
 
-/* Applies one file's edits: to its editor when it is open (autosave saves it), else to the file. */
-static void rename_in(App *t, const char *uri, JsonNode *edits)
+/* Applies one file's edits: to its editor when it is open (saved when save), else to the file. */
+static void edit_file(App *t, const char *uri, JsonNode *edits, gboolean save)
 {
   char *path = lsp_uri_to_path(uri), *text = NULL;
   Tab *tab = path ? find_tab(t, TAB_EDITOR, path) : NULL;
 
   if (tab && tab->view && !tab->view->loading) {
     edits_apply(tab, edits);
-    save_editor(tab); /* like the files that are not open, which are written at once */
+    if (save)
+      save_editor(tab); /* like the files that are not open, which are written at once */
   } else if (path && g_file_get_contents(path, &text, NULL, NULL)) {
     char *changed = edits_apply_text(text, edits, lsp_utf16(t));
     g_file_set_contents(path, changed, -1, NULL);
@@ -534,16 +642,15 @@ static void rename_in(App *t, const char *uri, JsonNode *edits)
 }
 
 /* A WorkspaceEdit: "changes" (uri -> edits) or "documentChanges" (a list of uri and edits). */
-static void on_renamed(JsonNode *result, gpointer data)
+void navigate_apply_edit(App *t, JsonNode *edit, gboolean save)
 {
-  Asked *asked = data;
-  JsonNode *changes = json_at(result, "changes"), *documents = json_at(result, "documentChanges");
+  JsonNode *changes = json_at(edit, "changes"), *documents = json_at(edit, "documentChanges");
 
   if (changes && JSON_NODE_HOLDS_OBJECT(changes)) {
     JsonObject *object = json_node_get_object(changes);
     GList *uris = json_object_get_members(object);
     for (GList *each = uris; each; each = each->next)
-      rename_in(asked->app, each->data, json_object_get_member(object, each->data));
+      edit_file(t, each->data, json_object_get_member(object, each->data), save);
     g_list_free(uris);
   }
   for (guint i = 0;
@@ -552,9 +659,16 @@ static void on_renamed(JsonNode *result, gpointer data)
     JsonNode *document = json_array_get_element(json_node_get_array(documents), i);
     const char *uri = json_string_at(document, "textDocument.uri");
     if (uri)
-      rename_in(asked->app, uri, json_at(document, "edits"));
+      edit_file(t, uri, json_at(document, "edits"), save);
   }
-  refresh_branch(asked->app); /* Source Control shows the changed files */
+  refresh_branch(t); /* Source Control shows the changed files */
+}
+
+static void on_renamed(JsonNode *result, gpointer data)
+{
+  Asked *asked = data;
+
+  navigate_apply_edit(asked->app, result, TRUE);
   asked_free(asked);
 }
 

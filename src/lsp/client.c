@@ -15,6 +15,7 @@
 #include "lsp/channel.h"
 #include "lsp/compiledb.h"
 #include "lsp/diagnostics.h"
+#include "lsp/navigate.h"
 #include "lsp/semantic.h"
 #include "window/statusbar.h"
 
@@ -191,7 +192,8 @@ static void finish(Pending *p, JsonNode *result)
   g_hash_table_steal(l->pending, &p->id);
   if (p->cancelled_id)
     g_cancellable_disconnect(p->cancel, p->cancelled_id);
-  p->reply(result, p->data);
+  if (p->reply)
+    p->reply(result, p->data);
   g_clear_object(&p->cancel);
   g_free(p);
 }
@@ -325,6 +327,11 @@ static char *range_json(Lsp *l, const GtkTextIter *start, const GtkTextIter *end
   position_of(l, end, &line2, &character2);
   return g_strdup_printf("{\"start\":{\"line\":%d,\"character\":%d},\"end\":{\"line\":%d,\"character\":%d}}", line1,
                          character1, line2, character2);
+}
+
+char *lsp_range(Tab *tab, const GtkTextIter *start, const GtkTextIter *end)
+{
+  return tab->app->lsp ? range_json(tab->app->lsp, start, end) : g_strdup("null");
 }
 
 /* Before the buffer takes the text (the signal's default handler inserts it). */
@@ -614,7 +621,10 @@ static void answer_server(Lsp *l, JsonNode *message)
   char *id_text = json_to_string(id, FALSE);
   GString *result = g_string_new("null");
 
-  if (g_strcmp0(method, "workspace/configuration") == 0 && items && JSON_NODE_HOLDS_ARRAY(items)) {
+  if (g_strcmp0(method, "workspace/applyEdit") == 0) { /* a quick fix run as a command */
+    navigate_apply_edit(l->app, json_at(message, "params.edit"), FALSE);
+    g_string_assign(result, "{\"applied\":true}");
+  } else if (g_strcmp0(method, "workspace/configuration") == 0 && items && JSON_NODE_HOLDS_ARRAY(items)) {
     g_string_assign(result, "[");
     for (guint i = 0; i < json_array_get_length(json_node_get_array(items)); i++)
       g_string_append(result, i ? ",null" : "null");

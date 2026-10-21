@@ -7,6 +7,8 @@
 
 #include "app.h"
 
+#include <json-glib/json-glib.h>
+
 /* Adds Ctrl+click (Go to Definition) to a new editor. */
 void navigate_attach(Tab *tab);
 
@@ -34,3 +36,10 @@ void go_to_symbol(Tab *tab);
 
 /* Asks for a new name for the symbol at the cursor and renames it everywhere. */
 void rename_symbol(Tab *tab);
+
+/* Lists the server's fixes and refactorings for the selection, or the cursor's line, and the
+ * problems on it; the one picked is applied. */
+void quick_fix(Tab *tab);
+
+/* Applies a WorkspaceEdit to the files it names (the open ones saved when save). */
+void navigate_apply_edit(App *t, JsonNode *edit, gboolean save);

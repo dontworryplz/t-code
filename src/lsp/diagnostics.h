@@ -24,3 +24,6 @@ void diagnostics_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot);
 
 /* Forgets them all (the editor goes). */
 void diagnostics_clear(Tab *tab);
+
+/* The diagnostics touching lines first to last (0-based), as a JSON list the server sent them in. */
+char *diagnostics_json(Tab *tab, int first, int last);

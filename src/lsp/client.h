@@ -69,6 +69,9 @@ char *lsp_position_params(Tab *tab, const GtkTextIter *iter);
 /* '"textDocument": {"uri": ...}' alone. */
 char *lsp_document_params(Tab *tab);
 
+/* '{"start": ..., "end": ...}' of the text from start to end, in the server's positions. */
+char *lsp_range(Tab *tab, const GtkTextIter *start, const GtkTextIter *end);
+
 /* Whether the server counts positions in UTF-16 units (else in UTF-8 bytes). */
 gboolean lsp_utf16(App *t);
 

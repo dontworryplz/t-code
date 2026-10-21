@@ -17,6 +17,7 @@ typedef struct {
   GtkTextMark *start, *end;
   int severity;
   char *message;
+  char *json; /* as the server sent it, for a quick fix request */
 } Diagnostic;
 
 /* The error, warning and info colors, from the color theme. */
@@ -45,6 +46,7 @@ static void diagnostic_free(Diagnostic *d)
     gtk_text_buffer_delete_mark(buffer, d->end);
   }
   g_free(d->message);
+  g_free(d->json);
   g_free(d);
 }
 
@@ -98,6 +100,7 @@ void diagnostics_show(Tab *tab, JsonNode *list)
 
     d->severity = (int)CLAMP(json_int_at(node, "severity", SEVERITY_ERROR), SEVERITY_ERROR, SEVERITY_HINT);
     d->message = g_strdup(json_string_at(node, "message") ? json_string_at(node, "message") : "");
+    d->json = json_to_string(node, FALSE);
     lsp_iter_at(tab, json_at(node, "range.start"), &start);
     lsp_iter_at(tab, json_at(node, "range.end"), &end);
     widen(&start, &end);
@@ -248,4 +251,20 @@ void diagnostics_draw(Tab *tab, GtkTextView *view, GtkSnapshot *snapshot)
 
   if (cr)
     cairo_destroy(cr);
+}
+
+char *diagnostics_json(Tab *tab, int first, int last)
+{
+  GString *list = g_string_new("[");
+  GtkTextIter start, end;
+
+  for (guint i = 0; tab->view->diagnostics && i < tab->view->diagnostics->len; i++) {
+    Diagnostic *d = g_ptr_array_index(tab->view->diagnostics, i);
+    gtk_text_buffer_get_iter_at_mark(GTK_TEXT_BUFFER(tab->buffer), &start, d->start);
+    gtk_text_buffer_get_iter_at_mark(GTK_TEXT_BUFFER(tab->buffer), &end, d->end);
+    if (gtk_text_iter_get_line(&start) <= last && gtk_text_iter_get_line(&end) >= first)
+      g_string_append_printf(list, "%s%s", list->len > 1 ? "," : "", d->json);
+  }
+  g_string_append_c(list, ']');
+  return g_string_free(list, FALSE);
 }

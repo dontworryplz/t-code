@@ -425,6 +425,8 @@ GtkSourceStyleScheme *editor_style_scheme(App *t)
 /* The editor's right-click menu: after GTK's own (cut, copy, paste), commands of the command
  * palette for the code under the cursor. */
 static const char *const menu_commands[][2] = {
+  { "Quick Fix…", "Quick Fix…" },
+  { NULL, NULL },
   { "Go to Definition", "Go to Definition" },
   { "Find All References", "Find All References" },
   { "Go to Symbol…", "Go to Symbol in File…" },
