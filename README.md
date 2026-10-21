@@ -1,4 +1,4 @@
-# <img src="desktop/io.github.tcode.svg" alt="" width="48" align="top"> t-code
+# <img src="desktop/io.github.tcode.svg" alt="" width="48" align="top"> T-Code
 
 A light C/C++ IDE for Linux in one GTK4 window, with a dark look (Dark Classic) and other color themes.
 
