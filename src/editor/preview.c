@@ -19,12 +19,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BODY_POINTS 12.0      /* the text at text size 1 */
+#define BODY_POINTS 10.5      /* the text at text size 1: 14 px, as VS Code's preview */
 #define MARGIN 32             /* minimum pixels left and right of the text */
 #define MAX_CONTENT_WIDTH 840 /* maximum comfortable reading width */
 #define INDENT 24             /* pixels per list or quote level */
 #define MAX_LEVEL 8
 #define CELL_PAD 10 /* pixels left and right of a table cell's text (its CSS padding) */
+#define PRE_PAD 14  /* pixels between a code block's box and its text */
+#define BAR_WIDTH 4 /* a quote's bar left of it */
 
 typedef struct {
   int start, end;
@@ -34,6 +36,15 @@ typedef struct {
 typedef struct {
   int start, end;
 } CodeSpan;
+
+/* What snapshot_layer draws below a block's text, within the text's column. */
+typedef enum { BLOCK_QUOTE, BLOCK_PRE, BLOCK_RULE, BLOCK_HR } BlockKind;
+
+typedef struct {
+  BlockKind kind;
+  int start, end; /* the block's text: a heading's for the rule under it */
+  int level;      /* lists and quotes around it */
+} Block;
 
 /* A table: a grid of wrapping labels in the text, its columns sized to the view's width. */
 typedef struct {
@@ -47,6 +58,7 @@ struct Preview {
   GtkTextBuffer *buffer;
   GArray *links;       /* Link, in the order of the text */
   GArray *code_spans;  /* CodeSpan: inline code spans for pill background */
+  GArray *blocks;      /* Block: quotes, code blocks, the rules under h1 / h2, horizontal rules */
   GHashTable *anchors; /* heading slug -> its offset */
   GHashTable *colors;  /* a code coloring ("fg|weight|style") -> its tag, made once per preview */
   GPtrArray *tables;   /* PreviewTable: the tables shown, sized to the view's width */
@@ -54,6 +66,7 @@ struct Preview {
   int width;           /* the view's width the images were sized for */
   double scale;        /* the window's text size */
   gboolean over_link;
+  int hovered; /* the link under the pointer (its index in links, underlined), or -1 */
   GFileMonitor *monitor;
   guint reload_id;
 };
@@ -80,6 +93,7 @@ typedef struct {
   GString *code;          /* inside a code block: its text */
   char *lang;
   int hidden;          /* inside a shown image: its alt text is not added */
+  GArray *smalls;      /* int: where each open <sub>, <sup> or <small> started */
   gboolean html_block; /* inside an HTML block: its lines flow like a paragraph's */
 } Render;
 
@@ -111,21 +125,12 @@ static void color_tags(GtkTextBuffer *b)
     const char *tag, *property;
     PalColor color;
   } colors[] = {
-    { "base", "foreground", PAL_FG },
-    { "quote", "foreground", PAL_FG_DIM },
-    { "quote", "paragraph-background", PAL_RAISED },
-    { "h1", "foreground", PAL_FG_STRONG },
-    { "h2", "foreground", PAL_FG_STRONG },
-    { "h3", "foreground", PAL_FG_BRIGHT },
-    { "h4", "foreground", PAL_FG_BRIGHT },
-    { "h5", "foreground", PAL_FG_BRIGHT },
-    { "h6", "foreground", PAL_FG_DIM },
-    { "bold", "foreground", PAL_FG_STRONG },
-    { "code", "foreground", PAL_FG_STRONG },
-    { "pre", "paragraph-background", PAL_FRAME },
-    { "hr", "paragraph-background", PAL_BORDER_STRONG },
-    { "dim", "foreground", PAL_FG_DIM },
-    { "error", "foreground", PAL_ERROR },
+    { "base", "foreground", PAL_FG },        { "quote", "foreground", PAL_FG_DIM },
+    { "h1", "foreground", PAL_FG_STRONG },   { "h2", "foreground", PAL_FG_STRONG },
+    { "h3", "foreground", PAL_FG_BRIGHT },   { "h4", "foreground", PAL_FG_BRIGHT },
+    { "h5", "foreground", PAL_FG_BRIGHT },   { "h6", "foreground", PAL_FG_DIM },
+    { "bold", "foreground", PAL_FG_STRONG }, { "code", "foreground", PAL_FG_STRONG },
+    { "dim", "foreground", PAL_FG_DIM },     { "error", "foreground", PAL_ERROR },
     { "link", "foreground", PAL_LINK },
   };
   GtkTextTagTable *table = gtk_text_buffer_get_tag_table(b);
@@ -155,26 +160,34 @@ static void create_tags(GtkTextBuffer *b, const char *mono)
     gtk_text_buffer_create_tag(b, name, "left-margin", MARGIN + i * INDENT, "indent", -INDENT, NULL);
   }
   gtk_text_buffer_create_tag(b, "tight", "pixels-below-lines", 3, NULL);
-  gtk_text_buffer_create_tag(b, "gap", "pixels-below-lines", 12, NULL);
+  gtk_text_buffer_create_tag(b, "gap", "pixels-below-lines", 14, NULL);
   gtk_text_buffer_create_tag(b, "spacer", "size-points", 4.0, NULL);
-  gtk_text_buffer_create_tag(b, "quote", "style", PANGO_STYLE_ITALIC, NULL);
+  gtk_text_buffer_create_tag(b, "quote", NULL);
   for (int i = 0; i < 6; i++) {
     g_snprintf(name, sizeof name, "h%d", i + 1);
-    gtk_text_buffer_create_tag(b, name, "weight", PANGO_WEIGHT_BOLD, "scale", heading_scale[i], "pixels-above-lines",
-                               i < 2 ? 24 : 16, "pixels-below-lines", i < 2 ? 12 : 8, NULL);
+    gtk_text_buffer_create_tag(b, name, "weight", PANGO_WEIGHT_SEMIBOLD, "scale", heading_scale[i],
+                               "pixels-above-lines", i < 2 ? 24 : 16, "pixels-below-lines", i < 2 ? 16 : 8, NULL);
   }
   gtk_text_buffer_create_tag(b, "bold", "weight", PANGO_WEIGHT_BOLD, NULL);
   gtk_text_buffer_create_tag(b, "italic", "style", PANGO_STYLE_ITALIC, NULL);
   gtk_text_buffer_create_tag(b, "strike", "strikethrough", TRUE, NULL);
   gtk_text_buffer_create_tag(b, "underline", "underline", PANGO_UNDERLINE_SINGLE, NULL);
   gtk_text_buffer_create_tag(b, "code", "family", mono, "scale", 0.90, NULL);
-  gtk_text_buffer_create_tag(b, "pre", "family", mono, "scale", 0.92, "wrap-mode", GTK_WRAP_NONE, NULL);
+  /* Wrapped: a line wider than the view would scroll the whole preview sideways. */
+  gtk_text_buffer_create_tag(b, "pre", "family", mono, "scale", 0.92, "wrap-mode", GTK_WRAP_WORD_CHAR, NULL);
+  for (int i = 0; i <= MAX_LEVEL; i++) { /* a code block's text, inside its box */
+    g_snprintf(name, sizeof name, "pre%d", i);
+    gtk_text_buffer_create_tag(b, name, "left-margin", MARGIN + i * INDENT + PRE_PAD, "right-margin", MARGIN + PRE_PAD,
+                               NULL);
+  }
   gtk_text_buffer_create_tag(b, "pre-top", "pixels-above-lines", 12, NULL);
   gtk_text_buffer_create_tag(b, "pre-bottom", "pixels-below-lines", 12, NULL);
   gtk_text_buffer_create_tag(b, "hr", "size-points", 1.0, NULL);
   gtk_text_buffer_create_tag(b, "dim", "style", PANGO_STYLE_ITALIC, NULL);
   gtk_text_buffer_create_tag(b, "error", NULL);
-  gtk_text_buffer_create_tag(b, "link", "underline", PANGO_UNDERLINE_SINGLE, NULL);
+  gtk_text_buffer_create_tag(b, "small", "scale", 0.85, NULL);
+  gtk_text_buffer_create_tag(b, "link", NULL);
+  gtk_text_buffer_create_tag(b, "link-hover", "underline", PANGO_UNDERLINE_SINGLE, NULL);
   color_tags(b);
 }
 
@@ -238,6 +251,14 @@ static void end_paragraph(Render *r, int start, const char *gap)
   tag_from(r, name, NULL, start);
   if (gap)
     tag_last_line(r, gap);
+}
+
+/* A block drawn below the text (draw_blocks), from start to the end of the buffer. */
+static void add_block(Render *r, BlockKind kind, int start, int level)
+{
+  Block block = { kind, start, end_offset(r), level };
+
+  g_array_append_val(r->p->blocks, block);
 }
 
 static void push_start(Render *r)
@@ -370,6 +391,13 @@ static void update_layout(Preview *p, int width)
     if (tag)
       g_object_set(tag, "left-margin", margin + i * INDENT, NULL);
   }
+  for (int i = 0; i <= MAX_LEVEL; i++) {
+    char name[16];
+    g_snprintf(name, sizeof name, "pre%d", i);
+    GtkTextTag *tag = gtk_text_tag_table_lookup(table, name);
+    if (tag)
+      g_object_set(tag, "left-margin", margin + i * INDENT + PRE_PAD, "right-margin", margin + PRE_PAD, NULL);
+  }
 
   int content_w = width - 2 * margin;
   for (guint i = 0; i < p->pictures->len; i++)
@@ -427,74 +455,115 @@ static void tcode_preview_view_size_allocate(GtkWidget *widget, int width, int h
   }
 }
 
+/* The buffer lines from first to last (the line after the end of a block that ends with its line
+ * break is not its). */
+static void block_lines(GtkTextBuffer *buffer, int start, int end, int *first, int *last)
+{
+  GtkTextIter from, to;
+
+  gtk_text_buffer_get_iter_at_offset(buffer, &from, start);
+  gtk_text_buffer_get_iter_at_offset(buffer, &to, end);
+  if (end > start && gtk_text_iter_starts_line(&to))
+    gtk_text_iter_backward_char(&to);
+  *first = gtk_text_iter_get_line(&from);
+  *last = gtk_text_iter_get_line(&to);
+}
+
+static void fill(GtkSnapshot *snapshot, const GdkRGBA *color, float x, float y, float w, float h, float radius)
+{
+  graphene_rect_t rect = GRAPHENE_RECT_INIT(x, y, w, h);
+  GskRoundedRect rounded;
+
+  if (w <= 0 || h <= 0)
+    return;
+  gsk_rounded_rect_init_from_rect(&rounded, &rect, radius);
+  gtk_snapshot_push_rounded_clip(snapshot, &rounded);
+  gtk_snapshot_append_color(snapshot, color, &rect);
+  gtk_snapshot_pop(snapshot);
+}
+
+/* Quotes (a bar and a light background), code blocks (a box), the line under h1 and h2 and horizontal
+ * rules, as VS Code draws them: within the text's column, not to the view's edge. */
+static void draw_blocks(GtkTextView *view, Preview *p, GtkSnapshot *snapshot, int first_line, int last_line)
+{
+  int margin = side_margin(p, p->width), right = p->width - margin;
+  GdkRGBA bar = *palette_rgba(PAL_ACCENT), quote = *palette_rgba(PAL_FG);
+  GdkRGBA box = *palette_rgba(PAL_FRAME), rule = *palette_rgba(PAL_BORDER), hr = *palette_rgba(PAL_BORDER_STRONG);
+
+  bar.alpha = 0.5f;
+  quote.alpha = 0.05f;
+  for (guint i = 0; i < p->blocks->len; i++) {
+    const Block *block = &g_array_index(p->blocks, Block, i);
+    GtkTextIter iter;
+    int first, last, top, bottom, height, left = margin + block->level * INDENT;
+
+    block_lines(p->buffer, block->start, block->end, &first, &last);
+    if (last < first_line || first > last_line)
+      continue;
+    gtk_text_buffer_get_iter_at_line(p->buffer, &iter, first);
+    gtk_text_view_get_line_yrange(view, &iter, &top, &height);
+    gtk_text_buffer_get_iter_at_line(p->buffer, &iter, last);
+    gtk_text_view_get_line_yrange(view, &iter, &bottom, &height);
+    bottom += height;
+    switch (block->kind) {
+      case BLOCK_QUOTE: /* its last line has a paragraph's gap below it: most of it is outside */
+        fill(snapshot, &quote, left, top - 6, right - left, bottom - top - 2, 0);
+        fill(snapshot, &bar, left, top - 6, BAR_WIDTH, bottom - top - 2, 0);
+        break;
+      case BLOCK_PRE: fill(snapshot, &box, left, top, right - left, bottom - top, 6); break;
+      case BLOCK_RULE: fill(snapshot, &rule, left, bottom - 8, right - left, 1, 0); break;
+      case BLOCK_HR: fill(snapshot, &hr, left, (top + bottom) / 2 - 1, right - left, 2, 0); break;
+    }
+  }
+}
+
+/* Inline code's background, a rectangle per row it takes on screen (it may wrap). */
+static void draw_code_spans(GtkTextView *view, Preview *p, GtkSnapshot *snapshot, int first_line, int last_line)
+{
+  GdkRGBA bg = *palette_rgba(PAL_BORDER_STRONG);
+
+  bg.alpha = 0.75f;
+  for (guint i = 0; i < p->code_spans->len; i++) {
+    const CodeSpan *span = &g_array_index(p->code_spans, CodeSpan, i);
+    GtkTextIter iter, end;
+    int first, last;
+    GdkRectangle row = { 0 }, at;
+
+    block_lines(p->buffer, span->start, span->end, &first, &last);
+    if (last < first_line || first > last_line)
+      continue;
+    gtk_text_buffer_get_iter_at_offset(p->buffer, &iter, span->start);
+    gtk_text_buffer_get_iter_at_offset(p->buffer, &end, span->end);
+    for (; gtk_text_iter_compare(&iter, &end) < 0; gtk_text_iter_forward_char(&iter)) {
+      gtk_text_view_get_iter_location(view, &iter, &at);
+      if (row.width > 0 && at.y == row.y) {
+        row.width = at.x + at.width - row.x;
+        continue;
+      }
+      if (row.width > 0) /* a little above and below the letters, like VS Code */
+        fill(snapshot, &bg, row.x, row.y - 2, row.width, row.height + 4, 4);
+      row = at;
+    }
+    if (row.width > 0)
+      fill(snapshot, &bg, row.x, row.y - 2, row.width, row.height + 4, 4);
+  }
+}
+
 static void tcode_preview_view_snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapshot *snapshot)
 {
   TcodePreviewView *self = TCODE_PREVIEW_VIEW(view);
 
   if (layer == GTK_TEXT_VIEW_LAYER_BELOW_TEXT && self->preview && self->preview->code_spans) {
-    Preview *p = self->preview;
-    GtkTextBuffer *buffer = p->buffer;
     GdkRectangle visible;
+    GtkTextIter iter;
+
     gtk_text_view_get_visible_rect(view, &visible);
-
-    GtkTextIter line_iter;
-    gtk_text_view_get_line_at_y(view, &line_iter, visible.y, NULL);
-    int first_line = gtk_text_iter_get_line(&line_iter);
-    gtk_text_view_get_line_at_y(view, &line_iter, visible.y + visible.height, NULL);
-    int last_line = gtk_text_iter_get_line(&line_iter);
-
-    GdkRGBA bg = *palette_rgba(PAL_BORDER_STRONG), border = *palette_rgba(PAL_BORDER_STRONG);
-    border.alpha = 0.85f;
-    bg.alpha = 0.75f;
-
-    for (guint i = 0; i < p->code_spans->len; i++) {
-      const CodeSpan *span = &g_array_index(p->code_spans, CodeSpan, i);
-      GtkTextIter start, end;
-      gtk_text_buffer_get_iter_at_offset(buffer, &start, span->start);
-      gtk_text_buffer_get_iter_at_offset(buffer, &end, span->end);
-
-      int s_line = gtk_text_iter_get_line(&start);
-      int e_line = gtk_text_iter_get_line(&end);
-      if (e_line < first_line || s_line > last_line)
-        continue;
-
-      for (int line = MAX(s_line, first_line); line <= MIN(e_line, last_line); line++) {
-        GtkTextIter line_start, line_end;
-        gtk_text_buffer_get_iter_at_line(buffer, &line_start, line);
-        line_end = line_start;
-        if (!gtk_text_iter_ends_line(&line_end))
-          gtk_text_iter_forward_to_line_end(&line_end);
-
-        GtkTextIter seg_start = (line == s_line) ? start : line_start;
-        GtkTextIter seg_end = (line == e_line) ? end : line_end;
-        if (gtk_text_iter_compare(&seg_start, &seg_end) >= 0)
-          continue;
-
-        GdkRectangle r1, r2;
-        gtk_text_view_get_iter_location(view, &seg_start, &r1);
-        gtk_text_view_get_iter_location(view, &seg_end, &r2);
-
-        float pad_l = (line == s_line) ? 1.0f : 0.0f; /* the thin spaces inside it do the rest */
-        float pad_r = (line == e_line) ? 1.0f : 0.0f;
-        float x = (float)r1.x - pad_l;
-        float y = (float)r1.y - 2.0f; /* a little above and below the letters, like VS Code */
-        float w = (float)(r2.x - r1.x) + pad_l + pad_r;
-        float h = (float)r1.height + 4.0f;
-        if (w <= 0.0f || h <= 0.0f)
-          continue;
-
-        graphene_rect_t rect = GRAPHENE_RECT_INIT(x, y, w, h);
-        GskRoundedRect rrect;
-        gsk_rounded_rect_init_from_rect(&rrect, &rect, 4.0f);
-
-        gtk_snapshot_push_rounded_clip(snapshot, &rrect);
-        gtk_snapshot_append_color(snapshot, &bg, &rect);
-        gtk_snapshot_pop(snapshot);
-
-        gtk_snapshot_append_border(snapshot, &rrect, (float[4]){ 1.0f, 1.0f, 1.0f, 1.0f },
-                                   (GdkRGBA[4]){ border, border, border, border });
-      }
-    }
+    gtk_text_view_get_line_at_y(view, &iter, visible.y, NULL);
+    int first_line = gtk_text_iter_get_line(&iter);
+    gtk_text_view_get_line_at_y(view, &iter, visible.y + visible.height, NULL);
+    int last_line = gtk_text_iter_get_line(&iter);
+    draw_blocks(view, self->preview, snapshot, first_line, last_line);
+    draw_code_spans(view, self->preview, snapshot, first_line, last_line);
   }
 
   if (GTK_TEXT_VIEW_CLASS(tcode_preview_view_parent_class)->snapshot_layer)
@@ -534,8 +603,18 @@ static char *html_attribute(const char *tag, const char *name)
   return value;
 }
 
-/* Raw HTML: <img> shows its image, <br> breaks the line, other tags are left out and the text
- * between them is shown. */
+/* Whether tag is <name> or <name ...> (closing: </name>), in any case. */
+static gboolean is_tag(const char *tag, const char *name, gboolean closing)
+{
+  const char *rest = tag + 1 + closing;
+  size_t len = strlen(name);
+
+  return (!closing || tag[1] == '/') && g_ascii_strncasecmp(rest, name, len) == 0 &&
+         (rest[len] == '>' || g_ascii_isspace(rest[len]));
+}
+
+/* Raw HTML: <img> shows its image, <br> breaks the line, <sub>, <sup> and <small> make their text
+ * smaller, other tags are left out and the text between them is shown. */
 static void append_html(Render *r, const char *text, gsize size, gboolean block)
 {
   const char *p = text, *end = text + size;
@@ -561,6 +640,13 @@ static void append_html(Render *r, const char *text, gsize size, gboolean block)
         g_free(src);
       } else if (g_ascii_strncasecmp(tag, "<br", 3) == 0) {
         append(r, "\u2028", -1);
+      } else if (is_tag(tag, "sub", FALSE) || is_tag(tag, "sup", FALSE) || is_tag(tag, "small", FALSE)) {
+        int start = end_offset(r);
+        g_array_append_val(r->smalls, start);
+      } else if ((is_tag(tag, "sub", TRUE) || is_tag(tag, "sup", TRUE) || is_tag(tag, "small", TRUE)) &&
+                 r->smalls->len) {
+        tag_from(r, "small", NULL, g_array_index(r->smalls, int, r->smalls->len - 1));
+        g_array_set_size(r->smalls, r->smalls->len - 1);
       }
       g_free(tag);
       p = close + 1;
@@ -709,7 +795,7 @@ static void table_free(gpointer data)
 static void size_table(PreviewTable *table, int width)
 {
   guint n = table->natural->len;
-  int *widths = g_new0(int, n), remaining = MAX(width, 1), left = (int)n;
+  int *widths = g_new0(int, n), remaining = MAX(width - 2, 1), left = (int)n; /* inside its 1px border */
   gboolean *done = g_new0(gboolean, n);
 
   while (left > 0) {
@@ -817,6 +903,15 @@ static void cell_text(Render *r, MD_TEXTTYPE type, const char *text, gsize size)
   g_free(plain);
 }
 
+/* Whether a link is open in the table cell. */
+static gboolean in_cell_link(Render *r)
+{
+  for (guint i = 0; i < r->closers->len; i++)
+    if (strcmp(g_ptr_array_index(r->closers, i), "</a>") == 0)
+      return TRUE;
+  return FALSE;
+}
+
 /* A span opens in a table cell: its markup, and what closes it. */
 static void cell_span(Render *r, MD_SPANTYPE type, void *detail)
 {
@@ -831,8 +926,11 @@ static void cell_span(Render *r, MD_SPANTYPE type, void *detail)
     case MD_SPAN_CODE:
     case MD_SPAN_LATEXMATH:
     case MD_SPAN_LATEXMATH_DISPLAY:
-      link = g_strdup_printf("<span font_family=\"monospace\" background=\"%s\" foreground=\"%s\">",
-                             palette_hex(PAL_BORDER_STRONG), palette_hex(PAL_FG_STRONG));
+      if (in_cell_link(r)) /* a foreground would win over the link's color */
+        link = g_strdup_printf("<span font_family=\"monospace\" background=\"%s\">", palette_hex(PAL_BORDER_STRONG));
+      else
+        link = g_strdup_printf("<span font_family=\"monospace\" background=\"%s\" foreground=\"%s\">",
+                               palette_hex(PAL_BORDER_STRONG), palette_hex(PAL_FG_STRONG));
       open = link;
       close = "</span>";
       break;
@@ -934,16 +1032,18 @@ static int enter_block(MD_BLOCKTYPE type, void *detail, void *data)
       r->lang = g_strndup(code->lang.text, code->lang.size);
       break;
     }
-    case MD_BLOCK_HR:
+    case MD_BLOCK_HR: {
       begin_block(r);
       append(r, "\n", 1);
       tag_last_line(r, "spacer");
-      push_start(r);
-      append(r, " \n", 2); /* an empty line paints no background */
-      tag_from(r, "hr", NULL, pop_start(r));
+      int start = end_offset(r);
+      append(r, " \n", 2); /* the line the rule is drawn on */
+      tag_from(r, "hr", NULL, start);
+      add_block(r, BLOCK_HR, start, MIN(r->level, MAX_LEVEL));
       append(r, "\n", 1);
       tag_last_line(r, "spacer");
       break;
+    }
     case MD_BLOCK_TABLE:
       begin_block(r);
       r->table = g_new0(PreviewTable, 1);
@@ -1024,7 +1124,9 @@ static int leave_block(MD_BLOCKTYPE type, void *detail, void *data)
     }
     case MD_BLOCK_QUOTE:
       begin_block(r);
-      tag_from(r, "quote", NULL, pop_start(r));
+      int start = pop_start(r);
+      tag_from(r, "quote", NULL, start);
+      add_block(r, BLOCK_QUOTE, start, MIN(r->level, MAX_LEVEL) - 1); /* the bar left of its text */
       r->level--;
       tag_last_line(r, "gap");
       break;
@@ -1038,6 +1140,10 @@ static int leave_block(MD_BLOCKTYPE type, void *detail, void *data)
       r->code = NULL;
       end_paragraph(r, start, "pre-bottom");
       tag_from(r, "pre", NULL, start);
+      char pre[16];
+      g_snprintf(pre, sizeof pre, "pre%d", MIN(r->level, MAX_LEVEL));
+      tag_from(r, pre, NULL, start);
+      add_block(r, BLOCK_PRE, start, MIN(r->level, MAX_LEVEL));
       GtkTextIter from, first_end;
       gtk_text_buffer_get_iter_at_offset(r->p->buffer, &from, start);
       first_end = from;
@@ -1052,8 +1158,11 @@ static int leave_block(MD_BLOCKTYPE type, void *detail, void *data)
       char name[4];
       add_anchor(r, start);
       end_paragraph(r, start, NULL);
-      g_snprintf(name, sizeof name, "h%u", MIN(((MD_BLOCK_H_DETAIL *)detail)->level, 6u));
+      unsigned level = MIN(((MD_BLOCK_H_DETAIL *)detail)->level, 6u);
+      g_snprintf(name, sizeof name, "h%u", level);
       tag_from(r, name, NULL, start);
+      if (level <= 2)
+        add_block(r, BLOCK_RULE, start, MIN(r->level, MAX_LEVEL));
       break;
     }
     case MD_BLOCK_P: {
@@ -1237,7 +1346,9 @@ static void reload(Preview *p)
   g_ptr_array_set_size(p->tables, 0);
   g_ptr_array_set_size(p->pictures, 0);
   g_array_set_size(p->code_spans, 0);
+  g_array_set_size(p->blocks, 0);
   clear_links(p);
+  p->hovered = -1;
   g_hash_table_remove_all(p->anchors);
   gtk_text_buffer_set_text(p->buffer, "", 0);
   g_object_set(gtk_text_tag_table_lookup(table, "base"), "size-points", BODY_POINTS * p->scale, NULL);
@@ -1247,6 +1358,7 @@ static void reload(Preview *p)
   r.images = g_array_new(FALSE, FALSE, sizeof(gboolean));
   r.hrefs = g_ptr_array_new_with_free_func(g_free);
   r.closers = g_ptr_array_new();
+  r.smalls = g_array_new(FALSE, FALSE, sizeof(int));
   if (g_file_get_contents(p->tab->path, &text, &len, &error)) {
     md_parse(text, (MD_SIZE)len, &parser, &r);
   } else {
@@ -1263,6 +1375,7 @@ static void reload(Preview *p)
   g_array_free(r.images, TRUE);
   g_ptr_array_free(r.hrefs, TRUE);
   g_ptr_array_free(r.closers, TRUE);
+  g_array_free(r.smalls, TRUE);
   if (r.markup) /* md4c stopped inside a table */
     g_string_free(r.markup, TRUE);
   if (r.table) {
@@ -1371,15 +1484,44 @@ static void on_click(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press, double
   }
 }
 
-/* The hand over links. */
+/* Underlines the link at index (-1: none) and only it, as VS Code does under the pointer. */
+static void hover_link(Preview *p, int index)
+{
+  GtkTextIter from, to;
+
+  if (index == p->hovered)
+    return;
+  if (p->hovered >= 0 && (guint)p->hovered < p->links->len) {
+    const Link *old = &g_array_index(p->links, Link, p->hovered);
+    gtk_text_buffer_get_iter_at_offset(p->buffer, &from, old->start);
+    gtk_text_buffer_get_iter_at_offset(p->buffer, &to, old->end);
+    gtk_text_buffer_remove_tag_by_name(p->buffer, "link-hover", &from, &to);
+  }
+  p->hovered = index;
+  if (index >= 0) {
+    const Link *link = &g_array_index(p->links, Link, index);
+    gtk_text_buffer_get_iter_at_offset(p->buffer, &from, link->start);
+    gtk_text_buffer_get_iter_at_offset(p->buffer, &to, link->end);
+    gtk_text_buffer_apply_tag_by_name(p->buffer, "link-hover", &from, &to);
+  }
+}
+
+/* The hand over links, and the link underlined. */
 static void on_motion(GtkEventControllerMotion *motion G_GNUC_UNUSED, double x, double y, Preview *p)
 {
-  gboolean over = link_at(p, x, y) != NULL;
+  const Link *link = link_at(p, x, y);
+  gboolean over = link != NULL;
 
+  hover_link(p, link ? (int)(link - &g_array_index(p->links, Link, 0)) : -1);
   if (over != p->over_link) {
     p->over_link = over;
     gtk_widget_set_cursor_from_name(GTK_WIDGET(p->view), over ? "pointer" : "text");
   }
+}
+
+static void on_leave(GtkEventControllerMotion *motion G_GNUC_UNUSED, Preview *p)
+{
+  hover_link(p, -1);
 }
 
 /* Tabs --------------------------------------------------------------------------------------- */
@@ -1395,6 +1537,7 @@ void preview_free(Preview *p)
   clear_links(p);
   g_array_free(p->links, TRUE);
   g_array_free(p->code_spans, TRUE);
+  g_array_free(p->blocks, TRUE);
   g_hash_table_destroy(p->anchors);
   g_hash_table_destroy(p->colors);
   g_ptr_array_free(p->tables, TRUE);
@@ -1414,7 +1557,7 @@ void preview_set_zoom(Tab *tab, double scale)
 {
   if (tab->preview) {
     tab->preview->scale = scale;
-    reload(tab->preview); /* the tables' tab stops are measured at the text size */
+    reload(tab->preview); /* the tables' cells and columns are sized at the text size */
   }
 }
 
@@ -1445,6 +1588,8 @@ void open_preview(App *t, const char *path)
   p->scale = t->font_scale;
   p->links = g_array_new(FALSE, FALSE, sizeof(Link));
   p->code_spans = g_array_new(FALSE, FALSE, sizeof(CodeSpan));
+  p->blocks = g_array_new(FALSE, FALSE, sizeof(Block));
+  p->hovered = -1;
   p->anchors = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   p->colors = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   p->tables = g_ptr_array_new_with_free_func(table_free);
@@ -1469,13 +1614,18 @@ void open_preview(App *t, const char *path)
   gtk_text_view_set_top_margin(p->view, 24);
   gtk_text_view_set_bottom_margin(p->view, 48);
   gtk_widget_add_css_class(GTK_WIDGET(p->view), "tcode-preview");
-  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+  /* Nothing is wider than the view (code blocks wrap, images and tables are sized to it), but
+   * GtkTextView measures lines with a hanging indent (list items) a few pixels too wide: no
+   * horizontal scrollbar for those. EXTERNAL, not NEVER, which would make the view's width the
+   * scrolled window's minimum. */
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_EXTERNAL, GTK_POLICY_AUTOMATIC);
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), GTK_WIDGET(p->view));
   gtk_widget_set_hexpand(scrolled, TRUE);
   gtk_widget_set_vexpand(scrolled, TRUE);
   g_signal_connect(click, "released", G_CALLBACK(on_click), p);
   gtk_widget_add_controller(GTK_WIDGET(p->view), GTK_EVENT_CONTROLLER(click));
   g_signal_connect(motion, "motion", G_CALLBACK(on_motion), p);
+  g_signal_connect(motion, "leave", G_CALLBACK(on_leave), p);
   gtk_widget_add_controller(GTK_WIDGET(p->view), motion);
 
   p->tab = add_tab(t, TAB_PREVIEW, scrolled, path);

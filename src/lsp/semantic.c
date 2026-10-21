@@ -96,8 +96,8 @@ static void collect(GtkTextTag *tag, gpointer data)
   g_free(name);
 }
 
-/* The semantic tags go above all others: GtkSourceView makes its own as it token_colors more of the
- * text, and a newer tag would win. */
+/* The semantic tags go above all others: GtkSourceView makes its own as it colors more of the text,
+ * and a newer tag would win. */
 static void raise_tags(GtkTextTagTable *table)
 {
   GPtrArray *tags = g_ptr_array_new();

@@ -12,11 +12,13 @@
 #include "dialogs/settings.h"
 #include "editor/breakpoints.h"
 #include "editor/editorview.h"
+#include "editor/preview.h"
 #include "editor/tabs.h"
 #include "files/fileops.h"
 #include "files/opentabs.h"
 #include "git/compare.h"
 #include "ipc/socket.h"
+#include "project/run.h"
 #include "project/session.h"
 #include "project/userfiles.h"
 #include "window/secondwindow.h"
@@ -616,6 +618,195 @@ static void test_theme_preview(void)
   g_free(saved);
 }
 
+/* What a Build or Run command prints, run by sh as the shell would. */
+static char *shell_output(const char *command)
+{
+  char *argv[] = { "sh", "-c", (char *)command, NULL }, *out = NULL;
+
+  g_assert_true(g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, &out, NULL,
+                             NULL, NULL));
+  return out;
+}
+
+static char *command_for(const char *path, gboolean and_run)
+{
+  open_file(&app, path);
+  run(200);
+  return project_command(&app, and_run);
+}
+
+/* A script runs with its interpreter (a Python file in a folder with a Makefile too), Build checks
+ * its syntax; an executable with "#!" runs itself; C still goes to make. */
+static void test_run_scripts(void)
+{
+  char *dir = g_build_filename(app.project.root, "run scripts", NULL); /* a space: the paths are quoted */
+  char *makefile = g_build_filename(dir, "Makefile", NULL), *py = g_build_filename(dir, "it's.py", NULL);
+  char *bad = g_build_filename(dir, "bad.py", NULL), *tool = g_build_filename(dir, "tool", NULL);
+  char *c = g_build_filename(dir, "main.c", NULL), *command, *out, *summary;
+
+  g_mkdir_with_parents(dir, 0755);
+  g_assert_true(g_file_set_contents(makefile, "all:\n\techo made\n", -1, NULL));
+  g_assert_true(g_file_set_contents(py, "import os\nprint('ran in', os.path.basename(os.getcwd()))\n", -1, NULL));
+  g_assert_true(g_file_set_contents(bad, "def f(:\n", -1, NULL));
+  g_assert_true(g_file_set_contents(tool, "#!/bin/sh\necho tool ran\n", -1, NULL));
+  g_chmod(tool, 0755);
+  g_assert_true(g_file_set_contents(c, "int main(void) { return 0; }\n", -1, NULL));
+
+  command = command_for(py, TRUE);
+  g_assert_true(project_is_script(&app));
+  summary = project_summary(&app);
+  g_assert_cmpstr(summary, ==, "python3: it's.py");
+  g_free(summary);
+  if (g_find_program_in_path("python3")) {
+    out = shell_output(command);
+    g_assert_cmpstr(out, ==, "ran in run scripts\n"); /* in the file's folder */
+    g_free(out);
+    g_free(command);
+    command = project_command(&app, FALSE);
+    out = shell_output(command);
+    g_assert_cmpstr(out, ==, "t-code: no syntax errors\n");
+    g_free(out);
+    g_free(command);
+    command = command_for(bad, FALSE);
+    out = shell_output(command);
+    g_assert_cmpstr(out, ==, ""); /* the error goes to stderr */
+    g_free(out);
+  }
+  g_free(command);
+
+  command = command_for(tool, TRUE);
+  out = shell_output(command);
+  g_assert_cmpstr(out, ==, "tool ran\n");
+  g_free(out);
+  g_free(command);
+
+  command = command_for(c, TRUE);
+  g_assert_false(project_is_script(&app));
+  g_assert_nonnull(strstr(command, "make"));
+  g_free(command);
+
+  close_all_tabs(&app);
+  run(100);
+  for (const char *const *f = (const char *const[]){ makefile, py, bad, tool, c, NULL }; *f; f++)
+    g_unlink(*f);
+  g_rmdir(dir);
+  g_free(c);
+  g_free(tool);
+  g_free(bad);
+  g_free(py);
+  g_free(makefile);
+  g_free(dir);
+}
+
+/* The text in the preview's buffer from where needle starts. */
+static GtkTextIter preview_find(GtkTextBuffer *buffer, const char *needle)
+{
+  GtkTextIter start, at;
+
+  gtk_text_buffer_get_start_iter(buffer, &start);
+  g_assert_true(gtk_text_iter_forward_search(&start, needle, 0, &at, NULL, NULL));
+  return at;
+}
+
+static gboolean has_tag(GtkTextIter *iter, const char *name)
+{
+  return gtk_text_iter_has_tag(
+      iter, gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(gtk_text_iter_get_buffer(iter)), name));
+}
+
+/* The Markdown preview looks like VS Code's: quotes are not italic, <sub> text is smaller, a link is
+ * underlined only under the pointer, and nothing scrolls sideways. */
+static void test_preview_look(void)
+{
+  char *path = g_build_filename(app.project.root, "look.md", NULL);
+  GtkEventController *motion = NULL;
+  GtkTextIter iter;
+  GdkRectangle where;
+  int x, y;
+
+  g_assert_true(
+      g_file_set_contents(path,
+                          "# Title\n\n"
+                          "> quoted **bold**\n\n"
+                          "<sub>a caption</sub>\n\n"
+                          "see [the link](https://example.com) here\n\n"
+                          "```c\nint a_very_long_line_of_code_that_is_much_wider_than_the_view = 1; // and more\n```\n",
+                          -1, NULL));
+  open_preview(&app, path);
+  run(300);
+  Tab *tab = current_tab(&app);
+  g_assert_true(tab->kind == TAB_PREVIEW);
+  GtkTextView *view = GTK_TEXT_VIEW(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(tab->page)));
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer(view);
+  GtkPolicyType hpolicy;
+
+  gtk_scrolled_window_get_policy(GTK_SCROLLED_WINDOW(tab->page), &hpolicy, NULL);
+  g_assert_cmpint(hpolicy, ==, GTK_POLICY_EXTERNAL);
+
+  iter = preview_find(buffer, "quoted");
+  g_assert_true(has_tag(&iter, "quote"));
+  GSList *tags = gtk_text_iter_get_tags(&iter);
+  for (GSList *each = tags; each; each = each->next) {
+    gboolean italic;
+    g_object_get(each->data, "style-set", &italic, NULL);
+    g_assert_false(italic);
+  }
+  g_slist_free(tags);
+  iter = preview_find(buffer, "a caption");
+  g_assert_true(has_tag(&iter, "small"));
+
+  iter = preview_find(buffer, "the link");
+  g_assert_true(has_tag(&iter, "link"));
+  g_assert_false(has_tag(&iter, "link-hover"));
+  GListModel *controllers = gtk_widget_observe_controllers(GTK_WIDGET(view));
+  for (guint i = 0; !motion && i < g_list_model_get_n_items(controllers); i++) {
+    GtkEventController *controller = g_list_model_get_item(controllers, i);
+    if (GTK_IS_EVENT_CONTROLLER_MOTION(controller))
+      motion = controller;
+    g_object_unref(controller);
+  }
+  g_object_unref(controllers);
+  g_assert_nonnull(motion);
+  gtk_text_iter_forward_chars(&iter, 2);
+  gtk_text_view_get_iter_location(view, &iter, &where);
+  gtk_text_view_buffer_to_window_coords(view, GTK_TEXT_WINDOW_WIDGET, where.x + 1, where.y + where.height / 2, &x, &y);
+  g_signal_emit_by_name(motion, "motion", (double)x, (double)y);
+  g_assert_true(has_tag(&iter, "link-hover"));
+  g_signal_emit_by_name(motion, "leave");
+  g_assert_false(has_tag(&iter, "link-hover"));
+
+  iter = preview_find(buffer, "int a_very_long");
+  g_assert_true(has_tag(&iter, "pre"));
+  GtkWrapMode wrap;
+  g_object_get(gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(buffer), "pre"), "wrap-mode", &wrap, NULL);
+  g_assert_cmpint(wrap, !=, GTK_WRAP_NONE); /* a long line wraps: the preview does not scroll sideways */
+
+  remove_tab(tab);
+  g_unlink(path);
+  g_free(path);
+}
+
+/* Every theme's editor scheme gets the theme's current line color (its key was misspelled once, so
+ * every theme but Dark Classic kept Dark Classic's). */
+static void test_theme_current_line(void)
+{
+  char *saved = g_strdup(app.settings.color_theme);
+
+  for (int n = 1; n < palette_count(); n++) {
+    GtkSourceStyle *style;
+    char *background = NULL;
+
+    color_theme_apply(&app, palette_nth_id(n));
+    style = gtk_source_style_scheme_get_style(palette_scheme(&app), "current-line");
+    g_assert_nonnull(style);
+    g_object_get(style, "background", &background, NULL);
+    g_assert_cmpint(g_ascii_strcasecmp(background, palette_hex(PAL_CURRENT_LINE)), ==, 0);
+    g_free(background);
+  }
+  color_theme_apply(&app, saved);
+  g_free(saved);
+}
+
 /* A file opens at its left edge, also in a narrow view without word wrap (the cursor's reveal used to
  * scroll sideways by a few pixels, cutting off every line's first letters). */
 static void test_opens_at_left_edge(void)
@@ -1098,6 +1289,9 @@ int main(int argc, char **argv)
   g_test_add_func("/window/tab-strip", test_tab_strip);
   g_test_add_func("/window/open-tabs", test_open_tabs);
   g_test_add_func("/window/theme-preview", test_theme_preview);
+  g_test_add_func("/window/theme-current-line", test_theme_current_line);
+  g_test_add_func("/window/preview-look", test_preview_look);
+  g_test_add_func("/window/run-scripts", test_run_scripts);
   g_test_add_func("/window/debugging", test_debugging);
   g_test_add_func("/window/debugging-conditions", test_debugging_conditions);
   g_test_add_func("/window/disassembly", test_disassembly);

@@ -776,6 +776,11 @@ void debug_start_or_continue(App *t)
     go(t, "continue");
     return;
   }
+  if (project_is_script(t)) {
+    show_sidebar_page(t, "debug");
+    say(t, TRUE, "Debugging is for C and C++ programs: Ctrl+F5 runs this file.");
+    return;
+  }
   if (!(gdb = g_find_program_in_path("gdb"))) {
     show_sidebar_page(t, "debug");
     say(t, TRUE, "gdb is not installed: install the package \"gdb\" (dnf, apt, pacman, xbps-install) to debug.");

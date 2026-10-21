@@ -5,6 +5,9 @@
  *                  (named after the project, else the newest one that is not a test)
  *   Makefile        make; run uses "make run" when the Makefile has a run target
  *   neither         compile the current C/C++ file alone (with ASan/UBSan) into build/
+ * A script (Python, JavaScript, shell, ...: scripts[], or an executable file starting with "#!") is
+ * run by its interpreter, before any CMakeLists.txt or Makefile is looked for: a tools/x.py in a C
+ * project runs itself, not make. Build checks its syntax when the language has a way to.
  * A build for debugging ends with "t-code --send 'debug <program>'" (or "debug-failed <dir>" when it
  * failed): the control socket hands the program to the debugger (for a Makefile, which builds who
  * knows what, the folder: the debugger asks which program, once).
@@ -16,12 +19,13 @@
 #include "editor/tabs.h"
 #include "window/terminal.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #define C_FLAGS "-std=c17 -Wall -Wextra -g -fsanitize=address,undefined"
 #define CXX_FLAGS "-std=c++20 -Wall -Wextra -g -fsanitize=address,undefined"
 
-typedef enum { PROJECT_NONE, PROJECT_CMAKE, PROJECT_MAKE, PROJECT_FILE } ProjectKind;
+typedef enum { PROJECT_NONE, PROJECT_CMAKE, PROJECT_MAKE, PROJECT_FILE, PROJECT_SCRIPT } ProjectKind;
 
 typedef enum {
   GOAL_BUILD,
@@ -30,8 +34,32 @@ typedef enum {
 } Goal;
 
 typedef struct {
+  const char *ext;
+  const char *run;   /* the interpreter (its first word is the program), NULL: the file runs itself */
+  const char *check; /* Build: checks the syntax without running it, or NULL */
+} Script;
+
+/* clang-format off */
+static const Script scripts[] = {
+  { ".py",   "python3", "python3 -c 'import sys; compile(open(sys.argv[1], \"rb\").read(), sys.argv[1], \"exec\")'" },
+  { ".js",   "node",    "node --check" },
+  { ".mjs",  "node",    "node --check" },
+  { ".cjs",  "node",    "node --check" },
+  { ".ts",   "node",    NULL }, /* Node 22.18 and newer run TypeScript */
+  { ".sh",   "bash",    "bash -n" },
+  { ".lua",  "lua",     "luac -p" },
+  { ".rb",   "ruby",    "ruby -c" },
+  { ".pl",   "perl",    "perl -c" },
+  { ".php",  "php",     "php -l" },
+  { ".go",   "go run",  "go vet" },
+  { ".java", "java",    NULL }, /* JDK 11 and newer run one source file */
+};
+/* clang-format on */
+
+typedef struct {
   ProjectKind kind;
-  char *root; /* the folder with CMakeLists.txt / Makefile, or the file itself */
+  char *root;           /* the folder with CMakeLists.txt / Makefile, or the file itself */
+  const Script *script; /* PROJECT_SCRIPT: how it runs */
 } Project;
 
 /* The nearest directory, from start upwards, that holds one of names. */
@@ -67,8 +95,37 @@ static gboolean is_source(const char *file, gboolean *cxx)
   return ext && (*cxx || strcmp(ext, ".c") == 0);
 }
 
-/* What to build: CMake or Make from the current file's folder upwards, or else the current file
- * alone. */
+/* How file runs when it is a script: by its extension, or itself when it has none, is executable and
+ * starts with "#!"; NULL when it is not one. */
+static const Script *script_of(const char *file)
+{
+  static const Script itself = { NULL, NULL, NULL };
+  const char *name = file ? strrchr(file, '/') : NULL;
+  const char *ext = name ? strrchr(name, '.') : NULL;
+  char head[2] = { 0 };
+
+  if (!name)
+    return NULL;
+  for (size_t i = 0; ext && i < G_N_ELEMENTS(scripts); i++)
+    if (strcmp(ext, scripts[i].ext) == 0)
+      return &scripts[i];
+  if (ext || !g_file_test(file, G_FILE_TEST_IS_EXECUTABLE) || g_file_test(file, G_FILE_TEST_IS_DIR))
+    return NULL;
+  FILE *f = fopen(file, "rb");
+  size_t got = f ? fread(head, 1, 2, f) : 0;
+  if (f)
+    fclose(f);
+  return got == 2 && head[0] == '#' && head[1] == '!' ? &itself : NULL;
+}
+
+/* The program a script's interpreter is ("go" for "go run"); the caller frees it. */
+static char *script_program(const Script *script)
+{
+  return g_strndup(script->run, strcspn(script->run, " "));
+}
+
+/* What to build: a script runs alone; else CMake or Make from the current file's folder upwards, or
+ * else the current file alone. */
 static Project find_project(App *t)
 {
   static const char *const cmake[] = { "CMakeLists.txt", NULL };
@@ -76,10 +133,13 @@ static Project find_project(App *t)
   Tab *tab = current_tab(t);
   const char *file = tab && tab->kind == TAB_EDITOR ? tab->path : NULL;
   char *start = file ? g_path_get_dirname(file) : g_strdup(t->project.root);
-  Project p = { PROJECT_NONE, NULL };
+  Project p = { PROJECT_NONE, NULL, NULL };
   gboolean cxx;
 
-  if ((p.root = find_up(start, cmake)))
+  if ((p.script = script_of(file))) {
+    p.kind = PROJECT_SCRIPT;
+    p.root = g_strdup(file);
+  } else if ((p.root = find_up(start, cmake)))
     p.kind = PROJECT_CMAKE;
   else if ((p.root = find_up(start, make)))
     p.kind = PROJECT_MAKE;
@@ -203,6 +263,37 @@ static char *file_command(const char *file, Goal goal)
   return cmd;
 }
 
+/* The shell command that runs a script with its interpreter in its folder (Build: checks it). */
+static char *script_command(const char *file, const Script *script, Goal goal)
+{
+  char *dir = g_path_get_dirname(file);
+  char *qdir = g_shell_quote(dir), *qfile = g_shell_quote(file);
+  char *program = script->run ? script_program(script) : NULL;
+  char *what, *cmd;
+
+  if (goal == GOAL_DEBUG) /* the debugger does not ask (project_is_script) */
+    what = g_strdup("echo 't-code: debugging is for C and C++ programs; Ctrl+F5 runs this file'; false");
+  else if (goal == GOAL_RUN) /* in a subshell: the shell stays in its own directory */
+    what = script->run ? g_strdup_printf("(cd %s && %s %s)", qdir, script->run, qfile)
+                       : g_strdup_printf("(cd %s && %s)", qdir, qfile);
+  else if (script->check)
+    what = g_strdup_printf("(cd %s && %s %s) && echo 't-code: no syntax errors'", qdir, script->check, qfile);
+  else
+    what = g_strdup("echo 't-code: nothing to build, Ctrl+F5 runs this file'");
+  if (program && goal != GOAL_DEBUG) {
+    cmd = g_strdup_printf("if command -v %s >/dev/null 2>&1; then %s; else echo 't-code: %s is not installed'; fi",
+                          program, what, program);
+    g_free(what);
+  } else {
+    cmd = what;
+  }
+  g_free(program);
+  g_free(qfile);
+  g_free(qdir);
+  g_free(dir);
+  return cmd;
+}
+
 char *project_summary(App *t)
 {
   Project p = find_project(t);
@@ -213,6 +304,12 @@ char *project_summary(App *t)
     case PROJECT_CMAKE: text = g_strdup_printf("CMake: %s", name); break;
     case PROJECT_MAKE: text = g_strdup_printf("Make: %s", name); break;
     case PROJECT_FILE: text = g_strdup_printf("gcc: %s", name); break;
+    case PROJECT_SCRIPT: {
+      char *program = p.script->run ? script_program(p.script) : g_strdup("Run");
+      text = g_strdup_printf("%s: %s", program, name);
+      g_free(program);
+      break;
+    }
     default: text = g_strdup("Nothing to build"); break;
   }
   g_free(name);
@@ -263,12 +360,14 @@ static char *goal_command(App *t, Goal goal, char **cwd)
     case PROJECT_CMAKE: command = cmake_command(p.root, goal); break;
     case PROJECT_MAKE: command = make_command(p.root, goal); break;
     case PROJECT_FILE: command = file_command(p.root, goal); break;
+    case PROJECT_SCRIPT: command = script_command(p.root, p.script, goal); break;
     default:
       command = g_strdup("echo 't-code: nothing to build here (open a C file, or add a Makefile or CMakeLists.txt)'");
       break;
   }
   if (cwd) /* the file's folder, as run does; the project's otherwise */
-    *cwd = p.kind == PROJECT_FILE ? g_path_get_dirname(p.root) : g_strdup(p.root ? p.root : t->project.root);
+    *cwd = p.kind == PROJECT_FILE || p.kind == PROJECT_SCRIPT ? g_path_get_dirname(p.root)
+                                                              : g_strdup(p.root ? p.root : t->project.root);
   if (goal == GOAL_DEBUG && p.kind != PROJECT_NONE) { /* a failed build says so: the debugger stops waiting */
     char *dir = p.kind == PROJECT_FILE ? g_path_get_dirname(p.root) : g_strdup(p.root);
     char *qdir = g_shell_quote(dir), *failed = send_verb("debug-failed", qdir);
@@ -283,10 +382,23 @@ static char *goal_command(App *t, Goal goal, char **cwd)
   return command;
 }
 
+char *project_command(App *t, gboolean run)
+{
+  return goal_command(t, run ? GOAL_RUN : GOAL_BUILD, NULL);
+}
+
+gboolean project_is_script(App *t)
+{
+  Project p = find_project(t);
+
+  g_free(p.root);
+  return p.kind == PROJECT_SCRIPT;
+}
+
 void build_project(App *t, gboolean run)
 {
   /* Every changed file is saved first. */
-  save_all(t, run_saved, goal_command(t, run ? GOAL_RUN : GOAL_BUILD, NULL));
+  save_all(t, run_saved, project_command(t, run));
 }
 
 char *build_for_debug(App *t)

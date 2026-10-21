@@ -154,10 +154,14 @@ static GtkWidget *group_row(int group)
 static gboolean refill(gpointer data G_GNUC_UNUSED)
 {
   App *t = open_tabs.app;
+
+  open_tabs.refill_id = 0;
+  if (t->closing) /* asked for before the window started closing: its groups may be gone */
+    return G_SOURCE_REMOVE;
+
   Tab *current = current_tab(t);
   int used = 0, n = tab_count(t);
 
-  open_tabs.refill_id = 0;
   gtk_list_box_remove_all(open_tabs.list);
   for (int g = 0; g < GROUPS; g++)
     for (int i = 0; i < n; i++)

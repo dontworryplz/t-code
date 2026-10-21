@@ -77,7 +77,7 @@ static const char *const dark_classic_given[] = { "frame",
                                                   "#264f78",
                                                   "selection-unfocused",
                                                   "#3a3d41",
-                                                  "current_theme-line",
+                                                  "current-line",
                                                   "#282828",
                                                   "line-number",
                                                   "#6e7681",
@@ -114,10 +114,9 @@ static const char *const windows_95_given[] = { "raised",           "#c0c0c0",  
                                                 "editor-selection", "#a6caf0",   "inactive-selection",
                                                 "#c0c0c0",          NULL };
 
-static const char *const hotdog_given[] = { "accent-fg",        "#000000", "selection",
-                                            "#000000",          "hover",   "#cc0000",
-                                            "editor-selection", "#000000", "current_theme-line",
-                                            "#e00000",          NULL };
+static const char *const hotdog_given[] = { "accent-fg", "#000000",          "selection", "#000000",      "hover",
+                                            "#cc0000",   "editor-selection", "#000000",   "current-line", "#e00000",
+                                            NULL };
 
 /* clang-format off */
 static const Theme theme_table[] = {
@@ -267,7 +266,7 @@ static const char *const color_names[PAL_COUNT] = {
   "git-ignored",
   "editor-selection",
   "selection-unfocused",
-  "current_theme-line",
+  "current-line",
   "line-number",
   "cursor",
   "bracket",
@@ -489,7 +488,7 @@ static void pal_write_scheme(App *t, const char *path)
     { "selection", PAL_EDITOR_SELECTION },
     { "selection-unfocused", PAL_SELECTION_UNFOCUSED },
     { "cursor", PAL_CURSOR },
-    { "current_theme-line", PAL_CURRENT_LINE },
+    { "current-line", PAL_CURRENT_LINE },
     { "line-number", PAL_LINE_NUMBER },
     { "bracket", PAL_BRACKET },
     { "search", PAL_SEARCH },
