@@ -9,7 +9,7 @@
 
 #include "app.h"
 
-#include <json-glib/json-glib.h>
+#include "lsp/json.h"
 
 /* Documents ---------------------------------------------------------------------------------- */
 
@@ -77,18 +77,6 @@ void lsp_iter_at(Tab *tab, JsonNode *position, GtkTextIter *iter);
 
 /* The same from the line and character. */
 void lsp_iter_at_position(Tab *tab, gint64 line, gint64 character, GtkTextIter *iter);
-
-/* JSON --------------------------------------------------------------------------------------- */
-
-/* The node at a dotted path in node ("range.start.line", "items.0.label"), or NULL. */
-JsonNode *json_at(JsonNode *node, const char *path);
-
-/* The string / number at path, or NULL / fallback. */
-const char *json_string_at(JsonNode *node, const char *path);
-gint64 json_int_at(JsonNode *node, const char *path, gint64 fallback);
-
-/* text as a JSON string, quotes included. */
-char *json_quote(const char *text);
 
 /* "file:///a%20b.c" -> "/a b.c" and back. */
 char *lsp_uri_to_path(const char *uri);

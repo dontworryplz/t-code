@@ -9,6 +9,7 @@
 #include "editor/blocks.c"
 #include "editor/diffgutter.c"
 #include "editor/folding.c"
+#include "editor/breakpoints.c"
 #include "editor/sticky.c"
 #include "git/linediff.c"
 #include "editor/editing.c"
@@ -18,6 +19,7 @@
 #include "editor/guides.c"
 #include "editor/occurrences.c"
 #include "lsp/channel.c"
+#include "lsp/json.c"
 #include "lsp/client.c"
 #include "lsp/compiledb.c"
 #include "lsp/completion.c"
@@ -30,6 +32,7 @@
 
 /* clang-format off */
 void update_status(App *t G_GNUC_UNUSED) {}
+void debug_breakpoints_changed(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void status_show_indent(App *t G_GNUC_UNUSED) {}
 int tab_count(App *t G_GNUC_UNUSED) { return 0; }
 Tab *tab_nth(App *t G_GNUC_UNUSED, int index G_GNUC_UNUSED) { return NULL; }

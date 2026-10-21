@@ -6,6 +6,7 @@
  */
 #include "editor/guides.h"
 
+#include "editor/breakpoints.h"
 #include "editor/diffgutter.h"
 #include "editor/editorview.h"
 #include "editor/folding.h"
@@ -337,6 +338,7 @@ static void snapshot_layer(GtkTextView *view, GtkTextViewLayer layer, GtkSnapsho
       draw_guides(self, snapshot);
     diagnostics_draw(self->tab, view, snapshot);
     folding_draw(self->tab, view, snapshot);
+    breakpoints_draw(self->tab, view, snapshot);
   }
 }
 

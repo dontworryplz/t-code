@@ -3,10 +3,12 @@
  * Tests for how tabs open and close, in a whole t-code window (every module but main.c) on a
  * temporary project with a temporary config: temporary tabs (a click in the Files panel, VS Code's
  * preview editor), comparisons in one tab, the first run's layout and fonts, the files edited by
- * hand. Needs a display; skipped without one.
+ * hand, debugging with gdb. Needs a display; skipped without one.
  */
 #include "editor/editor.h"
+#include "debug/debugger.h"
 #include "dialogs/settings.h"
+#include "editor/breakpoints.h"
 #include "editor/editorview.h"
 #include "editor/tabs.h"
 #include "files/fileops.h"
@@ -766,6 +768,99 @@ static void on_activate(GApplication *gapp, gpointer data G_GNUC_UNUSED)
   gtk_window_destroy(app.window);
 }
 
+/* Debugging ------------------------------------------------------------------------------------ */
+
+static gboolean stopped_at(gconstpointer line)
+{
+  return app.debug.stop_path && app.debug.stop_line == GPOINTER_TO_INT(line);
+}
+
+/* Waits (gdb takes a moment to start) until the program stopped at line, and checks it did. */
+static void wait_stop(int line)
+{
+  gint64 end = g_get_monotonic_time() + 15 * G_USEC_PER_SEC;
+
+  while (!stopped_at(GINT_TO_POINTER(line)) && g_get_monotonic_time() < end)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_cmpint(app.debug.stop_line, ==, line);
+}
+
+static void wait_end(void)
+{
+  gint64 end = g_get_monotonic_time() + 15 * G_USEC_PER_SEC;
+
+  while (debug_active(&app) && g_get_monotonic_time() < end)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_false(debug_active(&app));
+}
+
+/* A program built with -g runs under gdb: it stops at a breakpoint, which the editor shows; it steps
+ * over, out, on to a breakpoint put in while it is stopped, and to its end; Stop ends it at once. */
+static void test_debugging(void)
+{
+  static const char source[] = "#include <stdio.h>\n"      /* 1 */
+                               "static int twice(int n)\n" /* 2 */
+                               "{\n"                       /* 3 */
+                               "  int m = n * 2;\n"        /* 4 */
+                               "  return m;\n"             /* 5 */
+                               "}\n"                       /* 6 */
+                               "int main(void)\n"          /* 7 */
+                               "{\n"                       /* 8 */
+                               "  int a = twice(3);\n"     /* 9 */
+                               "  printf(\"%d\\n\", a);\n" /* 10 */
+                               "  return 0;\n"             /* 11 */
+                               "}\n";                      /* 12 */
+  char *gdb = g_find_program_in_path("gdb"), *gcc = g_find_program_in_path("gcc");
+
+  if (!gdb || !gcc) {
+    g_test_skip("no gdb or gcc");
+    g_free(gdb);
+    g_free(gcc);
+    return;
+  }
+  char *path = g_build_filename(app.project.root, "prog.c", NULL),
+       *exe = g_build_filename(app.project.root, "prog", NULL);
+  const char *cc[] = { "gcc", "-g", "-O0", "-o", exe, path, NULL };
+  int status = -1;
+  g_assert_true(g_file_set_contents(path, source, -1, NULL));
+  g_assert_true(g_spawn_sync(NULL, (char **)cc, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, &status, NULL));
+  g_assert_cmpint(status, ==, 0);
+
+  open_file(&app, path);
+  run_until(has_tab, path);
+  Tab *tab = find_tab(&app, TAB_EDITOR, path);
+  while (tab->view->loading)
+    g_main_context_iteration(NULL, FALSE);
+  breakpoint_toggle(tab, 3); /* line 4 */
+
+  debug_launch(&app, exe);
+  g_assert_true(debug_active(&app));
+  wait_stop(4);
+  g_assert_cmpstr(app.debug.stop_path, ==, path);
+  debug_step_over(&app);
+  wait_stop(5);
+  debug_step_out(&app);
+  wait_stop(9);
+  breakpoint_toggle(tab, 9); /* line 10, while stopped: gdb hears of it */
+  debug_start_or_continue(&app);
+  wait_stop(10);
+  debug_start_or_continue(&app);
+  wait_end();
+  g_assert_null(app.debug.stop_path);
+
+  debug_launch(&app, exe); /* again, and Stop while it is stopped */
+  wait_stop(4);
+  debug_stop(&app);
+  wait_end();
+
+  breakpoints_remove_all(&app);
+  close_everything();
+  g_free(exe);
+  g_free(path);
+  g_free(gdb);
+  g_free(gcc);
+}
+
 int main(int argc, char **argv)
 {
   char *home = g_dir_make_tmp("t-code-window-XXXXXX", NULL);
@@ -804,6 +899,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/tab-strip", test_tab_strip);
   g_test_add_func("/window/open-tabs", test_open_tabs);
   g_test_add_func("/window/theme-preview", test_theme_preview);
+  g_test_add_func("/window/debugging", test_debugging);
 
   gapp = gtk_application_new("io.github.tcode.test", G_APPLICATION_NON_UNIQUE);
   g_object_set_data(G_OBJECT(gapp), "status", &status);

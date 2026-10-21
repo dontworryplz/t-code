@@ -2,8 +2,9 @@
  * What t-code remembers between runs, in ~/.config/t-code/session.ini:
  *   [window]            size, pane sizes, which panes are shown, text size
  *   [recent]            the last opened project folders
- *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, and
- *                       the indentation chosen for it in the status bar
+ *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, the
+ *                       indentation chosen for it in the status bar, its breakpoints and the
+ *                       program it debugs
  * and the settings, in ~/.config/t-code/settings.ini.
  */
 #pragma once
@@ -24,11 +25,18 @@ void session_save_settings(App *t);
 /* Gives the window its saved size, pane sizes, visible panes and text size. */
 void session_apply_window(App *t);
 
-/* Reads the indentation chosen for the current project into t->project.indent (none: width 0). */
-void session_load_project_indent(App *t);
+/* Reads what the current project keeps besides its tabs: the indentation chosen for it into
+ * t->project.indent (none: width 0), its breakpoints into t->debug.breakpoints. */
+void session_load_project(App *t);
 
 /* Writes t->project.indent for the current project (width 0 forgets it). */
 void session_save_project_indent(App *t);
+
+/* A value kept for the current project ("debug-program"), or NULL (free it). */
+char *session_project_value(App *t, const char *key);
+
+/* Keeps value for the current project (NULL forgets it). */
+void session_set_project_value(App *t, const char *key, const char *value);
 
 /* Opens the tabs saved for the current project; returns whether any opened. */
 gboolean session_restore_tabs(App *t);

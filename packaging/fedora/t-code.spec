@@ -21,6 +21,7 @@ Requires:       git-core
 Requires:       cascadia-code-fonts
 Requires:       hicolor-icon-theme
 Recommends:     ripgrep
+Recommends:     gdb
 
 %description
 t-code is a lightweight C/C++ IDE: a file tree,

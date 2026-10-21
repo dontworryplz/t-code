@@ -2,13 +2,15 @@
  * Remembers the window between runs, in ~/.config/t-code/session.ini:
  *   [window]            size, pane sizes, which panes are shown, text size
  *   [recent]            the last opened project folders
- *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, and
- *                       the indentation chosen for it in the status bar
+ *   [project <sha1>]    per project folder: the open tabs of both groups and the active ones, the
+ *                       indentation chosen for it in the status bar, its breakpoints and the
+ *                       program it debugs (a Makefile's)
  * and the settings in ~/.config/t-code/settings.ini ([settings], with a comment over each one, for
  * editing by hand). Before 0.3 the settings were in session.ini's [settings].
  */
 #include "project/session.h"
 
+#include "editor/breakpoints.h"
 #include "editor/editor.h"
 #include "editor/preview.h"
 #include "editor/tabs.h"
@@ -221,8 +223,7 @@ void session_save_settings(App *t)
 
 void session_apply_window(App *t)
 {
-  static const char *names[] = { "files", "scm", "search", "shell" };
-  static const int defaults[] = { 0, 0, 0, 4 };
+  static const int defaults[PANELS] = { 0, 0, 0, 4, 4 };
   GKeyFile *kf = load();
   GError *error = NULL;
   double scale = g_key_file_get_double(kf, "window", "font-scale", &error);
@@ -235,8 +236,8 @@ void session_apply_window(App *t)
   if (get_bool(kf, "window", "maximized", FALSE))
     gtk_window_maximize(t->window);
   for (int pass = 0; pass < 2; pass++) {
-    for (int i = 0; (pass == 0) ? (order && order[i]) : (i < 4); i++) {
-      const char *nm = (pass == 0) ? order[i] : names[i];
+    for (int i = 0; (pass == 0) ? (order && order[i]) : (i < PANELS); i++) {
+      const char *nm = (pass == 0) ? order[i] : panel_names[i];
       if (pass == 1 && order) {
         gboolean seen = FALSE;
         for (int j = 0; order[j]; j++)
@@ -246,8 +247,8 @@ void session_apply_window(App *t)
           continue;
       }
       int def = 0;
-      for (int j = 0; j < 4; j++)
-        if (strcmp(names[j], nm) == 0)
+      for (int j = 0; j < PANELS; j++)
+        if (strcmp(panel_names[j], nm) == 0)
           def = defaults[j];
       char key[32];
       g_snprintf(key, sizeof(key), "dock-%s", nm);
@@ -267,6 +268,9 @@ void session_apply_window(App *t)
     }
   }
   g_strfreev(order);
+  int shell = panel_dock(t, "shell"); /* the panel moved in last shows: in the shell's dock, the shell */
+  if (shell >= 0)
+    gtk_stack_set_visible_child_name(t->dock.stacks[shell], "shell");
   gtk_paned_set_position(t->layout.hpaned, MAX(get_int(kf, "window", "files-width", 280), 80));
   gtk_paned_set_position(t->layout.rpaned, CLAMP(get_int(kf, "window", "right-position", 840), 200, 1600));
   gtk_paned_set_position(t->layout.vpaned, CLAMP(get_int(kf, "window", "editor-height", 620), 120, 1200));
@@ -291,13 +295,16 @@ void session_apply_window(App *t)
   g_key_file_free(kf);
 }
 
-void session_load_project_indent(App *t)
+void session_load_project(App *t)
 {
   GKeyFile *kf = load();
   char *group = project_group(t);
 
   t->project.indent.width = CLAMP(get_int(kf, group, "indent-width", 0), 0, 16);
   t->project.indent.tabs = get_bool(kf, group, "indent-tabs", FALSE);
+  char **breakpoints = g_key_file_get_string_list(kf, group, "breakpoints", NULL, NULL);
+  breakpoints_restore(t, breakpoints);
+  g_strfreev(breakpoints);
   g_free(group);
   g_key_file_free(kf);
 }
@@ -315,6 +322,32 @@ void session_save_project_indent(App *t)
     g_key_file_remove_key(kf, group, "indent-width", NULL);
     g_key_file_remove_key(kf, group, "indent-tabs", NULL);
   }
+  store(kf);
+  g_free(group);
+  g_key_file_free(kf);
+}
+
+char *session_project_value(App *t, const char *key)
+{
+  GKeyFile *kf = load();
+  char *group = project_group(t);
+  char *value = g_key_file_get_string(kf, group, key, NULL);
+
+  g_free(group);
+  g_key_file_free(kf);
+  return value;
+}
+
+void session_set_project_value(App *t, const char *key, const char *value)
+{
+  GKeyFile *kf = load();
+  char *group = project_group(t);
+
+  g_key_file_set_string(kf, group, "root", t->project.root);
+  if (value)
+    g_key_file_set_string(kf, group, key, value);
+  else
+    g_key_file_remove_key(kf, group, key, NULL);
   store(kf);
   g_free(group);
   g_key_file_free(kf);
@@ -387,11 +420,10 @@ gboolean session_restore_tabs(App *t)
 
 void session_save(App *t)
 {
-  static const char *names[] = { "files", "scm", "search", "shell" };
   GKeyFile *kf = load();
   char *group = project_group(t);
   gboolean maximized = gtk_window_is_maximized(t->window);
-  char *order[4];
+  char *order[PANELS];
   int n_order = 0;
 
   if (!maximized) {
@@ -400,17 +432,17 @@ void session_save(App *t)
   }
   g_key_file_set_boolean(kf, "window", "maximized", maximized);
   g_key_file_set_integer(kf, "window", "dock-layout", DOCKS);
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < PANELS; i++) {
     char key[32];
-    g_snprintf(key, sizeof(key), "dock-%s", names[i]);
-    g_key_file_set_integer(kf, "window", key, panel_dock(t, names[i]));
+    g_snprintf(key, sizeof(key), "dock-%s", panel_names[i]);
+    g_key_file_set_integer(kf, "window", key, panel_dock(t, panel_names[i]));
   }
   for (int d = 0; d < DOCKS; d++) {
     GtkSelectionModel *pages = gtk_stack_get_pages(t->dock.stacks[d]);
     guint n_items = g_list_model_get_n_items(G_LIST_MODEL(pages));
     for (guint i = 0; i < n_items; i++) {
       GtkStackPage *item = g_list_model_get_item(G_LIST_MODEL(pages), i);
-      if (item && gtk_stack_page_get_name(item) && n_order < 4)
+      if (item && gtk_stack_page_get_name(item) && n_order < PANELS)
         order[n_order++] = g_strdup(gtk_stack_page_get_name(item));
       if (item)
         g_object_unref(item);
@@ -462,6 +494,12 @@ void session_save(App *t)
     g_key_file_set_integer(kf, group, active_keys[g], active);
     g_strfreev(tabs);
   }
+  char **breakpoints = breakpoints_save(t);
+  if (breakpoints)
+    g_key_file_set_string_list(kf, group, "breakpoints", (const char *const *)breakpoints, g_strv_length(breakpoints));
+  else
+    g_key_file_remove_key(kf, group, "breakpoints", NULL);
+  g_strfreev(breakpoints);
 
   store(kf);
   g_free(group);

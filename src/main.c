@@ -1,11 +1,12 @@
 /*
- * t-code's start and end: the GTK application, the command line (t-code [dir] [file...] or
- * --version), and quitting cleanly on SIGTERM / SIGINT. The window itself is built by
+ * t-code's start and end: the GTK application, the command line (t-code [dir] [file...],
+ * --version, --send), and quitting cleanly on SIGTERM / SIGINT. The window itself is built by
  * build_window() (window/window.c); see app.h for how the source folders divide the work.
  */
 #define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 #include "app.h"
 
+#include "debug/debugger.h"
 #include "editor/editor.h"
 #include "files/files.h"
 #include "git/compare.h"
@@ -15,6 +16,7 @@
 #include "project/session.h"
 #include "window/window.h"
 
+#include <gio/gunixsocketaddress.h>
 #include <glib-unix.h>
 #include <signal.h>
 #include <stdio.h>
@@ -112,6 +114,7 @@ static void on_open(GApplication *app, GFile **files, int n, const char *hint G_
 static void on_shutdown(GApplication *app G_GNUC_UNUSED, App *t)
 {
   t->closing = TRUE;
+  debug_end(t);
   stop_socket(t);
   files_stop(t);
   lsp_stop(t);
@@ -136,13 +139,39 @@ static gboolean on_signal(gpointer data)
   return G_SOURCE_REMOVE;
 }
 
-/* --version: answered before GTK starts, so it works without a display. */
+/* --send "<command> <arg>": one request to the t-code whose shell this runs in ($TCODE_SOCKET), ended
+ * with a NUL (a path may hold a line break). The build for debugging ends with it (project/run.c). */
+static int send_request(const char *request)
+{
+  const char *path = g_getenv("TCODE_SOCKET");
+  GSocketClient *client = g_socket_client_new();
+  GSocketAddress *address = path ? g_unix_socket_address_new(path) : NULL;
+  GError *error = NULL;
+  GSocketConnection *conn =
+      address ? g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, &error) : NULL;
+  gboolean ok = conn && g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), request,
+                                                  strlen(request) + 1, NULL, NULL, &error);
+
+  if (!ok)
+    g_printerr("t-code --send: %s\n", error ? error->message : "TCODE_SOCKET is not set (run it in t-code's shell)");
+  g_clear_error(&error);
+  g_clear_object(&conn);
+  g_clear_object(&address);
+  g_object_unref(client);
+  return ok ? 0 : 1;
+}
+
+/* --version and --send: answered before GTK starts, so they work without a display. */
 static int on_local_options(GApplication *app G_GNUC_UNUSED, GVariantDict *options, App *t G_GNUC_UNUSED)
 {
+  const char *request = NULL;
+
   if (g_variant_dict_contains(options, "version")) {
     g_print("t-code %s\n", TCODE_VERSION);
     return 0;
   }
+  if (g_variant_dict_lookup(options, "send", "&s", &request))
+    return send_request(request);
   new_window = g_variant_dict_contains(options, "new-window");
   return -1;
 }
@@ -175,6 +204,8 @@ int main(int argc, char **argv)
                                 "Show the version and exit", NULL);
   g_application_add_main_option(G_APPLICATION(app), "new-window", 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_NONE,
                                 "Open an empty window that asks for a folder", NULL);
+  g_application_add_main_option(G_APPLICATION(app), "send", 0, G_OPTION_FLAG_NONE, G_OPTION_ARG_STRING,
+                                "Send a request to the t-code this runs in", "\"COMMAND ARG\"");
   static const GActionEntry app_actions[] = { { .name = "new-window", .activate = on_new_window_action } };
   g_action_map_add_action_entries(G_ACTION_MAP(app), app_actions, G_N_ELEMENTS(app_actions), NULL);
   g_signal_connect(app, "handle-local-options", G_CALLBACK(on_local_options), &t);

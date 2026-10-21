@@ -9,7 +9,8 @@ license=('MIT')
 depends=('glib2' 'gtk4' 'gtksourceview5' 'json-glib' 'vte4' 'md4c' 'clang' 'git'
          'ttf-cascadia-code' 'hicolor-icon-theme')
 makedepends=('pkgconf')
-optdepends=('ripgrep: faster Search panel (falls back to grep)')
+optdepends=('ripgrep: faster Search panel (falls back to grep)'
+            'gdb: the debugger (F5)')
 # packaging/build.sh makes this tarball from the working tree
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')

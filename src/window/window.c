@@ -4,6 +4,7 @@
  */
 #include "window/window.h"
 
+#include "debug/debugger.h"
 #include "dialogs/settings.h"
 #include "editor/editor.h"
 #include "editor/editorview.h"
@@ -27,7 +28,7 @@
 
 /* Panes -------------------------------------------------------------------------------------- */
 
-static const char *const panel_names[] = { "files", "scm", "search", "shell" };
+const char *const panel_names[PANELS] = { "files", "scm", "search", "shell", "debug" };
 
 static const char *panel_icon(const char *page)
 {
@@ -37,12 +38,14 @@ static const char *panel_icon(const char *page)
     return "send-to-symbolic";
   if (strcmp(page, "search") == 0)
     return "system-search-symbolic";
+  if (strcmp(page, "debug") == 0)
+    return "system-run-symbolic";
   return "utilities-terminal-symbolic";
 }
 
 static int panel_id(const char *page)
 {
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < PANELS; i++)
     if (g_strcmp0(page, panel_names[i]) == 0)
       return i + 1;
   return 0;
@@ -50,7 +53,7 @@ static int panel_id(const char *page)
 
 static const char *panel_from_id(int id)
 {
-  return (id >= 1 && id <= 4) ? panel_names[id - 1] : NULL;
+  return (id >= 1 && id <= PANELS) ? panel_names[id - 1] : NULL;
 }
 
 static void focus_panel(App *t, const char *page)
@@ -236,6 +239,8 @@ void set_font_scale(App *t, double scale)
 
   t->font_scale = CLAMP(scale, 0.5, 3.0);
   vte_terminal_set_font_scale(t->shell.term, t->font_scale);
+  if (t->debug.term)
+    vte_terminal_set_font_scale(t->debug.term, t->font_scale);
   editor_view_set_font(t);
   files_apply_font(t);
   for (int i = 0; i < n; i++)
@@ -396,7 +401,7 @@ static void move_panel_at(App *t, const char *page, int to, int insert_pos)
 
   if (from < 0 || to < 0 || to >= DOCKS || (from == to && insert_pos < 0))
     return;
-  const char *after[4];
+  const char *after[PANELS];
   int n_after = 0;
   if (insert_pos >= 0) {
     GtkSelectionModel *pages = gtk_stack_get_pages(t->dock.stacks[to]);
@@ -409,7 +414,7 @@ static void move_panel_at(App *t, const char *page, int to, int insert_pos)
         if (strcmp(nm, page) == 0) {
           cur_pos = idx;
         } else {
-          if (idx >= insert_pos && n_after < 4)
+          if (idx >= insert_pos && n_after < PANELS)
             after[n_after++] = nm;
           idx++;
         }
@@ -502,7 +507,7 @@ static void move_panel_relative(App *t, const char *page, int target_dock, int r
   }
   if (empty > want) {
     for (int i = empty; i > want; i--) {
-      for (int p = 0; p < 4; p++)
+      for (int p = 0; p < PANELS; p++)
         if (panel_dock(t, panel_names[p]) == base + i - 1)
           move_panel(t, panel_names[p], base + i);
     }
@@ -510,7 +515,7 @@ static void move_panel_relative(App *t, const char *page, int target_dock, int r
     if (rel > 0)
       want--;
     for (int i = empty; i < want; i++) {
-      for (int p = 0; p < 4; p++)
+      for (int p = 0; p < PANELS; p++)
         if (panel_dock(t, panel_names[p]) == base + i + 1)
           move_panel(t, panel_names[p], base + i);
     }
@@ -990,6 +995,7 @@ static void create_docks(App *t)
   add_dock_panel(t, 0, t->scm, "scm", "SOURCE CONTROL");
   add_dock_panel(t, 0, clip_box(search_panel(t), TRUE), "search", "Search (Ctrl+Shift+F)");
   add_dock_panel(t, 4, GTK_WIDGET(t->shell.term), "shell", "Terminal (Alt+3 / Ctrl+J)");
+  add_dock_panel(t, 4, debug_panel(t), "debug", "Debug (F5)");
 
   t->layout.left = build_side_chain(t, 0, GTK_ORIENTATION_VERTICAL, 320);
   t->layout.bottom = build_side_chain(t, 1, GTK_ORIENTATION_HORIZONTAL, 480);
@@ -1143,7 +1149,7 @@ void build_window(App *t, GtkApplication *app)
   /* The last session's sizes, then start the programs and show it. */
   add_shortcuts(t);
   session_apply_window(t);
-  session_load_project_indent(t);
+  session_load_project(t);
   if (strcmp(t->project.root, g_get_home_dir()) != 0) /* home means no folder (see reopen_last_project) */
     session_add_recent(t);
   rebuild_recent_menu(t);

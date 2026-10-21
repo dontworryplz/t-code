@@ -15,6 +15,7 @@
  *   project/   the project folder, the saved session, Build and Run
  *   ipc/       the control socket ($TCODE_SOCKET): open files from scripts and tools
  *   lsp/       the language server: clangd's diagnostics, hover, completion, ...
+ *   debug/     the debugger: gdb, the Debug panel
  */
 #pragma once
 
@@ -27,6 +28,7 @@ typedef struct Preview Preview;       /* editor/preview.c */
 typedef struct Picker Picker;         /* popups/picker.c */
 typedef struct EditorView EditorView; /* editor/editorview.h */
 typedef struct Lsp Lsp;               /* lsp/client.c */
+typedef struct Debugger Debugger;     /* debug/debugger.c */
 
 typedef enum {
   TAB_EDITOR,  /* a source file (GtkSourceView) */
@@ -137,6 +139,16 @@ struct App {
 
   GSocketService *service;
   Lsp *lsp; /* the language server (clangd), while C or C++ files are open */
+
+  /* debugging */
+  struct {
+    GHashTable *breakpoints; /* path -> GArray of line numbers, 1-based and ascending (editor/breakpoints.c) */
+    char *stop_path;         /* where the program is stopped (its innermost frame with a file), or NULL */
+    int stop_line;
+    Debugger *session; /* gdb, while debugging (debug/debugger.c) */
+    GtkWidget *panel;  /* the Debug panel: its buttons over the program's terminal */
+    VteTerminal *term; /* the program's terminal */
+  } debug;
   double font_scale;
   gboolean closing;
   gboolean plain; /* syntax coloring off (F7) */

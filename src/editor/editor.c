@@ -5,6 +5,7 @@
  */
 #include "editor/editor.h"
 
+#include "editor/breakpoints.h"
 #include "editor/detect.h"
 #include "editor/diffgutter.h"
 #include "editor/editorview.h"
@@ -419,6 +420,7 @@ static void on_loaded(GObject *source, GAsyncResult *result, gpointer data)
     editor_goto(tab, MAX(v->goto_line, 1), MAX(v->goto_column, 1));
     watch_file(tab);
     diff_gutter_loaded(tab);
+    breakpoints_loaded(tab);
     if (!lsp_wants(tab))
       completion_use_words(tab);
     else if (gtk_widget_get_mapped(GTK_WIDGET(tab->source)) || lsp_has(tab)) /* loaded again */

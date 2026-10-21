@@ -6,6 +6,7 @@
  */
 #include "project/project.h"
 
+#include "debug/debugger.h"
 #include "dialogs/about.h"
 #include "dialogs/keybinds.h"
 #include "editor/tabs.h"
@@ -119,6 +120,7 @@ static void switch_project(App *t, const char *root)
   if (strcmp(root, t->project.root) == 0)
     return;
   session_save(t);
+  debug_end(t); /* the program is the old project's */
   close_all_tabs(t);
   set_split(t, FALSE);
   lsp_stop(t); /* not a minute more of the old project's clangd: the next C file starts one here */
@@ -128,7 +130,7 @@ static void switch_project(App *t, const char *root)
 
   g_free(t->project.root);
   t->project.root = g_strdup(root);
-  session_load_project_indent(t);
+  session_load_project(t);
   update_title(t);
   session_add_recent(t);
   rebuild_recent_menu(t);

@@ -68,6 +68,12 @@ build/test-editing: tests/test_editing.c $(PAGE_SRC) $(APP_HDR) | build
 build/test-lsp: tests/test_lsp.c $(PAGE_SRC) $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_lsp.c $(shell pkg-config --libs $(PKGS))
 
+# The debugger's protocol client against gdb (skipped without one).
+DAP_SRC := src/debug/dap.c src/lsp/channel.c src/lsp/json.c
+build/test-debug: tests/test_debug.c $(DAP_SRC) src/debug/dap.h src/lsp/channel.h src/lsp/json.h | build
+	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags json-glib-1.0 gio-2.0) -o $@ tests/test_debug.c $(DAP_SRC) \
+	  $(shell pkg-config --libs json-glib-1.0 gio-2.0)
+
 build/test-scm: tests/test_scm.c src/git/scm.c src/git/gitstatus.c $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_scm.c src/git/scm.c $(shell pkg-config --libs $(PKGS))
 
@@ -90,13 +96,14 @@ build/test-about: tests/test_about.c src/dialogs/about.c $(APP_HDR) build/licens
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_about.c \
 	  $(shell pkg-config --libs $(PKGS))
 
-test: build/test-searchmatch build/test-detect build/test-linediff build/test-fileops build/test-lsp build/test-search-panel \
-      build/test-editing build/test-scm build/test-files build/test-window build/test-about
+test: build/test-searchmatch build/test-detect build/test-linediff build/test-fileops build/test-lsp build/test-debug \
+      build/test-search-panel build/test-editing build/test-scm build/test-files build/test-window build/test-about
 	build/test-searchmatch
 	build/test-detect
 	build/test-linediff
 	build/test-fileops
 	build/test-lsp
+	build/test-debug
 	build/test-search-panel
 	build/test-editing
 	build/test-scm
@@ -126,6 +133,9 @@ test-asan: | build
 	$(ASAN_ENV) build/asan/test-detect
 	$(ASAN_ENV) build/asan/test-linediff
 	$(ASAN_ENV) build/asan/test-fileops
+	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags json-glib-1.0 gio-2.0) -o build/asan/test-debug \
+	  tests/test_debug.c $(DAP_SRC) $(shell pkg-config --libs json-glib-1.0 gio-2.0)
+	$(ASAN_ENV) build/asan/test-debug
 
 # System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).
 install: build/t-code

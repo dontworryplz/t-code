@@ -15,7 +15,7 @@ VteTerminal *new_terminal(App *t);
  * window's text size. */
 void set_terminal_font(App *t, VteTerminal *term, const char *font);
 
-/* Gives the shell, the editors and the Files panel the fonts the settings choose for them. */
+/* Gives the terminals, the editors and the Files panel the fonts the settings choose for them. */
 void apply_fonts(App *t);
 
 /* Runs argv in term, in the project root, with $TCODE_SOCKET and extra_env ("NAME=value", may be
@@ -37,5 +37,5 @@ void run_in_shell(App *t, const char *command);
 /* cd into dir in the shell pane (kept out of the shell's history). */
 void cd_in_shell(App *t, const char *dir);
 
-/* The color theme changed: the shell takes its colors. */
+/* The color theme changed: the shell and the Debug panel's terminal take its colors. */
 void terminal_apply_colors(App *t);

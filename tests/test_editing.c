@@ -1059,6 +1059,118 @@ static void start_broadway(void)
   g_free(display);
 }
 
+/* The breakpoints' lines in /test/a.c as "3,5" ("" for none). */
+static char *breakpoint_lines(void)
+{
+  GArray *lines = breakpoints_in(&app, "/test/a.c");
+  GString *text = g_string_new("");
+
+  for (guint i = 0; lines && i < lines->len; i++)
+    g_string_append_printf(text, "%s%d", i ? "," : "", g_array_index(lines, int, i));
+  return g_string_free(text, FALSE);
+}
+
+static void assert_breakpoints(const char *expected)
+{
+  char *lines = breakpoint_lines();
+
+  g_assert_cmpstr(lines, ==, expected);
+  g_free(lines);
+}
+
+/* Inserts text at the start (column 0) or the end of line (0-based). */
+static void insert_at_line(Tab *tab, int line, gboolean at_end, const char *text)
+{
+  GtkTextIter at;
+
+  gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(tab->buffer), &at, line);
+  if (at_end)
+    gtk_text_iter_forward_to_line_end(&at);
+  gtk_text_buffer_insert(GTK_TEXT_BUFFER(tab->buffer), &at, text, -1);
+}
+
+/* A breakpoint moves with its line's text, two that come onto one line become one, and the table
+ * every file's breakpoints are kept in follows. */
+static void test_breakpoints(void)
+{
+  Tab *tab = new_tab("int a;\nint b;\nint c;\nint d;\n");
+
+  breakpoint_toggle(tab, 1);
+  breakpoint_toggle(tab, 3);
+  assert_breakpoints("2,4");
+  insert_at_line(tab, 1, FALSE, "\n"); /* Enter at the start of line 2: it goes down with its text */
+  assert_breakpoints("3,5");
+  insert_at_line(tab, 2, TRUE, "\n"); /* Enter at its end: it stays */
+  assert_breakpoints("3,6");
+  breakpoint_toggle(tab, 2); /* off again */
+  assert_breakpoints("6");
+  breakpoint_toggle(tab, 4);
+  assert_breakpoints("5,6");
+  GtkTextIter start, end; /* the line break between 5 and 6 goes: one breakpoint is left */
+  gtk_text_buffer_get_iter_at_line(GTK_TEXT_BUFFER(tab->buffer), &start, 4);
+  gtk_text_iter_forward_to_line_end(&start);
+  end = start;
+  gtk_text_iter_forward_char(&end);
+  gtk_text_buffer_delete(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+  assert_breakpoints("5");
+  breakpoint_toggle(tab, 4);
+  assert_breakpoints("");
+  g_assert_null(breakpoints_in(&app, "/test/a.c"));
+  free_tab(tab);
+}
+
+/* The session keeps them as "line:path"; a file's breakpoints come back when it is opened (loaded). */
+static void test_breakpoints_saved(void)
+{
+  Tab *tab = new_tab("one\ntwo\nthree\n");
+  char **saved;
+
+  breakpoint_toggle(tab, 2);
+  saved = breakpoints_save(&app);
+  g_assert_cmpstrv(saved, ((const char *[]){ "3:/test/a.c", NULL }));
+  breakpoints_remove_all(&app);
+  assert_breakpoints("");
+  g_assert_null(breakpoints_save(&app));
+  free_tab(tab);
+
+  char *again[] = { "2:/test/a.c", "1:/test/a.c", "x:/test/a.c", "4:relative.c", NULL };
+  breakpoints_restore(&app, again);
+  assert_breakpoints("1,2");
+  tab = new_tab("one\ntwo\nthree\n");
+  breakpoints_loaded(tab); /* as editor.c does once the file is in */
+  GSList *marks = marks_on(tab, 1);
+  g_assert_nonnull(marks);
+  g_slist_free(marks);
+  insert_at_line(tab, 0, FALSE, "zero\n");
+  assert_breakpoints("2,3");
+  breakpoints_remove_all(&app);
+  g_strfreev(saved);
+  free_tab(tab);
+}
+
+/* The line the program stopped at is marked once the file is in; read-only old versions take no
+ * breakpoints. */
+static void test_breakpoints_stop(void)
+{
+  Tab *tab = new_tab("one\ntwo\nthree\n");
+
+  app.debug.stop_path = g_strdup("/test/a.c");
+  app.debug.stop_line = 2;
+  breakpoints_loaded(tab);
+  g_assert_cmpint(stop_line(tab), ==, 1);
+  insert_at_line(tab, 0, FALSE, "zero\n"); /* it moves with the text */
+  g_assert_cmpint(stop_line(tab), ==, 2);
+  breakpoints_show_stop(&app, NULL, 0); /* running again: no tab gets it (none is in a group here) */
+  g_assert_null(app.debug.stop_path);
+  breakpoints_loaded(tab);
+  g_assert_cmpint(stop_line(tab), ==, -1);
+
+  tab->view->readonly = TRUE;
+  breakpoint_toggle(tab, 0);
+  assert_breakpoints("");
+  free_tab(tab);
+}
+
 int main(int argc, char **argv)
 {
   int status;
@@ -1075,6 +1187,9 @@ int main(int argc, char **argv)
   app.font_scale = 1.0;
   app.paths.styles = g_canonicalize_filename("styles", NULL); /* run from the repository (make test) */
   g_test_add_func("/editing/comment-lines", test_comment_lines);
+  g_test_add_func("/editing/breakpoints", test_breakpoints);
+  g_test_add_func("/editing/breakpoints-saved", test_breakpoints_saved);
+  g_test_add_func("/editing/breakpoints-stop", test_breakpoints_stop);
   g_test_add_func("/editing/enter-after-open", test_enter_after_open);
   g_test_add_func("/editing/double-click", test_double_click);
   g_test_add_func("/editing/occurrences", test_occurrences);

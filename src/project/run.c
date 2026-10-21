@@ -1,13 +1,17 @@
 /*
- * Build (Ctrl+Shift+B) and run (F5), in the shell pane, also on the status bar buttons.
- * The project is found from the current file upwards:
+ * Build (Ctrl+Shift+B), run (Ctrl+F5) and build for debugging (F5), in the shell pane, also on the
+ * status bar buttons. The project is found from the current file upwards:
  *   CMakeLists.txt  configure + build in build/; run starts the project's executable there
  *                  (named after the project, else the newest one that is not a test)
  *   Makefile        make; run uses "make run" when the Makefile has a run target
  *   neither         compile the current C/C++ file alone (with ASan/UBSan) into build/
+ * A build for debugging ends with "t-code --send 'debug <program>'": the control socket hands the
+ * program to the debugger (for a Makefile, which builds who knows what, the folder: the debugger
+ * asks which program, once).
  */
 #include "project/run.h"
 
+#include "debug/debugger.h"
 #include "editor/editor.h"
 #include "editor/tabs.h"
 #include "window/terminal.h"
@@ -18,6 +22,12 @@
 #define CXX_FLAGS "-std=c++20 -Wall -Wextra -g -fsanitize=address,undefined"
 
 typedef enum { PROJECT_NONE, PROJECT_CMAKE, PROJECT_MAKE, PROJECT_FILE } ProjectKind;
+
+typedef enum {
+  GOAL_BUILD,
+  GOAL_RUN,
+  GOAL_DEBUG, /* build, then hand the program to the debugger */
+} Goal;
 
 typedef struct {
   ProjectKind kind;
@@ -81,8 +91,21 @@ static Project find_project(App *t)
   return p;
 }
 
-/* The shell command that configures and builds with CMake (and with run, starts the program). */
-static char *cmake_command(const char *root, gboolean run)
+/* The shell command that gives the debugger what (already a shell word: '/a/b', "$exe") through the
+ * control socket. */
+static char *send_debug(const char *what)
+{
+  char *exe = g_file_read_link("/proc/self/exe", NULL);
+  char *quoted = g_shell_quote(exe ? exe : "t-code");
+  char *command = g_strdup_printf("%s --send \"debug \"%s", quoted, what);
+
+  g_free(quoted);
+  g_free(exe);
+  return command;
+}
+
+/* The shell command that configures and builds with CMake (and then runs or debugs the program). */
+static char *cmake_command(const char *root, Goal goal)
 {
   char *build_dir = g_build_filename(root, "build", NULL);
   char *src = g_shell_quote(root), *build = g_shell_quote(build_dir);
@@ -95,7 +118,8 @@ static char *cmake_command(const char *root, gboolean run)
                       " && cmake --build %s",
                       src, build, ninja ? "-G Ninja " : "", build);
 
-  if (run) {
+  if (goal != GOAL_BUILD) {
+    char *debug = goal == GOAL_DEBUG ? send_debug("\"$exe\"") : NULL;
     /* The executable named after the project (CMAKE_PROJECT_NAME) anywhere under build/
          * (targets may sit in build/bin, build/src); else the newest one that is not a test, else
          * the newest one. CMake's own checks and shared libraries are left out. */
@@ -106,9 +130,10 @@ static char *cmake_command(const char *root, gboolean run)
                                      " -printf '%%T@ %%p\\n' | sort -nr | cut -d' ' -f2- | grep -vi test;"
                                      " find . -type f -executable -not -path '*/CMakeFiles/*' -not -name '*.so*'"
                                      " -printf '%%T@ %%p\\n' | sort -nr | cut -d' ' -f2-; } | head -1)"
-                                     " && if [ -n \"$exe\" ]; then exe=%s/${exe#./} && echo \"▶ $exe\" && \"$exe\";"
+                                     " && if [ -n \"$exe\" ]; then exe=%s/${exe#./} && %s;"
                                      " else echo 'No executable in build/'; fi",
-                                     cmd, build, build);
+                                     cmd, build, build, debug ? debug : "echo \"▶ $exe\" && \"$exe\"");
+    g_free(debug);
     g_free(cmd);
     cmd = with_run;
   }
@@ -120,23 +145,27 @@ static char *cmake_command(const char *root, gboolean run)
   return cmd;
 }
 
-/* The shell command that runs make (and with run, "make run" when the Makefile has it). */
-static char *make_command(const char *root, gboolean run)
+/* The shell command that runs make (and then "make run" when the Makefile has it, or the debugger). */
+static char *make_command(const char *root, Goal goal)
 {
   char *dir = g_shell_quote(root);
+  char *debug = goal == GOAL_DEBUG ? send_debug(dir) : NULL;
   char *cmd =
-      run ? g_strdup_printf("make --no-print-directory -C %s"
+      debug ? g_strdup_printf("make --no-print-directory -C %s && %s", dir, debug)
+      : goal == GOAL_RUN
+          ? g_strdup_printf("make --no-print-directory -C %s"
                             " && if make -C %s -n run >/dev/null 2>&1; then make -s --no-print-directory -C %s run;"
                             " else echo \"Build OK (no 'run' target in Makefile)\"; fi",
                             dir, dir, dir)
           : g_strdup_printf("make --no-print-directory -C %s", dir);
 
+  g_free(debug);
   g_free(dir);
   return cmd;
 }
 
-/* The shell command that compiles one file into build/ next to it (and with run, runs it). */
-static char *file_command(const char *file, gboolean run)
+/* The shell command that compiles one file into build/ next to it (and then runs or debugs it). */
+static char *file_command(const char *file, Goal goal)
 {
   gboolean cxx;
   is_source(file, &cxx);
@@ -151,11 +180,17 @@ static char *file_command(const char *file, gboolean run)
   char *cmd = g_strdup_printf("mkdir -p %s && %s %s %s -o %s -lm", qout_dir, cxx ? "g++" : "gcc",
                               cxx ? CXX_FLAGS : C_FLAGS, qfile, qout);
 
-  if (run) {
+  if (goal == GOAL_RUN) {
     /* In a subshell: the shell stays in its own directory. */
     char *with_run = g_strdup_printf("%s && (cd %s && %s)", cmd, qdir, qout);
     g_free(cmd);
     cmd = with_run;
+  } else if (goal == GOAL_DEBUG) {
+    char *debug = send_debug(qout);
+    char *with_debug = g_strdup_printf("%s && %s", cmd, debug);
+    g_free(cmd);
+    g_free(debug);
+    cmd = with_debug;
   }
   g_free(qout);
   g_free(qout_dir);
@@ -218,20 +253,36 @@ static void run_saved(App *t, gpointer data)
   g_free(command);
 }
 
-void build_project(App *t, gboolean run)
+/* The command for goal; *cwd (may be NULL) gets the folder the program runs in. */
+static char *goal_command(App *t, Goal goal, char **cwd)
 {
   Project p = find_project(t);
   char *command;
 
   switch (p.kind) {
-    case PROJECT_CMAKE: command = cmake_command(p.root, run); break;
-    case PROJECT_MAKE: command = make_command(p.root, run); break;
-    case PROJECT_FILE: command = file_command(p.root, run); break;
+    case PROJECT_CMAKE: command = cmake_command(p.root, goal); break;
+    case PROJECT_MAKE: command = make_command(p.root, goal); break;
+    case PROJECT_FILE: command = file_command(p.root, goal); break;
     default:
       command = g_strdup("echo 't-code: nothing to build here (open a C file, or add a Makefile or CMakeLists.txt)'");
       break;
   }
-  /* Every changed file is saved first. */
-  save_all(t, run_saved, command);
+  if (cwd) /* the file's folder, as run does; the project's otherwise */
+    *cwd = p.kind == PROJECT_FILE ? g_path_get_dirname(p.root) : g_strdup(p.root ? p.root : t->project.root);
   g_free(p.root);
+  return command;
+}
+
+void build_project(App *t, gboolean run)
+{
+  /* Every changed file is saved first. */
+  save_all(t, run_saved, goal_command(t, run ? GOAL_RUN : GOAL_BUILD, NULL));
+}
+
+char *build_for_debug(App *t)
+{
+  char *cwd = NULL;
+
+  save_all(t, run_saved, goal_command(t, GOAL_DEBUG, &cwd));
+  return cwd;
 }

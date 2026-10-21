@@ -15,7 +15,7 @@ static const char license[] =
 #include "license.h"
     ;
 
-static const char *const tools[] = { "clangd", "git", "rg" };
+static const char *const tools[] = { "clangd", "gdb", "git", "rg" };
 
 typedef struct {
   GtkAboutDialog *dialog; /* weak: NULL once the window is closed */
@@ -142,6 +142,7 @@ void show_about(App *t)
   static const char *const authors[] = { "suacayipkisi https://github.com/suacayipkisi", NULL };
   static const char *const built_on[] = {
     "clangd https://clangd.llvm.org",
+    "GDB https://www.sourceware.org/gdb",
     "GTK https://www.gtk.org",
     "GtkSourceView https://gitlab.gnome.org/GNOME/gtksourceview",
     "VTE https://gitlab.gnome.org/GNOME/vte",

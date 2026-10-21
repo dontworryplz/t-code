@@ -4,11 +4,14 @@
  * (a path may hold a line break: printf 'open %s\0' "$path") ends them all that way:
  *   open <path>        open-side <path>    open-window <path> preview <path>     project <dir>
  *   compare <path>     history <path>      terminal <dir>     copy <text>
+ *   debug <path>
  * Paths are absolute. "compare" and "history" are git comparisons (git/compare.c), "terminal"
- * does cd in the shell, "copy" puts text on the clipboard.
+ * does cd in the shell, "copy" puts text on the clipboard, "debug" starts the debugger on a program
+ * that was just built for it (t-code --send, from project/run.c; a folder: pick one in it).
  */
 #include "ipc/socket.h"
 
+#include "debug/debugger.h"
 #include "editor/editor.h"
 #include "editor/preview.h"
 #include "git/compare.h"
@@ -45,6 +48,8 @@ static void handle(App *t, const char *command, const char *arg)
     open_project(t, arg);
   else if (strcmp(command, "terminal") == 0)
     cd_in_shell(t, arg);
+  else if (strcmp(command, "debug") == 0)
+    debug_launch(t, arg);
 }
 
 static void read_request(GDataInputStream *in, App *t);

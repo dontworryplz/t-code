@@ -5,6 +5,7 @@
 #include "editor/editorview.h"
 
 #include "editor/detect.h"
+#include "editor/breakpoints.h"
 #include "editor/diffgutter.h"
 #include "editor/editing.h"
 #include "editor/findbar.h"
@@ -430,6 +431,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   occurrences_attach(tab);
   diff_gutter_attach(tab);
   folding_attach(tab);
+  breakpoints_attach(tab);
   hover_attach(tab);
   completion_attach(tab);
   navigate_attach(tab);
@@ -495,6 +497,7 @@ void editor_view_free(EditorView *v)
   findbar_free(v->find);
   diff_gutter_free(v->diff);
   folding_free(v->folding);
+  breakpoints_free(v->breakpoints);
   sticky_free(v->sticky);
   g_free(v->closers);
   for (guint i = 0; i < v->next_waiters->len; i++) {

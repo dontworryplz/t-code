@@ -22,7 +22,8 @@ Depends: ${shlibs:Depends},
          git,
          fonts-cascadia-code,
          hicolor-icon-theme
-Recommends: ripgrep
+Recommends: ripgrep,
+            gdb
 Description: lightweight C/C++ IDE
  t-code is a lightweight C/C++ IDE: a file tree,
  GtkSourceView editor tabs sharing one clangd (errors underlined, completion,

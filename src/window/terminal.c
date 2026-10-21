@@ -29,10 +29,12 @@ void set_terminal_font(App *t, VteTerminal *term, const char *font)
   g_free(families);
 }
 
-/* Gives the shell, the editors and the Files panel the fonts the settings choose for them. */
+/* Gives the terminals, the editors and the Files panel the fonts the settings choose for them. */
 void apply_fonts(App *t)
 {
   set_terminal_font(t, t->shell.term, t->settings.font);
+  if (t->debug.term)
+    set_terminal_font(t, t->debug.term, t->settings.font);
   editor_view_set_font(t);
   files_apply_font(t);
 }
@@ -47,6 +49,8 @@ void terminal_apply_colors(App *t)
 {
   if (t->shell.term)
     color_terminal(t->shell.term);
+  if (t->debug.term)
+    color_terminal(t->debug.term);
 }
 
 /* A terminal in the editor font. */
