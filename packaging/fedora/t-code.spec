@@ -1,5 +1,5 @@
 Name:           t-code
-Version:        0.2.1
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Lightweight C/C++ IDE: file tree, editor tabs with clangd and a shell
 License:        MIT
@@ -57,6 +57,22 @@ build/test-linediff
 %{_datadir}/icons/hicolor/scalable/apps/io.github.tcode.svg
 
 %changelog
+* Wed Oct 21 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.3.0-1
+- A debugger: gdb over DAP, breakpoints (with conditions), F5 / stepping, the
+  Run and Debug panel (variables, watch, call stack, breakpoints), values
+  under the pointer, a Disassembly View
+- Quick fixes (Ctrl+.), Go to Symbol in File, Switch Source / Header, uses of
+  the symbol at the cursor highlighted, #if branches left out dimmed
+- Code folding and sticky scroll
+- Color themes with previews, a square look, settings.ini and hand-editable
+  theme files
+- Panels that move between docks, a title bar button per panel, Open in New
+  Window
+- Right-click menus everywhere; Source Control commit details; comparisons
+  open at the first change
+- A save conflict bar; Run for Python, JavaScript, Rust, Go, Java and other
+  projects
+
 * Tue Oct 20 2026 suacayipkisi <ufukdenizcaglayan@gmail.com> - 0.2.1-1
 - The Files panel is a native folder tree (GtkListView) instead of a terminal
   file manager: lazy folders, git colors, drag and drop, create / rename /

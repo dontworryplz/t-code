@@ -1,3 +1,22 @@
+t-code (0.3.0-1) unstable; urgency=medium
+
+  * A debugger: gdb over DAP, breakpoints (with conditions), F5 / stepping,
+    the Run and Debug panel (variables, watch, call stack, breakpoints),
+    values under the pointer, a Disassembly View.
+  * Quick fixes (Ctrl+.), Go to Symbol in File, Switch Source / Header, uses
+    of the symbol at the cursor highlighted, #if branches left out dimmed.
+  * Code folding and sticky scroll.
+  * Color themes with previews, a square look, settings.ini and hand-editable
+    theme files.
+  * Panels that move between docks, a title bar button per panel, Open in New
+    Window.
+  * Right-click menus everywhere; Source Control commit details; comparisons
+    open at the first change.
+  * A save conflict bar; Run for Python, JavaScript, Rust, Go, Java and other
+    projects.
+
+ -- suacayipkisi <ufukdenizcaglayan@gmail.com>  Wed, 21 Oct 2026 20:00:00 +0300
+
 t-code (0.2.1-1) unstable; urgency=medium
 
   * The Files panel is a native folder tree (GtkListView) instead of a
