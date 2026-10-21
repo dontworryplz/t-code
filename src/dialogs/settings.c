@@ -1,6 +1,7 @@
 /*
- * The Settings window (Ctrl+, or the gear in the title bar). Every change applies at once, to the
- * open editors too, and is saved in settings.ini, which can also be edited by hand.
+ * The Settings window (Ctrl+, or the gear in the title bar): pages listed on the left (General,
+ * Editor, Indentation, Appearance, C / C++, Edit by Hand). Every change applies at once, to the open
+ * editors too, and is saved in settings.ini, which can also be edited by hand.
  */
 #include "dialogs/settings.h"
 
@@ -17,11 +18,15 @@
 
 static const char *const css =
     ".tcode-settings { background: var(--tc-panel); }"
-    ".tcode-settings .section { font-weight: bold; color: var(--tc-fg-bright); margin: 18px 0 6px; }"
+    ".tcode-settings .section { font-weight: bold; font-size: larger; color: var(--tc-fg-bright); margin: 18px 0 6px; }"
+    ".tcode-settings stacksidebar { min-width: 150px; border-right: 1px solid var(--tc-border); }"
+    ".tcode-settings stacksidebar list { background: var(--tc-frame); }"
+    ".tcode-settings stacksidebar row { padding: 6px 12px; }"
     ".tcode-settings .name { color: var(--tc-fg); }"
     ".tcode-settings .note { color: var(--tc-fg-dim); font-size: smaller; }";
 
 static GtkWidget *window; /* the Settings window while it is open */
+static char *last_page;   /* the page shown when it closed: it opens there again */
 
 /* Applies the settings again to every open editor. */
 static void each_editor(App *t)
@@ -248,7 +253,7 @@ static GtkWidget *font_for(char **setting)
   return button;
 }
 
-/* A section heading ("Editor", "Window") across both columns. */
+/* A page's heading, across both columns. */
 static void add_heading(GtkGrid *grid, int *row, const char *title)
 {
   GtkWidget *heading = gtk_label_new(title);
@@ -324,13 +329,37 @@ void settings_changed(App *t, gboolean restart_lsp)
     lsp_restart(t);
 }
 
+/* A page of the window: its grid of rows (its heading in it), scrolling when the window is smaller. */
+static GtkWidget *add_page(GtkStack *stack, const char *name, const char *title, int *row)
+{
+  GtkWidget *grid = gtk_grid_new(), *scroll = gtk_scrolled_window_new();
+
+  gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+  gtk_grid_set_column_spacing(GTK_GRID(grid), 24);
+  gtk_widget_set_margin_start(grid, 24);
+  gtk_widget_set_margin_end(grid, 24);
+  gtk_widget_set_margin_bottom(grid, 24);
+  *row = 0;
+  add_heading(GTK_GRID(grid), row, title);
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), grid);
+  gtk_stack_add_titled(stack, scroll, name, title);
+  return grid;
+}
+
+/* The page shown changed: it is the one the window opens on next time. */
+static void on_page(GtkStack *stack, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+  g_set_str(&last_page, gtk_stack_get_visible_child_name(stack));
+}
+
 void show_settings(App *t)
 {
   static gboolean styled;
   GtkCssProvider *provider;
-  GtkWidget *grid;
+  GtkWidget *grid, *stack, *sidebar, *panes;
   GtkEventController *keys;
-  int row = 0;
+  int row;
 
   if (window) {
     gtk_window_present(GTK_WINDOW(window));
@@ -348,19 +377,21 @@ void show_settings(App *t)
   window = gtk_window_new();
   gtk_window_set_title(GTK_WINDOW(window), "Settings");
   gtk_window_set_transient_for(GTK_WINDOW(window), t->window);
-  gtk_window_set_default_size(GTK_WINDOW(window), 560, 640); /* smaller than the settings: they scroll */
+  gtk_window_set_default_size(GTK_WINDOW(window), 720, 480); /* a long page scrolls */
   gtk_widget_add_css_class(window, "tcode-settings");
   g_object_set_data(G_OBJECT(window), "t-code-app", t);
   g_object_add_weak_pointer(G_OBJECT(window), (gpointer *)&window);
+  stack = gtk_stack_new();
+  gtk_widget_set_hexpand(stack, TRUE);
 
-  grid = gtk_grid_new();
-  gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
-  gtk_grid_set_column_spacing(GTK_GRID(grid), 24);
-  gtk_widget_set_margin_start(grid, 24);
-  gtk_widget_set_margin_end(grid, 24);
-  gtk_widget_set_margin_bottom(grid, 24);
+  grid = add_page(GTK_STACK(stack), "general", "General", &row);
+  add_row(GTK_GRID(grid), &row, "Autosave", "Save a second after the last change",
+          switch_for(t->settings.autosave, G_CALLBACK(on_autosave)));
+  add_row(GTK_GRID(grid), &row, "Reopen the last project",
+          "When started from the app menu (not from a folder in a terminal)",
+          switch_for(t->settings.reopen_last, G_CALLBACK(on_reopen_last)));
 
-  add_heading(GTK_GRID(grid), &row, "Editor");
+  grid = add_page(GTK_STACK(stack), "editor", "Editor", &row);
   add_row(GTK_GRID(grid), &row, "Minimap", "A small picture of the file next to the scrollbar",
           switch_for(t->settings.minimap, G_CALLBACK(on_minimap)));
   add_row(GTK_GRID(grid), &row, "Sticky scroll",
@@ -372,6 +403,8 @@ void show_settings(App *t)
           switch_for(t->settings.guides, G_CALLBACK(on_guides)));
   add_row(GTK_GRID(grid), &row, "Word wrap", "Lines longer than the editor continue on the next row",
           switch_for(t->settings.word_wrap, G_CALLBACK(on_word_wrap)));
+
+  grid = add_page(GTK_STACK(stack), "indentation", "Indentation", &row);
   add_row(GTK_GRID(grid), &row, "Tab size",
           "For projects without their own: the status bar's choice, .editorconfig or .clang-format come first",
           spin_for(1, 16, 1, t->settings.tab_size, G_CALLBACK(on_tab_size)));
@@ -380,16 +413,8 @@ void show_settings(App *t)
   add_row(GTK_GRID(grid), &row, "Detect indentation",
           "Files indented with tabs or another number of spaces keep it (applies to files opened from now on)",
           switch_for(t->settings.detect_indent, G_CALLBACK(on_detect_indent)));
-  add_row(GTK_GRID(grid), &row, "Autosave", "Save a second after the last change",
-          switch_for(t->settings.autosave, G_CALLBACK(on_autosave)));
-  add_row(GTK_GRID(grid), &row, "Format on save",
-          "Ctrl+S formats C and C++ files with clangd first (the project's .clang-format); autosave does not",
-          switch_for(t->settings.format_on_save, G_CALLBACK(on_format_on_save)));
-  add_row(GTK_GRID(grid), &row, "clang-tidy checks",
-          "clangd also reports what the project's .clang-tidy asks for (more CPU while typing)",
-          switch_for(t->settings.clang_tidy, G_CALLBACK(on_clang_tidy)));
 
-  add_heading(GTK_GRID(grid), &row, "Window");
+  grid = add_page(GTK_STACK(stack), "appearance", "Appearance", &row);
   GtkWidget *theme = gtk_drop_down_new_from_strings((const char *const[]){ "Rounded", "Square", NULL });
   gtk_drop_down_set_selected(GTK_DROP_DOWN(theme), t->settings.square ? 1 : 0);
   g_signal_connect(theme, "notify::selected", G_CALLBACK(on_theme), NULL);
@@ -401,11 +426,16 @@ void show_settings(App *t)
           font_for(&t->settings.files_font));
   add_row(GTK_GRID(grid), &row, "Text size (%)", "Also Ctrl+= and Ctrl+-",
           spin_for(50, 300, 10, t->font_scale * 100, G_CALLBACK(on_text_size)));
-  add_row(GTK_GRID(grid), &row, "Reopen the last project",
-          "When started from the app menu (not from a folder in a terminal)",
-          switch_for(t->settings.reopen_last, G_CALLBACK(on_reopen_last)));
 
-  add_heading(GTK_GRID(grid), &row, "Edit by hand");
+  grid = add_page(GTK_STACK(stack), "c", "C / C++", &row);
+  add_row(GTK_GRID(grid), &row, "Format on save",
+          "Ctrl+S formats C and C++ files with clangd first (the project's .clang-format); autosave does not",
+          switch_for(t->settings.format_on_save, G_CALLBACK(on_format_on_save)));
+  add_row(GTK_GRID(grid), &row, "clang-tidy checks",
+          "clangd also reports what the project's .clang-tidy asks for (more CPU while typing)",
+          switch_for(t->settings.clang_tidy, G_CALLBACK(on_clang_tidy)));
+
+  grid = add_page(GTK_STACK(stack), "files", "Edit by Hand", &row);
   add_row(GTK_GRID(grid), &row, "Settings file", "settings.ini: these settings, each with a note",
           open_button(open_settings_file));
   add_row(GTK_GRID(grid), &row, "Theme CSS", "theme.css: your own CSS over t-code's look (colors, corners, sizes)",
@@ -413,10 +443,15 @@ void show_settings(App *t)
   add_row(GTK_GRID(grid), &row, "Editor colors", "Your copy of the editor's color scheme (dark-classic.xml)",
           open_button(open_editor_colors));
 
-  GtkWidget *scroll = gtk_scrolled_window_new();
-  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), grid);
-  gtk_window_set_child(GTK_WINDOW(window), scroll);
+  if (last_page && gtk_stack_get_child_by_name(GTK_STACK(stack), last_page))
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), last_page);
+  g_signal_connect(stack, "notify::visible-child", G_CALLBACK(on_page), NULL);
+  sidebar = gtk_stack_sidebar_new();
+  gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), GTK_STACK(stack));
+  panes = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_box_append(GTK_BOX(panes), sidebar);
+  gtk_box_append(GTK_BOX(panes), stack);
+  gtk_window_set_child(GTK_WINDOW(window), panes);
   keys = gtk_event_controller_key_new();
   g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key), NULL);
   gtk_widget_add_controller(window, keys);

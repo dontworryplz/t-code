@@ -1040,22 +1040,77 @@ static void test_open_user_files(void)
   g_free(theme);
 }
 
-/* The Settings window can be made smaller than its rows, which then scroll. */
-static void test_settings_scrolls(void)
+/* The open Settings window, or NULL. */
+static GtkWindow *settings_window(void)
 {
   GtkWindow *settings = NULL;
 
-  show_settings(&app);
-  run(50);
   for (guint i = 0; i < g_list_model_get_n_items(gtk_window_get_toplevels()); i++) {
     GtkWindow *window = g_list_model_get_item(gtk_window_get_toplevels(), i);
     if (g_strcmp0(gtk_window_get_title(window), "Settings") == 0)
       settings = window;
     g_object_unref(window);
   }
+  return settings;
+}
+
+/* The widgets of type under widget. */
+static int count_of(GtkWidget *widget, GType type)
+{
+  int n = G_TYPE_CHECK_INSTANCE_TYPE(widget, type);
+
+  for (GtkWidget *child = gtk_widget_get_first_child(widget); child; child = gtk_widget_get_next_sibling(child))
+    n += count_of(child, type);
+  return n;
+}
+
+static GtkStack *settings_stack(GtkWindow *settings)
+{
+  for (GtkWidget *child = gtk_widget_get_first_child(gtk_window_get_child(settings)); child;
+       child = gtk_widget_get_next_sibling(child))
+    if (GTK_IS_STACK(child))
+      return GTK_STACK(child);
+  return NULL;
+}
+
+/* The Settings window lists its pages on the left, each scrolling when the window is smaller; every
+ * setting is still there, and it opens again on the page it closed on. */
+static void test_settings_pages(void)
+{
+  static const char *const pages[] = { "general", "editor", "indentation", "appearance", "c", "files", NULL };
+  GtkWindow *settings;
+  GtkStack *stack;
+  int switches = 0;
+
+  show_settings(&app);
+  run(50);
+  settings = settings_window();
   g_assert_nonnull(settings);
   g_assert_true(gtk_window_get_resizable(settings));
-  g_assert_true(GTK_IS_SCROLLED_WINDOW(gtk_window_get_child(settings)));
+  stack = settings_stack(settings);
+  g_assert_nonnull(stack);
+  g_assert_cmpint(count_of(gtk_window_get_child(settings), GTK_TYPE_STACK_SIDEBAR), ==, 1);
+  for (int i = 0; pages[i]; i++) {
+    GtkWidget *page = gtk_stack_get_child_by_name(stack, pages[i]);
+    g_assert_nonnull(page);
+    g_assert_true(GTK_IS_SCROLLED_WINDOW(page));
+    switches += count_of(page, GTK_TYPE_SWITCH);
+  }
+  g_assert_cmpint(switches, ==, 11); /* none lost on the way */
+  g_assert_cmpstr(gtk_stack_get_visible_child_name(stack), ==, "general");
+
+  gtk_stack_set_visible_child_name(stack, "appearance");
+  gtk_window_destroy(settings);
+  run(50);
+  show_settings(&app);
+  run(50);
+  settings = settings_window();
+  g_assert_cmpstr(gtk_stack_get_visible_child_name(settings_stack(settings)), ==, "appearance");
+  GtkSelectionModel *rows = gtk_stack_get_pages(settings_stack(settings)); /* what the list on the left shows */
+  g_assert_true(gtk_selection_model_is_selected(rows, 3));
+  g_assert_false(gtk_selection_model_is_selected(rows, 0));
+  g_object_unref(rows);
+  gtk_stack_set_visible_child_name(settings_stack(settings), "general"); /* as it was, for the other tests */
   gtk_window_destroy(settings);
   run(50);
 }
@@ -1387,7 +1442,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/settings-moved", test_settings_moved);
   g_test_add_func("/window/settings-edited", test_settings_edited);
   g_test_add_func("/window/open-user-files", test_open_user_files);
-  g_test_add_func("/window/settings-scrolls", test_settings_scrolls);
+  g_test_add_func("/window/settings-pages", test_settings_pages);
   g_test_add_func("/window/temporary-tabs", test_temporary);
   g_test_add_func("/window/temporary-per-group", test_temporary_per_group);
   g_test_add_func("/window/opens-at-left-edge", test_opens_at_left_edge);
