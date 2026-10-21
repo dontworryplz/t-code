@@ -278,6 +278,7 @@ static const Command commands[] = {
   { "Markdown Preview", "<Control><Shift>v", "Ctrl+Shift+V", preview, FALSE, TRUE, FALSE },
   { "Split Editor", "<Control>backslash", "Ctrl+\\", toggle_split, FALSE, FALSE, FALSE },
   { "View: Move Editor into New Window", NULL, NULL, move_to_new_window, FALSE, TRUE, FALSE },
+  { "View: Reset Panel Layout", NULL, NULL, reset_panel_layout, FALSE, FALSE, FALSE },
   { "Focus Left Editor Group", "<Control>1", "Ctrl+1", focus_left, FALSE, FALSE, FALSE },
   { "Focus Right Editor Group", "<Control>2", "Ctrl+2", focus_right, FALSE, FALSE, FALSE },
   { "Next Tab", "<Control>Page_Down|<Alt>period", "Ctrl+PageDown, Alt+.", next_tab, FALSE, TRUE, FALSE },

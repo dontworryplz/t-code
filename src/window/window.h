@@ -16,9 +16,9 @@
 
 #include "app.h"
 
-/* The panels that go into the docks around the editors, by name. */
-#define PANELS 6
+/* The panels that go into the docks around the editors, by name, and the dock each is in at first. */
 extern const char *const panel_names[PANELS];
+extern const int panel_default_docks[PANELS];
 
 /* Creates the window with everything in it, starts the shell and shows it. Called once, from
  * the application's "activate" or "open" signal. */
@@ -43,3 +43,14 @@ int panel_dock(App *t, const char *page);
 
 /* Moves a panel (one of panel_names) to dock (0..DOCKS-1). */
 void move_panel(App *t, const char *page, int dock);
+
+/* Whether page shows: its dock and side are shown, not collapsed or squeezed to nothing, and it is
+ * the dock's current tab. */
+gboolean panel_shown(App *t, const char *page);
+
+/* Hides page's dock when page shows, else shows it wherever it is (the title bar's panel buttons). */
+void toggle_panel(App *t, const char *page);
+
+/* Puts every panel back in its first dock, every dock open, the sides at their first sizes
+ * ("View: Reset Panel Layout"). */
+void reset_panel_layout(App *t);

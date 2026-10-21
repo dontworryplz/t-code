@@ -1040,6 +1040,80 @@ static void test_open_user_files(void)
   g_free(theme);
 }
 
+/* The title bar's button of page. */
+static GtkWidget *panel_button(const char *page)
+{
+  for (int i = 0; i < PANELS; i++)
+    if (strcmp(panel_names[i], page) == 0)
+      return app.dock.panel_buttons[i];
+  return NULL;
+}
+
+static void click_panel(const char *page)
+{
+  g_signal_emit_by_name(panel_button(page), "clicked");
+  run(50);
+}
+
+static gboolean button_on(const char *page)
+{
+  return gtk_widget_has_css_class(panel_button(page), "tcode-panel-on");
+}
+
+/* Each panel has a button in the title bar, pressed while the panel shows: a click hides a shown
+ * panel and brings a hidden one back from wherever it is, also from a side squeezed to nothing (a
+ * size saved on a bigger screen), which Ctrl+J then shows too instead of hiding it. "View: Reset
+ * Panel Layout" puts everything back. */
+static void test_panel_buttons(void)
+{
+  int h = gtk_widget_get_height(GTK_WIDGET(app.layout.vpaned));
+
+  reset_panel_layout(&app);
+  run(50);
+  for (int i = 0; i < PANELS; i++)
+    g_assert_nonnull(app.dock.panel_buttons[i]);
+  g_assert_true(button_on("files"));
+  g_assert_false(button_on("scm")); /* a tab behind Files */
+  g_assert_true(button_on("shell"));
+
+  click_panel("scm");
+  g_assert_true(panel_shown(&app, "scm"));
+  g_assert_true(button_on("scm"));
+  g_assert_false(button_on("files"));
+  click_panel("scm"); /* shown: hidden */
+  g_assert_false(panel_shown(&app, "scm"));
+  g_assert_false(gtk_widget_get_visible(app.layout.left));
+  click_panel("files");
+  g_assert_true(panel_shown(&app, "files"));
+  g_assert_true(gtk_widget_get_visible(app.layout.left));
+
+  g_assert_cmpint(h, >, 200);
+  gtk_paned_set_position(app.layout.vpaned, h - 10); /* the bottom squeezed to nothing */
+  run(50);
+  g_assert_false(panel_shown(&app, "shell"));
+  g_assert_false(button_on("shell"));
+  click_panel("shell");
+  g_assert_true(panel_shown(&app, "shell"));
+  g_assert_cmpint(gtk_paned_get_position(app.layout.vpaned), <=, h - 48);
+  gtk_paned_set_position(app.layout.vpaned, h - 10);
+  toggle_pane(&app, app.layout.bottom); /* Ctrl+J's side toggle: shown, not hidden */
+  g_assert_true(gtk_widget_get_visible(app.layout.bottom));
+  g_assert_true(panel_shown(&app, "shell"));
+
+  move_panel(&app, "files", 8); /* moved right, its dock hidden, the bottom collapsed */
+  click_panel("files");
+  g_assert_false(panel_shown(&app, "files"));
+  click_panel("shell");
+  reset_panel_layout(&app);
+  run(50);
+  for (int i = 0; i < PANELS; i++)
+    g_assert_cmpint(panel_dock(&app, panel_names[i]), ==, panel_default_docks[i]);
+  g_assert_true(panel_shown(&app, "files"));
+  g_assert_true(panel_shown(&app, "shell"));
+  g_assert_false(gtk_widget_get_visible(app.layout.right)); /* nothing left there */
+  g_assert_true(button_on("files"));
+}
+
 /* The open Settings window, or NULL. */
 static GtkWindow *settings_window(void)
 {
@@ -1443,6 +1517,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/settings-edited", test_settings_edited);
   g_test_add_func("/window/open-user-files", test_open_user_files);
   g_test_add_func("/window/settings-pages", test_settings_pages);
+  g_test_add_func("/window/panel-buttons", test_panel_buttons);
   g_test_add_func("/window/temporary-tabs", test_temporary);
   g_test_add_func("/window/temporary-per-group", test_temporary_per_group);
   g_test_add_func("/window/opens-at-left-edge", test_opens_at_left_edge);

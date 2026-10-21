@@ -30,6 +30,9 @@
 /* Panes -------------------------------------------------------------------------------------- */
 
 const char *const panel_names[PANELS] = { "files", "scm", "search", "shell", "debug", "run" };
+const int panel_default_docks[PANELS] = { 0, 0, 0, 4, 4, 0 };
+
+static void queue_panel_buttons(App *t);
 
 static const char *panel_icon(const char *page)
 {
@@ -138,6 +141,24 @@ static void make_room(App *t, int side)
   }
 }
 
+/* Whether a shown side has been squeezed to (almost) nothing by its paned, as make_room() puts it
+ * right: a size saved on a bigger screen, a paned dragged to the edge. The bottom with every dock
+ * collapsed is small on purpose. */
+static gboolean side_squeezed(App *t, int side)
+{
+  if (side == 0)
+    return t->layout.hpaned && gtk_paned_get_position(t->layout.hpaned) < 48;
+  GtkPaned *paned = side == 1 ? t->layout.vpaned : t->layout.rpaned;
+  int size = !paned      ? 0
+             : side == 1 ? gtk_widget_get_height(GTK_WIDGET(paned))
+                         : gtk_widget_get_width(GTK_WIDGET(paned));
+  gboolean expanded = side != 1;
+
+  for (int i = 0; i < 4 && !expanded; i++)
+    expanded = gtk_widget_get_visible(t->dock.cards[4 + i]) && !t->dock.collapsed[4 + i];
+  return expanded && size > 0 && gtk_paned_get_position(paned) > size - 48;
+}
+
 /* Adjusts the paned positions on a side so collapsed docks shrink to their header bar and
  * expanded docks share the space. */
 static void sync_side_paneds(App *t, int side)
@@ -214,6 +235,7 @@ static void set_dock_collapsed(App *t, int d, gboolean collapsed)
   if (btn)
     gtk_button_set_icon_name(GTK_BUTTON(btn), collapsed ? "pan-end-symbolic" : "pan-down-symbolic");
   sync_side_paneds(t, d / 4);
+  queue_panel_buttons(t);
 }
 
 static void update_docks(App *t)
@@ -329,18 +351,99 @@ void toggle_pane(App *t, GtkWidget *pane)
       return;
     int side = d / 4;
     gboolean shown = gtk_widget_get_visible(t->dock.cards[d]) && !t->dock.collapsed[d] &&
-                     gtk_widget_get_visible(side_widget(t, side));
+                     gtk_widget_get_visible(side_widget(t, side)) && !side_squeezed(t, side);
     if (shown && g_strcmp0(gtk_stack_get_visible_child_name(t->dock.stacks[d]), name) == 0)
       hide_dock(t, d);
     else
       show_sidebar_page(t, name);
     return;
   }
-  gboolean show = !gtk_widget_get_visible(pane);
+  int side = pane == t->layout.left ? 0 : pane == t->layout.bottom ? 1 : pane == t->layout.right ? 2 : -1;
+  /* a side squeezed to nothing looks hidden: it is shown (with room) rather than hidden */
+  gboolean show = !gtk_widget_get_visible(pane) || (side >= 0 && side_squeezed(t, side));
 
   set_pane_visible(t, pane, show);
   if (show)
     gtk_widget_grab_focus(pane);
+}
+
+gboolean panel_shown(App *t, const char *page)
+{
+  int d = panel_dock(t, page);
+
+  return d >= 0 && gtk_widget_get_visible(t->dock.cards[d]) && !t->dock.collapsed[d] &&
+         gtk_widget_get_visible(side_widget(t, d / 4)) && !side_squeezed(t, d / 4) &&
+         g_strcmp0(gtk_stack_get_visible_child_name(t->dock.stacks[d]), page) == 0;
+}
+
+void toggle_panel(App *t, const char *page)
+{
+  if (panel_shown(t, page))
+    hide_dock(t, panel_dock(t, page));
+  else
+    show_sidebar_page(t, page);
+  queue_panel_buttons(t);
+}
+
+/* The title bar's panel buttons look pressed while their panel shows. */
+static gboolean sync_panel_buttons(gpointer data)
+{
+  App *t = data;
+
+  t->dock.buttons_id = 0;
+  for (int i = 0; i < PANELS && !t->closing; i++)
+    if (t->dock.panel_buttons[i]) {
+      if (panel_shown(t, panel_names[i]))
+        gtk_widget_add_css_class(t->dock.panel_buttons[i], "tcode-panel-on");
+      else
+        gtk_widget_remove_css_class(t->dock.panel_buttons[i], "tcode-panel-on");
+    }
+  return G_SOURCE_REMOVE;
+}
+
+/* Something about the panels changed: their buttons follow in an idle, once for many changes. */
+static void queue_panel_buttons(App *t)
+{
+  if (!t->dock.buttons_id)
+    t->dock.buttons_id = g_idle_add(sync_panel_buttons, t);
+}
+
+static void on_layout_changed(GObject *object G_GNUC_UNUSED, GParamSpec *spec G_GNUC_UNUSED, App *t)
+{
+  queue_panel_buttons(t);
+}
+
+/* The window goes: the buttons with it. */
+static void on_window_destroy(GtkWidget *window G_GNUC_UNUSED, App *t)
+{
+  g_clear_handle_id(&t->dock.buttons_id, g_source_remove);
+  memset(t->dock.panel_buttons, 0, sizeof t->dock.panel_buttons);
+}
+
+void reset_panel_layout(App *t)
+{
+  static const int first_split[3] = { 320, 480, 320 }; /* build_side_chain()'s */
+  int h = gtk_widget_get_height(GTK_WIDGET(t->layout.vpaned)), w = gtk_widget_get_width(GTK_WIDGET(t->layout.rpaned));
+
+  for (int i = 0; i < PANELS; i++) /* in panel_names' order: their tabs too */
+    move_panel(t, panel_names[i], panel_default_docks[i]);
+  for (int d = 0; d < DOCKS; d++) {
+    t->dock.saved_pos[d] = 0;
+    if (t->dock.collapsed[d])
+      set_dock_collapsed(t, d, FALSE);
+  }
+  for (int side = 0; side < 3; side++)
+    for (int i = 0; i < 3; i++)
+      gtk_paned_set_position(t->dock.paneds[side][i], first_split[side]);
+  update_docks(t);
+  gtk_paned_set_position(t->layout.hpaned, 280);
+  gtk_paned_set_position(t->layout.vpaned, h > 400 ? h - 240 : 620);
+  gtk_paned_set_position(t->layout.rpaned, w > 600 ? w - 280 : 840);
+  show_side(t, 0, TRUE);
+  show_side(t, 1, TRUE);
+  gtk_stack_set_visible_child_name(t->dock.stacks[panel_dock(t, "shell")], "shell");
+  show_sidebar_page(t, "files");
+  queue_panel_buttons(t);
 }
 
 static void update_scm_badge(GtkStackPage *sp, GParamSpec *pspec G_GNUC_UNUSED, App *t)
@@ -976,7 +1079,10 @@ static void create_docks(App *t)
       ".tcode-sidebar stackswitcher button:checked { color: var(--tc-fg-bright); background: color-mix(in srgb, var(--tc-fg) 10%, transparent); }"
       ".tcode-sidebar stackswitcher button:hover, .tcode-dock-close:hover {"
       "  color: var(--tc-fg-bright); background: color-mix(in srgb, var(--tc-fg) 5%, transparent); }"
-      ".tcode-scm-badge { font-size: 0.78em; font-weight: bold; }";
+      ".tcode-scm-badge { font-size: 0.78em; font-weight: bold; }"
+      ".tcode-panel-buttons button { color: var(--tc-fg-dim); }"
+      ".tcode-panel-buttons button.tcode-panel-on { color: var(--tc-fg-bright);"
+      "  background: color-mix(in srgb, var(--tc-fg) 12%, transparent); }";
   GtkCssProvider *provider = gtk_css_provider_new();
   GtkDropTarget *ed_drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_MOVE | GDK_ACTION_COPY);
   GType dropped[] = { G_TYPE_INT, G_TYPE_FILE }; /* a panel's icon, a file from the Files panel */
@@ -1005,6 +1111,13 @@ static void create_docks(App *t)
   t->layout.bottom = build_side_chain(t, 1, GTK_ORIENTATION_HORIZONTAL, 480);
   t->layout.right = build_side_chain(t, 2, GTK_ORIENTATION_VERTICAL, 320);
   update_docks(t);
+  /* the title bar's panel buttons follow whatever shows or hides a panel */
+  for (int d = 0; d < DOCKS; d++) {
+    g_signal_connect(t->dock.cards[d], "notify::visible", G_CALLBACK(on_layout_changed), t);
+    g_signal_connect(t->dock.stacks[d], "notify::visible-child", G_CALLBACK(on_layout_changed), t);
+  }
+  for (int side = 0; side < 3; side++)
+    g_signal_connect(side_widget(t, side), "notify::visible", G_CALLBACK(on_layout_changed), t);
 
   gtk_drop_target_set_gtypes(ed_drop, dropped, G_N_ELEMENTS(dropped));
   gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(ed_drop), GTK_PHASE_CAPTURE);
@@ -1028,15 +1141,27 @@ static void on_toggle_bottom(App *t)
   toggle_pane(t, side_has_pages(t, 1) ? t->layout.bottom : GTK_WIDGET(t->shell.term));
 }
 
-/* Open Folder and Recent Folders on the left; the main menu, Settings and Split Editor on the right. */
+/* A panel's button in the title bar: shows or hides it. */
+static void on_panel_button(GtkButton *button, App *t)
+{
+  toggle_panel(t, g_object_get_data(G_OBJECT(button), "tcode-panel"));
+}
+
+/* Open Folder, Recent Folders and a button per panel on the left; the main menu, Settings, the
+ * sides' toggles and Split Editor on the right. */
 static GtkWidget *header_bar(App *t)
 {
+  static const char *const tips[PANELS] = {
+    "Files (Alt+1)", "Source Control (Ctrl+Shift+G)", "Search (Ctrl+Shift+F)", "Terminal (Ctrl+J)",
+    "Debug (F5)",    "Run and Debug (Ctrl+Shift+D)"
+  };
+  GtkWidget *panels = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
   GtkWidget *header = gtk_header_bar_new();
   GtkWidget *open = gtk_button_new_from_icon_name("folder-open-symbolic");
   GtkWidget *recent = gtk_menu_button_new();
   GtkWidget *left_btn = gtk_button_new_from_icon_name("sidebar-show-symbolic");
   GtkWidget *right_btn = gtk_button_new_from_icon_name("sidebar-show-right-symbolic");
-  GtkWidget *bottom_btn = gtk_button_new_from_icon_name("utilities-terminal-symbolic");
+  GtkWidget *bottom_btn = gtk_button_new_from_icon_name("go-bottom-symbolic");
   GtkWidget *split = gtk_toggle_button_new();
   GtkWidget *settings = gtk_button_new_from_icon_name("emblem-system-symbolic");
   GtkWidget *menu = gtk_menu_button_new();
@@ -1050,6 +1175,19 @@ static GtkWidget *header_bar(App *t)
   gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(recent), G_MENU_MODEL(t->recent_menu));
   gtk_widget_set_tooltip_text(recent, "Recent Folders");
   gtk_header_bar_pack_start(GTK_HEADER_BAR(header), recent);
+
+  gtk_widget_add_css_class(panels, "tcode-panel-buttons");
+  gtk_widget_set_margin_start(panels, 12);
+  for (int i = 0; i < PANELS; i++) {
+    GtkWidget *button = gtk_button_new_from_icon_name(panel_icon(panel_names[i]));
+    gtk_widget_set_tooltip_text(button, tips[i]);
+    gtk_widget_set_focusable(button, FALSE);
+    g_object_set_data(G_OBJECT(button), "tcode-panel", (gpointer)panel_names[i]);
+    g_signal_connect(button, "clicked", G_CALLBACK(on_panel_button), t);
+    gtk_box_append(GTK_BOX(panels), button);
+    t->dock.panel_buttons[i] = button;
+  }
+  gtk_header_bar_pack_start(GTK_HEADER_BAR(header), panels);
 
   gtk_button_set_icon_name(GTK_BUTTON(split), "view-dual-symbolic");
   gtk_widget_set_tooltip_text(split, "Split Editor (Ctrl+\\)");
@@ -1073,6 +1211,7 @@ static GtkWidget *header_bar(App *t)
   g_signal_connect_swapped(settings, "clicked", G_CALLBACK(show_settings), t);
   gtk_header_bar_pack_end(GTK_HEADER_BAR(header), settings);
 
+  g_menu_append(items, "Reset Panel Layout", "win.reset-panels");
   g_menu_append(items, "Keyboard Shortcuts", "win.keybinds");
   g_menu_append(items, "About t-code", "win.about");
   gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu), "open-menu-symbolic");
@@ -1105,6 +1244,11 @@ void build_window(App *t, GtkApplication *app)
   add_project_actions(t);
   gtk_window_set_titlebar(t->window, header_bar(t));
   g_signal_connect(t->window, "close-request", G_CALLBACK(on_close_request), t);
+  g_signal_connect(t->window, "destroy", G_CALLBACK(on_window_destroy), t);
+  GSimpleAction *reset = g_simple_action_new("reset-panels", NULL);
+  g_signal_connect_swapped(reset, "activate", G_CALLBACK(reset_panel_layout), t);
+  g_action_map_add_action(G_ACTION_MAP(t->window), G_ACTION(reset));
+  g_object_unref(reset);
   update_title(t);
 
   create_shell_pane(t);
@@ -1143,6 +1287,9 @@ void build_window(App *t, GtkApplication *app)
   gtk_paned_set_position(t->layout.hpaned, 280);
   gtk_widget_set_vexpand(GTK_WIDGET(t->layout.hpaned), TRUE);
   gtk_widget_add_css_class(GTK_WIDGET(t->layout.hpaned), "tcode-workspace");
+  g_signal_connect(t->layout.hpaned, "notify::position", G_CALLBACK(on_layout_changed), t);
+  g_signal_connect(t->layout.vpaned, "notify::position", G_CALLBACK(on_layout_changed), t);
+  g_signal_connect(t->layout.rpaned, "notify::position", G_CALLBACK(on_layout_changed), t);
 
   gtk_box_append(GTK_BOX(content), GTK_WIDGET(t->layout.hpaned));
   gtk_box_append(GTK_BOX(content), status_bar(t));

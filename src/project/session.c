@@ -228,7 +228,6 @@ void session_save_settings(App *t)
 
 void session_apply_window(App *t)
 {
-  static const int defaults[PANELS] = { 0, 0, 0, 4, 4, 0 };
   GKeyFile *kf = load();
   GError *error = NULL;
   double scale = g_key_file_get_double(kf, "window", "font-scale", &error);
@@ -254,7 +253,7 @@ void session_apply_window(App *t)
       int def = 0;
       for (int j = 0; j < PANELS; j++)
         if (strcmp(panel_names[j], nm) == 0)
-          def = defaults[j];
+          def = panel_default_docks[j];
       char key[32];
       g_snprintf(key, sizeof(key), "dock-%s", nm);
       int d = get_int(kf, "window", key, def);

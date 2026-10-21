@@ -67,6 +67,7 @@ typedef struct Tab {
 #define GROUPS 3
 #define WINDOW_GROUP 2
 #define DOCKS 12 /* 0..3: left stacked, 4..7: bottom side-by-side, 8..11: right stacked */
+#define PANELS 6 /* the panels that go into the docks (window.h's panel_names) */
 
 struct App {
   GtkWindow *window;
@@ -88,7 +89,9 @@ struct App {
     GtkStack *stacks[DOCKS]; /* the stack of panels in each dock */
     gboolean collapsed[DOCKS];
     int saved_pos[DOCKS];
-    GtkStack *scm_stack; /* the dock stack currently holding t->scm */
+    GtkStack *scm_stack;              /* the dock stack currently holding t->scm */
+    GtkWidget *panel_buttons[PANELS]; /* the title bar's button per panel (panel_names' order) */
+    guint buttons_id;                 /* the idle that updates them */
   } dock;
 
   /* editors */
