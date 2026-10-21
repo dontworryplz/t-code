@@ -5,6 +5,7 @@
 #include "window/window.h"
 
 #include "debug/debugger.h"
+#include "debug/debugview.h"
 #include "dialogs/settings.h"
 #include "editor/editor.h"
 #include "editor/editorview.h"
@@ -28,7 +29,7 @@
 
 /* Panes -------------------------------------------------------------------------------------- */
 
-const char *const panel_names[PANELS] = { "files", "scm", "search", "shell", "debug" };
+const char *const panel_names[PANELS] = { "files", "scm", "search", "shell", "debug", "run" };
 
 static const char *panel_icon(const char *page)
 {
@@ -40,6 +41,8 @@ static const char *panel_icon(const char *page)
     return "system-search-symbolic";
   if (strcmp(page, "debug") == 0)
     return "system-run-symbolic";
+  if (strcmp(page, "run") == 0)
+    return "media-playback-start-symbolic";
   return "utilities-terminal-symbolic";
 }
 
@@ -996,6 +999,7 @@ static void create_docks(App *t)
   add_dock_panel(t, 0, clip_box(search_panel(t), TRUE), "search", "Search (Ctrl+Shift+F)");
   add_dock_panel(t, 4, GTK_WIDGET(t->shell.term), "shell", "Terminal (Alt+3 / Ctrl+J)");
   add_dock_panel(t, 4, debug_panel(t), "debug", "Debug (F5)");
+  add_dock_panel(t, 0, clip_box(debug_view(t), TRUE), "run", "Run and Debug (Ctrl+Shift+D)");
 
   t->layout.left = build_side_chain(t, 0, GTK_ORIENTATION_VERTICAL, 320);
   t->layout.bottom = build_side_chain(t, 1, GTK_ORIENTATION_HORIZONTAL, 480);

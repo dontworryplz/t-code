@@ -17,7 +17,7 @@
 #include "app.h"
 
 /* The panels that go into the docks around the editors, by name. */
-#define PANELS 5
+#define PANELS 6
 extern const char *const panel_names[PANELS];
 
 /* Creates the window with everything in it, starts the shell and shows it. Called once, from
@@ -41,5 +41,5 @@ void show_sidebar_page(App *t, const char *page);
 /* Which dock holds page (0..3 left, 4..7 bottom, 8..11 right; see DOCKS in app.h), or -1. */
 int panel_dock(App *t, const char *page);
 
-/* Moves a panel ("files", "scm", "search", "shell" or "debug") to dock (0..DOCKS-1). */
+/* Moves a panel (one of panel_names) to dock (0..DOCKS-1). */
 void move_panel(App *t, const char *page, int dock);

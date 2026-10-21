@@ -7,6 +7,7 @@
  */
 #include "editor/editor.h"
 #include "debug/debugger.h"
+#include "debug/debugview.h"
 #include "dialogs/settings.h"
 #include "editor/breakpoints.h"
 #include "editor/editorview.h"
@@ -785,6 +786,22 @@ static void wait_stop(int line)
   g_assert_cmpint(app.debug.stop_line, ==, line);
 }
 
+/* Waits until the Variables list holds line ("m = 6*"). */
+static void wait_variable(const char *line)
+{
+  gint64 end = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+  char *text = NULL;
+
+  do {
+    g_free(text);
+    g_main_context_iteration(NULL, FALSE);
+    text = debug_view_variables_text();
+  } while (!strstr(text, line) && g_get_monotonic_time() < end);
+  if (!strstr(text, line))
+    g_error("no \"%s\" in the variables:\n%s", line, text);
+  g_free(text);
+}
+
 static void wait_end(void)
 {
   gint64 end = g_get_monotonic_time() + 15 * G_USEC_PER_SEC;
@@ -798,18 +815,18 @@ static void wait_end(void)
  * over, out, on to a breakpoint put in while it is stopped, and to its end; Stop ends it at once. */
 static void test_debugging(void)
 {
-  static const char source[] = "#include <stdio.h>\n"      /* 1 */
-                               "static int twice(int n)\n" /* 2 */
-                               "{\n"                       /* 3 */
-                               "  int m = n * 2;\n"        /* 4 */
-                               "  return m;\n"             /* 5 */
-                               "}\n"                       /* 6 */
-                               "int main(void)\n"          /* 7 */
-                               "{\n"                       /* 8 */
-                               "  int a = twice(3);\n"     /* 9 */
-                               "  printf(\"%d\\n\", a);\n" /* 10 */
-                               "  return 0;\n"             /* 11 */
-                               "}\n";                      /* 12 */
+  static const char source[] = "#include <stdio.h>\n"        /* 1 */
+                               "static int twice(int n)\n"   /* 2 */
+                               "{\n"                         /* 3 */
+                               "  int m = n * 2;\n"          /* 4 */
+                               "  return m;\n"               /* 5 */
+                               "}\n"                         /* 6 */
+                               "int main(void)\n"            /* 7 */
+                               "{ int b[3] = { 1, 2, 3 };\n" /* 8 */
+                               "  int a = twice(3);\n"       /* 9 */
+                               "  printf(\"%d\\n\", a);\n"   /* 10 */
+                               "  return 0;\n"               /* 11 */
+                               "}\n";                        /* 12 */
   char *gdb = g_find_program_in_path("gdb"), *gcc = g_find_program_in_path("gcc");
 
   if (!gdb || !gcc) {
@@ -837,11 +854,19 @@ static void test_debugging(void)
   g_assert_true(debug_active(&app));
   wait_stop(4);
   g_assert_cmpstr(app.debug.stop_path, ==, path);
+  wait_variable("n = 3\n");
+  wait_variable("m = "); /* its value before the step, garbage */
+  char *stack = debug_view_stack_text();
+  g_assert_cmpstr(stack, ==, "twice prog.c:4\nmain prog.c:9\n");
+  g_free(stack);
   debug_step_over(&app);
   wait_stop(5);
+  wait_variable("m = 6*\n"); /* changed since the last pause */
+  wait_variable("n = 3\n");  /* not changed */
   debug_step_out(&app);
   wait_stop(9);
-  breakpoint_toggle(tab, 9); /* line 10, while stopped: gdb hears of it */
+  wait_variable("b = {1, 2, 3}\n"); /* an array's value, made from its elements */
+  breakpoint_toggle(tab, 9);        /* line 10, while stopped: gdb hears of it */
   debug_start_or_continue(&app);
   wait_stop(10);
   debug_start_or_continue(&app);

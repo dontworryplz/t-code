@@ -61,6 +61,7 @@ static void toggle_files(App *t) { toggle_pane(t, t->layout.left); }
 static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell.term)); }
 static void show_scm(App *t) { show_sidebar_page(t, "scm"); }
 static void show_search(App *t) { show_sidebar_page(t, "search"); }
+static void show_run(App *t) { show_sidebar_page(t, "run"); }
 /* clang-format on */
 
 /* Alt+1: the file manager, showing the sidebar. */
@@ -240,6 +241,7 @@ static const Command commands[] = {
   { "Debug: Pause", "F6", "F6", debug_pause, FALSE, FALSE, TRUE },
   { "Debug: Stop", "<Shift>F5", "Shift+F5", debug_stop, FALSE, FALSE, TRUE },
   { "Debug: Restart", "<Control><Shift>F5", "Ctrl+Shift+F5", debug_restart, FALSE, FALSE, TRUE },
+  { "View: Run and Debug", "<Control><Shift>d", "Ctrl+Shift+D", show_run, FALSE, FALSE, FALSE },
   { "Debug: Remove All Breakpoints", NULL, NULL, breakpoints_remove_all, FALSE, FALSE, FALSE },
   { "Debug: Select Program to Debug…", NULL, NULL, debug_select_program, FALSE, FALSE, FALSE },
   { "Git: Compare with HEAD", "<Control><Alt>d", "Ctrl+Alt+D", compare_head, FALSE, FALSE, FALSE },

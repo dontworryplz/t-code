@@ -21,7 +21,18 @@ typedef struct {
   gint64 seq;
   DapReply reply;
   gpointer data;
+  GDestroyNotify destroy;
 } Pending;
+
+/* An answer that will not come (dap_free): its data goes. */
+static void drop_pending(gpointer data)
+{
+  Pending *p = data;
+
+  if (p->destroy)
+    p->destroy(p->data);
+  g_free(p);
+}
 
 /* The debugger asked something itself (runInTerminal, startDebugging): none of it is done here. */
 static void refuse(Dap *d, JsonNode *message)
@@ -58,11 +69,14 @@ static void on_message(gpointer owner, const char *text)
       JsonNode *success = json_at(message, "success");
       gboolean ok = success && JSON_NODE_HOLDS_VALUE(success) && json_node_get_boolean(success);
       const char *error = json_string_at(message, "message");
-      g_hash_table_remove(d->pending, &seq);
+      g_hash_table_steal(d->pending, &seq);
+      g_free(p);
       if (ok && g_strcmp0(json_string_at(message, "command"), "initialize") == 0 && json_at(message, "body"))
         d->capabilities = json_node_copy(json_at(message, "body"));
-      if (done.reply)
+      if (done.reply) /* it may free d: done.data is ours alone now */
         done.reply(done.data, ok ? json_at(message, "body") : NULL, ok ? NULL : (error ? error : "failed"));
+      if (done.destroy)
+        done.destroy(done.data);
     }
   } else if (g_strcmp0(type, "event") == 0 && json_string_at(message, "event")) {
     d->on_event(d->owner, json_string_at(message, "event"), json_at(message, "body"));
@@ -82,12 +96,18 @@ static void on_closed(gpointer owner)
 
 void dap_request(Dap *d, const char *command, const char *arguments, DapReply reply, gpointer data)
 {
+  dap_request_full(d, command, arguments, reply, data, NULL);
+}
+
+void dap_request_full(Dap *d, const char *command, const char *arguments, DapReply reply, gpointer data,
+                      GDestroyNotify destroy)
+{
   Pending *p = g_new(Pending, 1);
   char *quoted = json_quote(command);
   char *body = g_strdup_printf("{\"seq\":%" G_GINT64_FORMAT ",\"type\":\"request\",\"command\":%s,\"arguments\":%s}",
                                ++d->seq, quoted, arguments ? arguments : "{}");
 
-  *p = (Pending){ d->seq, reply, data };
+  *p = (Pending){ d->seq, reply, data, destroy };
   g_hash_table_insert(d->pending, &p->seq, p);
   channel_send(d->ch, body);
   g_free(body);
@@ -115,7 +135,7 @@ Dap *dap_start(const char *const *argv, const char *cwd, char **env, DapEvent on
     return NULL;
   d = g_new0(Dap, 1);
   d->process = process;
-  d->pending = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, g_free);
+  d->pending = g_hash_table_new_full(g_int64_hash, g_int64_equal, NULL, drop_pending);
   d->on_event = on_event;
   d->owner = owner;
   d->ch =

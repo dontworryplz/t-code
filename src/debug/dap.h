@@ -26,6 +26,10 @@ Dap *dap_start(const char *const *argv, const char *cwd, char **env, DapEvent on
  * answer. */
 void dap_request(Dap *d, const char *command, const char *arguments, DapReply reply, gpointer data);
 
+/* The same; destroy (may be NULL) frees data after the reply, or when the answer is dropped (dap_free). */
+void dap_request_full(Dap *d, const char *command, const char *arguments, DapReply reply, gpointer data,
+                      GDestroyNotify destroy);
+
 /* What the debugger said it can do (the answer to initialize: "supportsStepBack", ...), or NULL
  * before it answered. */
 JsonNode *dap_capabilities(Dap *d);

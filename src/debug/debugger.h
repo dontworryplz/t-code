@@ -14,6 +14,9 @@ GtkWidget *debug_panel(App *t);
 /* Whether a program is being debugged (the step keys work only then). */
 gboolean debug_active(App *t);
 
+/* gdb, for the Run and Debug panel's requests; NULL when not debugging. */
+struct Dap *debug_dap(App *t);
+
 /* F5: builds the project and starts debugging it; while the program is stopped, it goes on. */
 void debug_start_or_continue(App *t);
 

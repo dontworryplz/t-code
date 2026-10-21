@@ -223,7 +223,7 @@ void session_save_settings(App *t)
 
 void session_apply_window(App *t)
 {
-  static const int defaults[PANELS] = { 0, 0, 0, 4, 4 };
+  static const int defaults[PANELS] = { 0, 0, 0, 4, 4, 0 };
   GKeyFile *kf = load();
   GError *error = NULL;
   double scale = g_key_file_get_double(kf, "window", "font-scale", &error);

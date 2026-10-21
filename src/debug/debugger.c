@@ -16,6 +16,7 @@
 #include "debug/debugger.h"
 
 #include "debug/dap.h"
+#include "debug/debugview.h"
 #include "editor/breakpoints.h"
 #include "editor/editor.h"
 #include "lsp/json.h"
@@ -52,6 +53,7 @@ struct Debugger {
   gboolean configured; /* the breakpoints went before the start: each change goes on its own now */
   gint64 thread;       /* the thread that stopped last, which the steps go on with */
   char *reason;        /* why it stopped last ("breakpoint", "step", "signal") */
+  gboolean crashed;    /* it stopped on a crash: its end is that crash's */
   gboolean restart;    /* build and start again once ended */
   guint end_id;        /* gdb is killed when it does not end the program in time */
 };
@@ -84,6 +86,7 @@ static void say(App *t, gboolean error, const char *text)
 
 typedef struct {
   App *app;
+  gboolean error;
   char *text;
 } Line;
 
@@ -91,7 +94,7 @@ static gboolean say_now(gpointer data)
 {
   Line *line = data;
 
-  say(line->app, FALSE, line->text);
+  say(line->app, line->error, line->text);
   g_free(line->text);
   g_free(line);
   return G_SOURCE_REMOVE;
@@ -99,11 +102,11 @@ static gboolean say_now(gpointer data)
 
 /* The same a moment later: gdb tells of the program's end before its terminal has read the program's
  * last lines. */
-static void say_later(App *t, char *text)
+static void say_later(App *t, gboolean error, char *text)
 {
   Line *line = g_new(Line, 1);
 
-  *line = (Line){ t, text };
+  *line = (Line){ t, error, text };
   g_timeout_add(LATER_MS, say_now, line);
 }
 
@@ -141,10 +144,12 @@ static void finish(Debugger *s)
   dap_free(s->dap);
   g_free(s->reason);
   g_free(s);
-  if (t->closing) /* the tabs are gone */
+  if (t->closing) { /* the tabs are gone */
     g_clear_pointer(&t->debug.stop_path, g_free);
-  else
+  } else {
     breakpoints_show_stop(t, NULL, 0);
+    debug_view_ended(t);
+  }
   update_ui(t, "Not debugging");
   if (again && !t->closing)
     debug_start_or_continue(t);
@@ -174,6 +179,7 @@ static void end_session(Debugger *s)
   }
   s->state = ENDING;
   breakpoints_show_stop(s->app, NULL, 0);
+  say(s->app, FALSE, "Stopped.");
   update_ui(s->app, "Stopping…");
   dap_request(s->dap, "disconnect", "{\"terminateDebuggee\":true}", on_disconnected, s);
   s->end_id = g_timeout_add(END_MS, on_end_timeout, s);
@@ -230,45 +236,114 @@ static const char *pause_reason(const char *reason)
   return "Paused";
 }
 
+/* What a crash was, in plain words: an ASan report, or the signal (signo, 0: unknown). */
+static const char *crash_meaning(gboolean sanitizer, int signo)
+{
+  if (sanitizer)
+    return "a memory error: reading or writing outside an array, or memory already freed (the report above says "
+           "which)";
+  switch (signo) {
+    case 11: return "a bad pointer (segmentation fault): NULL, freed, or pointing outside the program's memory";
+    case 8: return "an arithmetic error, like a division by zero";
+    case 6: return "abort(): a failed assert(), or the C library found its memory broken";
+    case 7: return "a bad memory access (bus error)";
+    case 4:
+    case 5: return "a trap: the compiler's checks caught undefined behavior";
+    default: return "a signal from the system";
+  }
+}
+
+typedef struct {
+  App *app;
+  char *where; /* "average.c:8 (in average)" */
+} Crash;
+
+static void crash_free(gpointer data)
+{
+  Crash *c = data;
+
+  g_free(c->where);
+  g_free(c);
+}
+
+static void say_crash(App *t, const char *where, gboolean sanitizer, int signo)
+{
+  say_later(t, TRUE, g_strdup_printf("■ The program crashed at %s: %s.", where, crash_meaning(sanitizer, signo)));
+}
+
+/* The signal's number came ($_siginfo.si_signo). */
+static void on_signal(gpointer data, JsonNode *body, const char *error G_GNUC_UNUSED)
+{
+  Crash *c = data;
+  const char *number = json_string_at(body, "result");
+
+  say_crash(c->app, c->where, FALSE, number ? atoi(number) : 0);
+}
+
 /* The stack of the thread that stopped: its innermost frame with a file on disk (not the C
- * library's, or ASan's) is shown. */
+ * library's, or ASan's) is shown, in the editor and in the Run and Debug panel. */
 static void on_stack(gpointer data, JsonNode *body, const char *error)
 {
   Debugger *s = data;
   App *t = s->app;
   JsonNode *frames = json_at(body, "stackFrames");
   guint n = frames && JSON_NODE_HOLDS_ARRAY(frames) ? json_array_get_length(json_node_get_array(frames)) : 0;
-  const char *path = NULL, *top = NULL;
-  int line = 0;
+  const char *path = NULL, *top = NULL, *function = NULL;
+  gboolean crash = g_strcmp0(s->reason, "signal") == 0 || g_strcmp0(s->reason, "exception") == 0;
+  gboolean sanitizer = FALSE;
+  int line = 0, shown = 0;
+  char *where;
 
   if (s->state != STOPPED) /* went on meanwhile */
     return;
-  for (guint i = 0; i < n && !path; i++) {
+  for (guint i = 0; i < n; i++) {
     JsonNode *frame = json_array_get_element(json_node_get_array(frames), i);
-    const char *file = json_string_at(frame, "source.path");
+    const char *file = json_string_at(frame, "source.path"), *name = json_string_at(frame, "name");
     if (i == 0)
-      top = json_string_at(frame, "name");
-    if (file && g_file_test(file, G_FILE_TEST_IS_REGULAR)) {
+      top = name;
+    if (name && !path && (strstr(name, "__asan") || strstr(name, "__sanitizer") || strstr(name, "__ubsan")))
+      sanitizer = TRUE;
+    if (!path && file && g_file_test(file, G_FILE_TEST_IS_REGULAR)) {
       path = file;
       line = (int)json_int_at(frame, "line", 0);
+      function = name;
+      shown = (int)i;
     }
   }
   if (path && line > 0) {
     char *name = g_path_get_basename(path);
-    char *status = g_strdup_printf("%s: %s:%d", pause_reason(s->reason), name, line);
+    char *status = g_strdup_printf("%s: %s:%d", crash ? "Crashed" : pause_reason(s->reason), name, line);
+    where = g_strdup_printf("%s:%d (in %s)", name, line, function ? function : "?");
     breakpoints_show_stop(t, path, line);
     open_file_at(t, path, line, 1);
     update_ui(t, status);
     g_free(status);
     g_free(name);
   } else {
-    char *where = g_strdup_printf("%s in %s (no source)", pause_reason(s->reason), top ? top : "?");
+    where = g_strdup_printf("%s (no source)", top ? top : "?");
+    char *status = g_strdup_printf("%s in %s", crash ? "Crashed" : pause_reason(s->reason), where);
     if (error)
       say(t, TRUE, error);
-    say(t, FALSE, where);
-    update_ui(t, where);
-    g_free(where);
+    update_ui(t, status);
+    g_free(status);
   }
+  debug_view_paused(t, frames, shown);
+  if (crash) {
+    s->crashed = TRUE;
+    if (sanitizer) {
+      say_crash(t, where, TRUE, 0);
+    } else {
+      Crash *c = g_new0(Crash, 1);
+      char *args = g_strdup_printf(
+          "{\"expression\":\"$_siginfo.si_signo\",\"context\":\"watch\",\"frameId\":%" G_GINT64_FORMAT "}",
+          json_int_at(frames, "0.id", 0));
+      c->app = t;
+      c->where = g_strdup(where);
+      dap_request_full(s->dap, "evaluate", args, on_signal, c, crash_free);
+      g_free(args);
+    }
+  }
+  g_free(where);
 }
 
 static void stopped(Debugger *s, JsonNode *body)
@@ -312,12 +387,17 @@ static void on_event(gpointer owner, const char *event, JsonNode *body)
   } else if (strcmp(event, "continued") == 0 && s->state != ENDING) {
     s->state = RUNNING;
     breakpoints_show_stop(t, NULL, 0);
+    debug_view_running(t);
     update_ui(t, "Running");
   } else if (strcmp(event, "process") == 0 && s->state == STARTING) {
     s->state = RUNNING;
+    debug_view_running(t);
     update_ui(t, "Running");
-  } else if (strcmp(event, "exited") == 0) {
-    say_later(t, g_strdup_printf("The program exited with code %d", (int)json_int_at(body, "exitCode", 0)));
+  } else if (strcmp(event, "exited") == 0 && s->state != ENDING) { /* Stop says so itself */
+    if (s->crashed)                                                /* gdb says 0 */
+      say_later(t, FALSE, g_strdup("The program ended: the crash killed it."));
+    else
+      say_later(t, FALSE, g_strdup_printf("The program exited with code %d.", (int)json_int_at(body, "exitCode", 0)));
   } else if (strcmp(event, "terminated") == 0) {
     finish(s);
   } else if (strcmp(event, "output") == 0) {
@@ -374,7 +454,10 @@ static void start(App *t, const char *program, const char *cwd)
   s->state = STARTING;
   s->thread = 1;
   s->dap = dap_start(argv, cwd, env, on_event, s, &error);
+  if (t->debug.term) /* this run's output alone */
+    vte_terminal_reset(t->debug.term, TRUE, TRUE);
   show_sidebar_page(t, "debug");
+  show_sidebar_page(t, "run");
   if (!s->dap) {
     line = g_strdup_printf("Could not start gdb: %s", error->message);
     say(t, TRUE, line);
@@ -383,7 +466,9 @@ static void start(App *t, const char *program, const char *cwd)
     update_ui(t, "Not debugging");
   } else {
     t->debug.session = s;
-    line = g_strdup_printf("▶ %s", program);
+    line = g_str_has_prefix(program, t->project.root) && program[strlen(t->project.root)] == '/'
+               ? g_strdup_printf("▶ %s", program + strlen(t->project.root) + 1)
+               : g_strdup_printf("▶ %s", program);
     say(t, FALSE, line);
     g_free(line);
     args = g_strdup_printf("{\"program\":%s,\"cwd\":%s}", qprogram, qcwd);
@@ -543,6 +628,11 @@ gboolean debug_active(App *t)
   return t->debug.session != NULL;
 }
 
+Dap *debug_dap(App *t)
+{
+  return t->debug.session && t->debug.session->state != ENDING ? t->debug.session->dap : NULL;
+}
+
 /* A request that sets the stopped program going (a step, continue). */
 static void go(App *t, const char *command)
 {
@@ -553,6 +643,7 @@ static void go(App *t, const char *command)
     return;
   s->state = RUNNING;
   breakpoints_show_stop(t, NULL, 0);
+  debug_view_running(t);
   update_ui(t, "Running");
   args = g_strdup_printf("{\"threadId\":%" G_GINT64_FORMAT "}", s->thread);
   dap_request(s->dap, command, args, NULL, NULL);
