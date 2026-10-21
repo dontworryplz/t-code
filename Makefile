@@ -62,7 +62,7 @@ build/test-detect: tests/test_detect.c src/editor/detect.c src/editor/detect.h s
 # the language server.
 PAGE_SRC := $(filter-out src/editor/tabs.c src/editor/editor.c src/editor/preview.c,$(wildcard src/editor/*.c)) \
             $(wildcard src/lsp/*.c) src/git/linediff.c src/window/palette.c tests/editor_page.h
-build/test-editing: tests/test_editing.c $(PAGE_SRC) $(APP_HDR) | build
+build/test-editing: tests/test_editing.c tests/broadway.h $(PAGE_SRC) $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_editing.c $(shell pkg-config --libs $(PKGS))
 
 build/test-lsp: tests/test_lsp.c $(PAGE_SRC) $(APP_HDR) | build
@@ -88,7 +88,7 @@ build/test-files: tests/test_files.c $(wildcard src/files/*.c) src/window/palett
 	  $(shell pkg-config --libs $(PKGS))
 
 # A whole window (every module but main.c): how tabs open and close.
-build/test-window: tests/test_window.c $(APP_SRC) $(APP_HDR) build/license.h | build
+build/test-window: tests/test_window.c tests/broadway.h $(APP_SRC) $(APP_HDR) build/license.h | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_window.c \
 	  $(filter-out src/main.c,$(APP_SRC)) $(shell pkg-config --libs $(PKGS))
 

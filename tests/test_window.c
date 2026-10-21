@@ -25,6 +25,7 @@
 #include "window/palette.h"
 #include "window/theme.h"
 #include "window/window.h"
+#include "broadway.h"
 
 #include <gio/gunixsocketaddress.h>
 #include <glib/gstdio.h>
@@ -743,6 +744,12 @@ static void test_run_projects(void)
   path = put(py, "scripts/main.py",
              "import os\nfrom mypkg import util\nprint(util.NAME, os.path.basename(os.getcwd()))\n", 0644);
   check_run(path, "PYTHONPATH=", "python3", "util py\n"); /* from the root, its package found */
+  g_free(path);
+  /* in a package: as a module, so its relative imports work */
+  path = put(py, "mypkg/tool.py", "from .util import NAME\nprint('tool', NAME)\n", 0644);
+  check_run(path, "-m 'mypkg.tool'", "python3", "tool util\n");
+  g_free(path);
+  path = g_build_filename(py, "scripts", "main.py", NULL);
   g_free(put(py, ".venv/bin/python", "#!/bin/sh\necho venv python\n", 0755));
   check_run(path, ".venv/bin/python", "sh", "venv python\n");
   summary = project_summary(&app);
@@ -767,6 +774,14 @@ static void test_run_projects(void)
   g_free(put(cargo, "src/main.rs", "fn main() { println!(\"main ran\"); }\n", 0644));
   path = put(cargo, "src/bin/other.rs", "fn main() { println!(\"other ran\"); }\n", 0644);
   check_run(path, "cargo run --bin 'other'", "cargo", "other ran\n");
+  g_free(path);
+  /* a library in a workspace: cargo runs the workspace's program */
+  g_free(put(other, "ws/Cargo.toml", "[workspace]\nmembers = [\"app\", \"lib\"]\nresolver = \"2\"\n", 0644));
+  g_free(put(other, "ws/app/Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n", 0644));
+  g_free(put(other, "ws/app/src/main.rs", "fn main() { println!(\"app ran\"); }\n", 0644));
+  g_free(put(other, "ws/lib/Cargo.toml", "[package]\nname = \"lib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n", 0644));
+  path = put(other, "ws/lib/src/lib.rs", "pub fn f() {}\n", 0644);
+  check_run(path, "/ws' && cargo run", "cargo", "app ran\n");
   g_free(path);
   path = put(other, "alone.rs", "fn main() { println!(\"alone ran\"); }\n", 0644);
   check_run(path, "rustc", "rustc", "alone ran\n");
@@ -941,24 +956,6 @@ static void test_opens_at_left_edge(void)
   app.settings.word_wrap = wrap;
   g_string_free(text, TRUE);
   g_free(path);
-}
-
-static GPid broadway;
-
-/* The window is shown (build_window presents it): on GTK's Broadway backend, nothing appears on the
- * screen. Without gtk4-broadwayd it opens on the desktop for a moment. */
-static void start_broadway(void)
-{
-  char *display = g_strdup_printf(":%d", 50 + g_random_int_range(0, 50));
-  char *argv[] = { "gtk4-broadwayd", display, NULL };
-
-  if (g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
-                    NULL, NULL, &broadway, NULL)) {
-    g_setenv("GDK_BACKEND", "broadway", TRUE);
-    g_setenv("BROADWAY_DISPLAY", display, TRUE);
-    g_usleep(300 * 1000); /* until it listens */
-  }
-  g_free(display);
 }
 
 /* The first run (no session.ini yet): Files shows on the left, the shell below the editors. */
@@ -1416,8 +1413,7 @@ int main(int argc, char **argv)
   g_signal_connect(gapp, "activate", G_CALLBACK(on_activate), NULL);
   g_application_run(G_APPLICATION(gapp), 1, argv);
   g_object_unref(gapp);
-  if (broadway)
-    kill(broadway, SIGTERM);
+  stop_broadway();
   stop_socket(&app);
   remove_temp_dir(&app);
   files_delete(home, NULL);

@@ -6,6 +6,7 @@
 #define _DEFAULT_SOURCE /* kill() under -std=c23 with musl */
 
 #include "editor_page.h"
+#include "broadway.h"
 
 #include <glib/gstdio.h>
 #include <math.h>
@@ -1041,24 +1042,6 @@ static void test_indent_order(void)
   free_tab(tab);
 }
 
-static GPid broadway;
-
-/* /editing/strip-follows-map shows a window: on GTK's Broadway backend, nothing appears on the
- * screen. Without gtk4-broadwayd it opens on the desktop for a moment. */
-static void start_broadway(void)
-{
-  char *display = g_strdup_printf(":%d", 50 + g_random_int_range(0, 50));
-  char *argv[] = { "gtk4-broadwayd", display, NULL };
-
-  if (g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
-                    NULL, NULL, &broadway, NULL)) {
-    g_setenv("GDK_BACKEND", "broadway", TRUE);
-    g_setenv("BROADWAY_DISPLAY", display, TRUE);
-    g_usleep(300 * 1000); /* until it listens */
-  }
-  g_free(display);
-}
-
 /* The breakpoints in path as "3,5 if i == 2" ("" for none). */
 static char *breakpoints_of(const char *path)
 {
@@ -1272,7 +1255,6 @@ int main(int argc, char **argv)
   g_test_add_func("/guides/blank-lines", test_guide_blank_lines);
   g_test_add_func("/signature/outlived", test_signature_outlived);
   status = g_test_run();
-  if (broadway)
-    kill(broadway, SIGTERM);
+  stop_broadway();
   return status;
 }

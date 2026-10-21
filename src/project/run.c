@@ -357,6 +357,36 @@ static char *venv_python(const char *root)
   return NULL;
 }
 
+/* A Python file's module name when it is inside its root's packages ("app.cli" for app/cli.py with
+ * app/__init__.py; "app" for app/__main__.py), else NULL: it then runs as a file. Relative imports
+ * (from .core import x) work only when it runs as a module. */
+static char *python_module(const char *root, const char *file)
+{
+  size_t len = strlen(root);
+  char *at, *module;
+  gboolean package;
+
+  if (!g_str_has_prefix(file, root) || file[len] != '/')
+    return NULL;
+  at = g_path_get_dirname(file);
+  package = strlen(at) > len;           /* a file in the root itself is in no package */
+  while (package && strlen(at) > len) { /* every folder up to the root has __init__.py */
+    char *init = g_build_filename(at, "__init__.py", NULL), *parent = g_path_get_dirname(at);
+    package = g_file_test(init, G_FILE_TEST_IS_REGULAR);
+    g_free(init);
+    g_free(at);
+    at = parent;
+  }
+  g_free(at);
+  if (!package)
+    return NULL;
+  module = g_strndup(file + len + 1, strlen(file + len + 1) - strlen(".py"));
+  g_strdelimit(module, "/", '.');
+  if (g_str_has_suffix(module, ".__main__"))
+    module[strlen(module) - strlen(".__main__")] = '\0';
+  return module;
+}
+
 /* what (taken), run only when program is installed. */
 static char *if_installed(const char *program, char *what)
 {
@@ -387,9 +417,17 @@ static char *script_command(const Project *p, Goal goal)
   if (goal == GOAL_DEBUG) /* the debugger does not ask (project_can_debug) */
     what = g_strdup("echo 't-code: debugging is for C and C++ programs; Ctrl+F5 runs this file'; false");
   else if (goal == GOAL_RUN) /* in a subshell: the shell stays in its own directory */
-    what = script->run ? g_strdup_printf("(cd %s && %s%s %s)", qdir, path, run, qfile)
-                       : g_strdup_printf("(cd %s && %s)", qdir, qfile);
-  else if (check)
+  {
+    char *module = p->python ? python_module(p->python, p->file) : NULL,
+         *qmodule = module ? g_shell_quote(module) : NULL;
+    if (module)
+      what = g_strdup_printf("(cd %s && %s%s -m %s)", qdir, path, run, qmodule);
+    else
+      what = script->run ? g_strdup_printf("(cd %s && %s%s %s)", qdir, path, run, qfile)
+                         : g_strdup_printf("(cd %s && %s)", qdir, qfile);
+    g_free(qmodule);
+    g_free(module);
+  } else if (check)
     what = g_strdup_printf("(cd %s && %s %s) && echo 't-code: no syntax errors'", qdir, check, qfile);
   else
     what = g_strdup("echo 't-code: nothing to build, Ctrl+F5 runs this file'");
@@ -428,6 +466,36 @@ static char *rustc_command(const char *file, Goal goal)
   g_free(base);
   g_free(dir);
   return if_installed("rustc", cmd);
+}
+
+/* Where cargo runs for a crate: the crate itself, or its workspace's root when the crate has nothing
+ * to run (a library: cargo run there fails, the workspace's root runs its program). */
+static char *cargo_root(const char *crate)
+{
+  char *main_rs = g_build_filename(crate, "src", "main.rs", NULL), *bin = g_build_filename(crate, "src", "bin", NULL);
+  char *toml = g_build_filename(crate, "Cargo.toml", NULL), *text = NULL, *root = NULL;
+  gboolean runs = g_file_test(main_rs, G_FILE_TEST_EXISTS) || g_file_test(bin, G_FILE_TEST_IS_DIR) ||
+                  (g_file_get_contents(toml, &text, NULL, NULL) && strstr(text, "[[bin]]"));
+
+  g_free(text);
+  char *dir = runs ? NULL : g_path_get_dirname(crate);
+  while (dir && !root) { /* upwards to the workspace's Cargo.toml */
+    char *path = g_build_filename(dir, "Cargo.toml", NULL), *parent = g_path_get_dirname(dir);
+    text = NULL;
+    if (g_file_get_contents(path, &text, NULL, NULL) && strstr(text, "[workspace]"))
+      root = g_strdup(dir);
+    if (strcmp(parent, dir) == 0) /* the top */
+      g_clear_pointer(&parent, g_free);
+    g_free(text);
+    g_free(path);
+    g_free(dir);
+    dir = parent;
+  }
+  g_free(dir);
+  g_free(toml);
+  g_free(bin);
+  g_free(main_rs);
+  return root ? root : g_strdup(crate);
 }
 
 /* Cargo's target for a file: "--bin name" in src/bin/, "--example name" in examples/, else "". */
@@ -524,9 +592,11 @@ static char *language_command(const Project *p, Goal goal)
 
   switch (p->kind) {
     case PROJECT_CARGO: {
-      char *target = cargo_target(p->root, p->file);
+      char *target = cargo_target(p->root, p->file), *where = cargo_root(p->root), *qwhere = g_shell_quote(where);
       program = "cargo";
-      cmd = g_strdup_printf("(cd %s && cargo %s%s)", qroot, goal == GOAL_RUN ? "run" : "build", target);
+      cmd = g_strdup_printf("(cd %s && cargo %s%s)", qwhere, goal == GOAL_RUN ? "run" : "build", target);
+      g_free(qwhere);
+      g_free(where);
       g_free(target);
       break;
     }
