@@ -2,13 +2,13 @@
 
 A light C/C++ IDE for Linux in one GTK4 window, with a dark look (Dark Classic) and other color themes.
 
+### Jump => [Latest Release v0.3](https://github.com/suacayipkisi/t-code/releases/tag/v0.3) | [Install](https://github.com/suacayipkisi/t-code#install) | [Usage and Keys](https://github.com/suacayipkisi/t-code#usage) | [Performance](https://github.com/suacayipkisi/t-code#performance)
+
 ![t-code 0.3 in the Dark Classic color theme with the rounded look](docs/dark_classic-rounded.png)
 
 ![t-code 0.3 in the Gruvbox color theme with the square look](docs/gruvbox-square.png)
 
 <sub>t-code 0.3: Dark Classic, rounded (top) and Gruvbox, square (bottom).</sub>
-
-## Jump => [Install](https://github.com/suacayipkisi/t-code#install) | [Usage and Keys](https://github.com/suacayipkisi/t-code#usage) | [Performance](https://github.com/suacayipkisi/t-code#performance)
 
 **New in 0.3:** a debugger (gdb: breakpoints, stepping, variables, call stack, watch, conditional
 breakpoints, values under the pointer, disassembly), quick fixes, code folding, sticky scroll, color
