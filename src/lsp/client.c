@@ -32,6 +32,9 @@
 #endif
 #define MAX_CRASHES 3
 
+/* A compile database written (make, cmake) is told to the server this long after its last change. */
+#define DATABASE_MS 1500
+
 #ifdef __GLIBC__
 #define MALLOC_TRIM "--malloc-trim", /* gives freed memory back to the system */
 #else
@@ -83,7 +86,10 @@ struct Lsp {
   guint64 use;      /* next LRU stamp for docs */
   guint idle_id, restart_id;
   int crashes;
-  gboolean missing; /* the server is not installed: not tried again */
+  gboolean missing;       /* the server is not installed: not tried again */
+  GFileMonitor *watch[2]; /* the root and its build/ folder, for a compile database written */
+  GString *written;       /* didChangeWatchedFiles changes not sent yet, comma separated */
+  guint written_id;
 };
 
 char *lsp_uri_to_path(const char *uri)
@@ -455,10 +461,82 @@ static Lsp *lsp_of(App *t)
 
 /* Stops the server: stdin closes, and it exits. Requests get NULL; the files are sent again to the
  * next one. */
+/* The compile database changed: the server hears of it, and the open files go again, so that it
+ * reads their flags anew (a "No compile flags" hint goes once make wrote the database). */
+static gboolean database_written(gpointer data)
+{
+  Lsp *l = data;
+  GHashTableIter iter;
+  gpointer doc;
+
+  l->written_id = 0;
+  if (!l->ready || !l->written->len)
+    return G_SOURCE_REMOVE;
+  char *params = g_strdup_printf("{\"changes\":[%s]}", l->written->str);
+  notify(l, "workspace/didChangeWatchedFiles", params);
+  g_free(params);
+  g_string_truncate(l->written, 0);
+  g_hash_table_iter_init(&iter, l->docs);
+  while (g_hash_table_iter_next(&iter, NULL, &doc))
+    if (((Doc *)doc)->opened) {
+      close_on_server(doc);
+      send_document(doc);
+    }
+  return G_SOURCE_REMOVE;
+}
+
+static void on_folder_changed(GFileMonitor *monitor G_GNUC_UNUSED, GFile *file, GFile *other, GFileMonitorEvent event,
+                              Lsp *l)
+{
+  if (event == G_FILE_MONITOR_EVENT_RENAMED || event == G_FILE_MONITOR_EVENT_MOVED_IN)
+    file = other ? other : file; /* an atomic save: written to a temporary name, then renamed */
+  if (!file || (event != G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT && event != G_FILE_MONITOR_EVENT_CREATED &&
+                event != G_FILE_MONITOR_EVENT_DELETED && event != G_FILE_MONITOR_EVENT_RENAMED &&
+                event != G_FILE_MONITOR_EVENT_MOVED_IN))
+    return;
+  char *name = g_file_get_basename(file);
+  gboolean database =
+      !g_strcmp0(name, "compile_commands.json") || !g_strcmp0(name, "compile_flags.txt") || !g_strcmp0(name, ".clangd");
+  g_free(name);
+  if (!database)
+    return;
+  char *uri = g_file_get_uri(file), *quoted = json_quote(uri);
+  int type = event == G_FILE_MONITOR_EVENT_CREATED ? 1 : event == G_FILE_MONITOR_EVENT_DELETED ? 3 : 2;
+  g_string_append_printf(l->written, "%s{\"uri\":%s,\"type\":%d}", l->written->len ? "," : "", quoted, type);
+  g_free(quoted);
+  g_free(uri);
+  if (l->written_id)
+    g_source_remove(l->written_id);
+  l->written_id = g_timeout_add(DATABASE_MS, database_written, l);
+}
+
+static void watch_databases(Lsp *l)
+{
+  for (int i = 0; i < 2; i++) {
+    char *path = i ? g_build_filename(l->root, "build", NULL) : g_strdup(l->root);
+    GFile *folder = g_file_new_for_path(path);
+    l->watch[i] = g_file_monitor_directory(folder, G_FILE_MONITOR_WATCH_MOVES, NULL, NULL);
+    if (l->watch[i])
+      g_signal_connect(l->watch[i], "changed", G_CALLBACK(on_folder_changed), l);
+    g_object_unref(folder);
+    g_free(path);
+  }
+}
+
 static void server_stop(Lsp *l)
 {
   GHashTableIter iter;
   gpointer doc;
+
+  for (int i = 0; i < 2; i++)
+    if (l->watch[i]) {
+      g_file_monitor_cancel(l->watch[i]);
+      g_signal_handlers_disconnect_by_data(l->watch[i], l);
+      g_clear_object(&l->watch[i]);
+    }
+  g_clear_handle_id(&l->written_id, g_source_remove);
+  if (l->written)
+    g_string_truncate(l->written, 0);
 
   if (l->ch) {
     channel_close(l->ch);
@@ -650,6 +728,9 @@ static void server_start(Lsp *l)
     return;
   }
   l->root = g_strdup(l->app->project.root);
+  if (!l->written)
+    l->written = g_string_new(NULL);
+  watch_databases(l);
   l->ch = channel_new(g_subprocess_get_stdout_pipe(l->process), g_subprocess_get_stdin_pipe(l->process),
                       G_OBJECT(l->process), l);
   l->ch->message = on_message;
@@ -806,6 +887,8 @@ void lsp_stop(App *t)
     g_source_remove(l->restart_id);
   g_hash_table_destroy(l->docs);
   g_hash_table_destroy(l->pending);
+  if (l->written)
+    g_string_free(l->written, TRUE);
   g_free(l);
   t->lsp = NULL;
 }

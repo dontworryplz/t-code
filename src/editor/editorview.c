@@ -427,6 +427,8 @@ GtkSourceStyleScheme *editor_style_scheme(App *t)
 static const char *const menu_commands[][2] = {
   { "Go to Definition", "Go to Definition" },
   { "Find All References", "Find All References" },
+  { "Go to Symbol…", "Go to Symbol in File…" },
+  { "Switch Source / Header", "Switch Source / Header" },
   { "Rename Symbol…", "Rename Symbol" },
   { "Format Document", "Format Document" },
   { NULL, NULL },

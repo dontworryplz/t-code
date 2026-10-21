@@ -25,5 +25,12 @@ void format_document(Tab *tab);
 /* Ctrl+S: saves the file, formatting it first when the "Format on save" setting is on. */
 void save_with_format(Tab *tab);
 
+/* Opens the header of a source file or the source of a header (clangd, else a file beside it
+ * with the same name). */
+void switch_source_header(Tab *tab);
+
+/* Lists the file's functions, types and the like in the popup list; one goes to it. */
+void go_to_symbol(Tab *tab);
+
 /* Asks for a new name for the symbol at the cursor and renames it everywhere. */
 void rename_symbol(Tab *tab);

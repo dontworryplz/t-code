@@ -134,6 +134,8 @@ static void definition(App *t) { Tab *tab = current_editor(t); if (tab) go_to_de
 static void references(App *t) { Tab *tab = current_editor(t); if (tab) find_references(tab); }
 static void format(App *t) { Tab *tab = current_editor(t); if (tab) format_document(tab); }
 static void rename_it(App *t) { Tab *tab = current_editor(t); if (tab) rename_symbol(tab); }
+static void switch_header(App *t) { Tab *tab = current_editor(t); if (tab) switch_source_header(tab); }
+static void symbols(App *t) { Tab *tab = current_editor(t); if (tab) go_to_symbol(tab); }
 static void suggest(App *t) { Tab *tab = current_editor(t); if (tab) completion_show(tab); }
 static void parameter_hints(App *t) { Tab *tab = current_editor(t); if (tab) signature_show(tab); }
 static void toggle_breakpoint(App *t) { Tab *tab = current_editor(t); if (tab) breakpoint_toggle_at_cursor(tab); }
@@ -253,6 +255,8 @@ static const Command commands[] = {
   { "Go to Definition", "F12|<Alt>d", "F12, Ctrl+Click", definition, TRUE, FALSE, FALSE },
   { "Go Back", "<Alt>Left", "Alt+←", go_back, TRUE, FALSE, FALSE },
   { "Find All References", "<Shift>F12|<Alt>r", "Shift+F12", references, TRUE, FALSE, FALSE },
+  { "Go to Symbol in File…", "<Control><Shift>period|<Control><Shift>greater", "Ctrl+Shift+.", symbols, TRUE, FALSE, FALSE },
+  { "Switch Source / Header", "<Alt>o", "Alt+O", switch_header, TRUE, FALSE, FALSE },
   { "Rename Symbol", "F2", "F2", rename_it, TRUE, FALSE, FALSE },
   { "Format Document", "<Shift><Alt>f|<Alt>f", "Shift+Alt+F", format, TRUE, FALSE, FALSE },
   { "Trigger Suggest", "<Control>space", "Ctrl+Space", suggest, TRUE, FALSE, FALSE },

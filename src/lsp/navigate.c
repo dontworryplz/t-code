@@ -293,6 +293,172 @@ void find_references(Tab *tab)
   g_free(params);
 }
 
+/* Source / header -------------------------------------------------------------------------- */
+
+/* Without the server: a file beside path with the same name and the other kind of extension. */
+static char *counterpart(const char *path)
+{
+  static const char *const sources[] = { ".c", ".cc", ".cpp", ".cxx", NULL };
+  static const char *const headers[] = { ".h", ".hh", ".hpp", ".hxx", NULL };
+  const char *dot = strrchr(path, '.');
+  const char *const *other = NULL;
+
+  if (!dot || strchr(dot, '/'))
+    return NULL;
+  for (int i = 0; sources[i] && !other; i++)
+    if (!strcmp(dot, sources[i]))
+      other = headers;
+  for (int i = 0; headers[i] && !other; i++)
+    if (!strcmp(dot, headers[i]))
+      other = sources;
+  for (int i = 0; other && other[i]; i++) {
+    char *candidate = g_strdup_printf("%.*s%s", (int)(dot - path), path, other[i]);
+    if (g_file_test(candidate, G_FILE_TEST_IS_REGULAR))
+      return candidate;
+    g_free(candidate);
+  }
+  return NULL;
+}
+
+static void on_switched(JsonNode *result, gpointer data)
+{
+  Asked *asked = data;
+  const char *uri = result && JSON_NODE_HOLDS_VALUE(result) ? json_node_get_string(result) : NULL;
+  char *path = uri ? lsp_uri_to_path(uri) : NULL;
+
+  if (!path)
+    path = counterpart(asked->path);
+  if (path)
+    open_file(asked->app, path);
+  g_free(path);
+  asked_free(asked);
+}
+
+void switch_source_header(Tab *tab)
+{
+  Asked *asked = g_new0(Asked, 1);
+  char *document = lsp_document_params(tab), *params = g_strdup_printf("{%s}", document);
+
+  asked->app = tab->app;
+  asked->path = g_strdup(tab->path);
+  if (lsp_has(tab))
+    lsp_request(tab, "textDocument/switchSourceHeader", params, NULL, on_switched, asked);
+  else
+    on_switched(NULL, asked);
+  g_free(params);
+  g_free(document);
+}
+
+/* Symbols in the file ------------------------------------------------------------------------ */
+
+static GPtrArray *symbols; /* "line\x1fcolumn\x1fname\x1fwhat" of the last answer */
+
+static const char *kind_name(gint64 kind)
+{
+  switch (kind) {
+    case 2: return "module";
+    case 3: return "namespace";
+    case 5: return "class";
+    case 6: return "method";
+    case 8: return "field";
+    case 9: return "constructor";
+    case 10: return "enum";
+    case 12: return "function";
+    case 13: return "variable";
+    case 14: return "constant";
+    case 22: return "enumerator";
+    case 23: return "struct";
+    case 26: return "type parameter";
+    default: return "";
+  }
+}
+
+/* DocumentSymbols with their children, or SymbolInformations, into symbols (inside: whose). */
+static void add_symbols(Tab *tab, JsonArray *array, const char *inside)
+{
+  for (guint i = 0; array && i < json_array_get_length(array); i++) {
+    JsonNode *symbol = json_array_get_element(array, i);
+    const char *name = json_string_at(symbol, "name");
+    JsonNode *at = json_at(symbol, "selectionRange.start");
+    GtkTextIter iter;
+    if (!at)
+      at = json_at(symbol, "location.range.start");
+    if (!name || !at)
+      continue;
+    lsp_iter_at(tab, at, &iter);
+    const char *kind = kind_name(json_int_at(symbol, "kind", 0));
+    char *what = inside ? g_strdup_printf("%s in %s", kind, inside) : g_strdup(kind);
+    g_ptr_array_add(symbols, g_strdup_printf("%d\x1f%d\x1f%s\x1f%s", gtk_text_iter_get_line(&iter) + 1,
+                                             gtk_text_iter_get_line_offset(&iter) + 1, name, what));
+    g_free(what);
+    JsonNode *children = json_at(symbol, "children");
+    if (children && JSON_NODE_HOLDS_ARRAY(children))
+      add_symbols(tab, json_node_get_array(children), name);
+  }
+}
+
+static void symbols_query(App *t, const char *text, guint generation)
+{
+  int shown = 0;
+
+  for (guint i = 0; symbols && i < symbols->len; i++) {
+    char **f = g_strsplit(g_ptr_array_index(symbols, i), "\x1f", 4);
+    if (!*text || fuzzy_score(text, f[2]) >= 0) {
+      char *detail = g_strdup_printf("%s  :%s", f[3], f[0]);
+      char *payload = g_strjoin("\x1f", f[0], f[1], NULL);
+      picker_add(t, generation, f[2], detail, payload);
+      g_free(payload);
+      g_free(detail);
+      shown++;
+    }
+    g_strfreev(f);
+  }
+  if (!shown)
+    picker_message(t, generation, symbols && symbols->len ? "No matching symbols" : "No symbols in this file");
+}
+
+static char *symbols_path; /* the file they are in */
+
+static void symbols_choose(App *t, const char *payload)
+{
+  char **f = g_strsplit(payload, "\x1f", 2);
+
+  if (symbols_path)
+    open_file_at(t, symbols_path, atoi(f[0]), atoi(f[1]));
+  g_strfreev(f);
+}
+
+static void on_symbols(JsonNode *result, gpointer data)
+{
+  Asked *asked = data;
+  Tab *tab = find_tab(asked->app, TAB_EDITOR, asked->path);
+
+  if (!symbols)
+    symbols = g_ptr_array_new_with_free_func(g_free);
+  g_ptr_array_set_size(symbols, 0);
+  if (tab && tab->view && result && JSON_NODE_HOLDS_ARRAY(result))
+    add_symbols(tab, json_node_get_array(result), NULL);
+  if (tab) {
+    g_free(symbols_path);
+    symbols_path = g_strdup(tab->path);
+    remember(tab);
+    picker_open(asked->app, "Go to a symbol in this file", symbols_query, symbols_choose);
+  }
+  asked_free(asked);
+}
+
+void go_to_symbol(Tab *tab)
+{
+  Asked *asked = g_new0(Asked, 1);
+  char *document = lsp_document_params(tab), *params = g_strdup_printf("{%s}", document);
+
+  asked->app = tab->app;
+  asked->path = g_strdup(tab->path);
+  lsp_request(tab, "textDocument/documentSymbol", params, NULL, on_symbols, asked);
+  g_free(params);
+  g_free(document);
+}
+
 /* Formatting --------------------------------------------------------------------------------- */
 
 static void on_formatted(JsonNode *result, gpointer data)

@@ -19,6 +19,7 @@
 #include "files/opentabs.h"
 #include "git/compare.h"
 #include "ipc/socket.h"
+#include "lsp/navigate.h"
 #include "popups/contextmenu.h"
 #include "project/run.h"
 #include "project/session.h"
@@ -586,6 +587,26 @@ static void test_context_menus(void)
   choose_menu_item(widget, "Move to Other Group");
   assert_strip(0, "m1.txt!");
   assert_strip(1, "m2.txt!");
+  close_everything();
+}
+
+static gboolean current_is(gconstpointer name)
+{
+  Tab *tab = current_tab(&app);
+
+  return tab && g_str_has_suffix(tab->path, name);
+}
+
+/* Alt+O goes from a source file to its header and back (clangd, else the file beside it). */
+static void test_switch_source_header(void)
+{
+  g_free(file("pair.h"));
+  open_kept("pair.c");
+  switch_source_header(current_tab(&app));
+  run_until(current_is, "/pair.h");
+  switch_source_header(current_tab(&app));
+  run_until(current_is, "/pair.c");
+  g_assert_true(current_is("/pair.c"));
   close_everything();
 }
 
@@ -1648,6 +1669,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/tab-strip", test_tab_strip);
   g_test_add_func("/window/open-tabs", test_open_tabs);
   g_test_add_func("/window/context-menus", test_context_menus);
+  g_test_add_func("/window/switch-source-header", test_switch_source_header);
   g_test_add_func("/window/theme-preview", test_theme_preview);
   g_test_add_func("/window/theme-current-line", test_theme_current_line);
   g_test_add_func("/window/theme-renamed", test_theme_renamed);
