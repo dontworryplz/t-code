@@ -13,11 +13,13 @@
 #include "editor/breakpoints.h"
 #include "editor/editorview.h"
 #include "editor/preview.h"
+#include "editor/tabmenu.h"
 #include "editor/tabs.h"
 #include "files/fileops.h"
 #include "files/opentabs.h"
 #include "git/compare.h"
 #include "ipc/socket.h"
+#include "popups/contextmenu.h"
 #include "project/run.h"
 #include "project/session.h"
 #include "project/userfiles.h"
@@ -504,6 +506,86 @@ static void test_tab_strip(void)
   assert_strip(0, "s3.txt! s2.txt");
   assert_strip(1, "s1.txt!");
   g_value_unset(&value);
+  close_everything();
+}
+
+/* Chooses the item labelled label in the right-click menu shown on widget, as a click would. */
+static void choose_menu_item(GtkWidget *widget, const char *label)
+{
+  GtkWidget *popover = NULL;
+  char *action = NULL;
+
+  for (GtkWidget *child = gtk_widget_get_first_child(widget); child; child = gtk_widget_get_next_sibling(child))
+    if (GTK_IS_POPOVER_MENU(child))
+      popover = child;
+  g_assert_nonnull(popover);
+  GMenuModel *model = gtk_popover_menu_get_menu_model(GTK_POPOVER_MENU(popover));
+  for (int s = 0; s < g_menu_model_get_n_items(model) && !action; s++) {
+    GMenuModel *section = g_menu_model_get_item_link(model, s, G_MENU_LINK_SECTION);
+    for (int i = 0; i < g_menu_model_get_n_items(section) && !action; i++) {
+      char *text = NULL;
+      if (g_menu_model_get_item_attribute(section, i, G_MENU_ATTRIBUTE_LABEL, "s", &text) && !g_strcmp0(text, label))
+        g_menu_model_get_item_attribute(section, i, G_MENU_ATTRIBUTE_ACTION, "s", &action);
+      g_free(text);
+    }
+    g_object_unref(section);
+  }
+  g_assert_nonnull(action);
+  g_assert_true(gtk_widget_activate_action(widget, action, NULL));
+  g_free(action);
+  gtk_popover_popdown(GTK_POPOVER(popover));
+  run(20);
+}
+
+static void count_run(gpointer data)
+{
+  (*(int *)data)++;
+}
+
+static int menu_freed;
+
+static void count_free(gpointer data G_GNUC_UNUSED)
+{
+  menu_freed++;
+}
+
+/* A right-click menu runs the chosen item once it closed and frees its data, chosen or not; a
+ * tab's menu closes the tabs right of it, and moves a tab to the other group. */
+static void test_context_menus(void)
+{
+  int ran = 0;
+  MenuItem items[] = { { "First", count_run }, { NULL, NULL }, { "Second", count_run } };
+
+  open_kept("m1.txt");
+  open_kept("m2.txt");
+  open_kept("m3.txt");
+  run(20);
+  GtkWidget *widget = tab_nth(&app, 0)->item;
+
+  menu_freed = 0;
+  context_menu(widget, 1, 1, items, G_N_ELEMENTS(items), &ran, count_free);
+  choose_menu_item(widget, "Second");
+  g_assert_cmpint(ran, ==, 1);
+  g_assert_cmpint(menu_freed, ==, 1);
+  context_menu(widget, 1, 1, items, G_N_ELEMENTS(items), &ran, count_free);
+  for (GtkWidget *child = gtk_widget_get_first_child(widget); child; child = gtk_widget_get_next_sibling(child))
+    if (GTK_IS_POPOVER_MENU(child))
+      gtk_popover_popdown(GTK_POPOVER(child)); /* closed without a choice */
+  run(20);
+  g_assert_cmpint(ran, ==, 1);
+  g_assert_cmpint(menu_freed, ==, 2);
+
+  tab_menu(tab_nth(&app, 0), widget, 1, 1);
+  choose_menu_item(widget, "Close to the Right");
+  assert_tabs("m1.txt");
+
+  open_kept("m2.txt");
+  run(20);
+  widget = tab_nth(&app, 1)->item;
+  tab_menu(tab_nth(&app, 1), widget, 1, 1);
+  choose_menu_item(widget, "Move to Other Group");
+  assert_strip(0, "m1.txt!");
+  assert_strip(1, "m2.txt!");
   close_everything();
 }
 
@@ -1565,6 +1647,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/second-window", test_second_window);
   g_test_add_func("/window/tab-strip", test_tab_strip);
   g_test_add_func("/window/open-tabs", test_open_tabs);
+  g_test_add_func("/window/context-menus", test_context_menus);
   g_test_add_func("/window/theme-preview", test_theme_preview);
   g_test_add_func("/window/theme-current-line", test_theme_current_line);
   g_test_add_func("/window/theme-renamed", test_theme_renamed);

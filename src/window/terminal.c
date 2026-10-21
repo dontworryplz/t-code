@@ -8,7 +8,6 @@
 #include "editor/editor.h"
 #include "editor/editorview.h"
 #include "files/files.h"
-#include "popups/contextmenu.h"
 #include "window/window.h"
 #include "window/palette.h"
 
@@ -56,14 +55,14 @@ void terminal_apply_colors(App *t)
 
 /* A terminal in the editor font. */
 /* clang-format off */
-static void term_copy(gpointer term) { vte_terminal_copy_clipboard_format(term, VTE_FORMAT_TEXT); }
-static void term_paste(gpointer term) { vte_terminal_paste_clipboard(term); }
-static void term_select_all(gpointer term) { vte_terminal_select_all(term); }
+static void term_copy(GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, gpointer term) { vte_terminal_copy_clipboard_format(term, VTE_FORMAT_TEXT); }
+static void term_paste(GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, gpointer term) { vte_terminal_paste_clipboard(term); }
+static void term_select_all(GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, gpointer term) { vte_terminal_select_all(term); }
 /* clang-format on */
 
 /* A shell (a prompt in it) is cleared by Ctrl+L, which draws the prompt again; a program's output
  * is wiped with its scrollback. */
-static void term_clear(gpointer term)
+static void term_clear(GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, gpointer term)
 {
   if (g_object_get_data(G_OBJECT(term), "t-code-shell"))
     vte_terminal_feed_child(term, "\x0c", 1);
@@ -71,14 +70,32 @@ static void term_clear(gpointer term)
     vte_terminal_reset(term, TRUE, TRUE);
 }
 
-static void on_terminal_menu(GtkWidget *term, double x, double y, gpointer data G_GNUC_UNUSED)
+/* The right-click menu is the terminal's own (a popover put on it by hand came up small and
+ * scrolling): items are actions of its "term" group. */
+static void add_terminal_menu(VteTerminal *term)
 {
-  static const MenuItem items[] = {
-    { "Copy", term_copy },   { "Paste", term_paste }, { NULL, NULL }, { "Select All", term_select_all },
-    { "Clear", term_clear },
+  static const GActionEntry entries[] = {
+    { .name = "copy", .activate = term_copy },
+    { .name = "paste", .activate = term_paste },
+    { .name = "select-all", .activate = term_select_all },
+    { .name = "clear", .activate = term_clear },
   };
+  GSimpleActionGroup *group = g_simple_action_group_new();
+  GMenu *menu = g_menu_new(), *edit = g_menu_new(), *rest = g_menu_new();
 
-  context_menu(term, x, y, items, G_N_ELEMENTS(items), g_object_ref(term), g_object_unref);
+  g_action_map_add_action_entries(G_ACTION_MAP(group), entries, G_N_ELEMENTS(entries), term);
+  gtk_widget_insert_action_group(GTK_WIDGET(term), "term", G_ACTION_GROUP(group));
+  g_menu_append(edit, "Copy", "term.copy");
+  g_menu_append(edit, "Paste", "term.paste");
+  g_menu_append(rest, "Select All", "term.select-all");
+  g_menu_append(rest, "Clear", "term.clear");
+  g_menu_append_section(menu, NULL, G_MENU_MODEL(edit));
+  g_menu_append_section(menu, NULL, G_MENU_MODEL(rest));
+  vte_terminal_set_context_menu_model(term, G_MENU_MODEL(menu));
+  g_object_unref(edit);
+  g_object_unref(rest);
+  g_object_unref(menu);
+  g_object_unref(group);
 }
 
 VteTerminal *new_terminal(App *t)
@@ -91,7 +108,7 @@ VteTerminal *new_terminal(App *t)
   vte_terminal_set_mouse_autohide(term, TRUE);
   gtk_widget_set_hexpand(GTK_WIDGET(term), TRUE);
   gtk_widget_set_vexpand(GTK_WIDGET(term), TRUE);
-  context_menu_attach(GTK_WIDGET(term), on_terminal_menu, NULL);
+  add_terminal_menu(term);
   return term;
 }
 
