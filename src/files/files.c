@@ -308,6 +308,11 @@ static void reveal(const char *path)
   settle_later();
 }
 
+void files_reveal(App *t G_GNUC_UNUSED, const char *path)
+{
+  reveal(path);
+}
+
 static void on_tree_changed(GListModel *model G_GNUC_UNUSED, guint position G_GNUC_UNUSED, guint removed G_GNUC_UNUSED,
                             guint added, gpointer data G_GNUC_UNUSED)
 {

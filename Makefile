@@ -42,9 +42,9 @@ build/test-searchmatch: tests/test_searchmatch.c src/search/searchmatch.c src/se
 	  $(shell pkg-config --libs gio-2.0)
 
 build/test-search-panel: tests/test_search_panel.c src/search/search.c src/search/searchmatch.c src/window/palette.c \
-                         $(APP_HDR) | build
+                         src/popups/contextmenu.c $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_search_panel.c src/search/search.c src/search/searchmatch.c \
-	  src/window/palette.c \
+	  src/window/palette.c src/popups/contextmenu.c \
 	  $(shell pkg-config --libs $(PKGS))
 
 build/test-linediff: tests/test_linediff.c src/git/linediff.c src/git/linediff.h | build
@@ -74,8 +74,9 @@ build/test-debug: tests/test_debug.c $(DAP_SRC) src/debug/dap.h src/lsp/channel.
 	$(CC) $(CFLAGS) -Isrc $(shell pkg-config --cflags json-glib-1.0 gio-2.0) -o $@ tests/test_debug.c $(DAP_SRC) \
 	  $(shell pkg-config --libs json-glib-1.0 gio-2.0)
 
-build/test-scm: tests/test_scm.c src/git/scm.c src/git/gitstatus.c $(APP_HDR) | build
-	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_scm.c src/git/scm.c $(shell pkg-config --libs $(PKGS))
+build/test-scm: tests/test_scm.c src/git/scm.c src/git/gitstatus.c src/popups/contextmenu.c src/window/palette.c $(APP_HDR) | build
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_scm.c src/git/scm.c src/popups/contextmenu.c src/window/palette.c \
+	  $(shell pkg-config --libs $(PKGS))
 
 FILES_GIO := src/files/fileops.c src/files/folder.c src/files/gitmarks.c src/files/icons.c
 build/test-fileops: tests/test_fileops.c $(FILES_GIO) $(FILES_GIO:.c=.h) | build

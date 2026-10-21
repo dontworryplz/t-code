@@ -15,6 +15,7 @@
 #include "editor/breakpoints.h"
 #include "editor/editor.h"
 #include "lsp/json.h"
+#include "popups/contextmenu.h"
 
 #include <string.h>
 
@@ -463,6 +464,60 @@ static void on_remove_watch(GtkButton *button, gpointer data G_GNUC_UNUSED)
   g_free(expression);
 }
 
+/* A variable's right-click menu: what it showed (the row may show another one when an item runs). */
+typedef struct {
+  char *name, *value;
+  gboolean watch, top; /* a Watch row; an expression or variable itself, not a member of one */
+} VarMenu;
+
+static void var_menu_free(VarMenu *m)
+{
+  g_free(m->name);
+  g_free(m->value);
+  g_free(m);
+}
+
+/* clang-format off */
+static void copy_value(gpointer data) { copy_to_clipboard(((VarMenu *)data)->value); }
+static void copy_name(gpointer data) { copy_to_clipboard(((VarMenu *)data)->name); }
+static void add_to_watch(gpointer data) { debug_view_add_watch(view.app, ((VarMenu *)data)->name); }
+static void remove_from_watch(gpointer data) { remove_watch(((VarMenu *)data)->name); }
+/* clang-format on */
+
+static void copy_both(gpointer data)
+{
+  VarMenu *m = data;
+  char *text = g_strdup_printf("%s = %s", m->name, m->value);
+
+  copy_to_clipboard(text);
+  g_free(text);
+}
+
+static void on_var_menu(GtkWidget *expander, double x, double y, gpointer watch)
+{
+  TcodeVar *var = g_object_get_data(G_OBJECT(expander), "var");
+  GtkTreeListRow *row = gtk_tree_expander_get_list_row(GTK_TREE_EXPANDER(expander));
+  MenuItem items[8];
+  int n = 0;
+
+  if (!var || !row)
+    return;
+  VarMenu *m = g_new0(VarMenu, 1);
+  m->name = g_strdup(var->name);
+  m->value = g_strdup(var->value);
+  m->watch = watch != NULL;
+  m->top = gtk_tree_list_row_get_depth(row) == 0;
+  items[n++] = (MenuItem){ "Copy Value", copy_value };
+  items[n++] = (MenuItem){ "Copy Name", copy_name };
+  items[n++] = (MenuItem){ "Copy Name = Value", copy_both };
+  if (m->top && *m->name) {
+    items[n++] = (MenuItem){ NULL, NULL };
+    items[n++] =
+        m->watch ? (MenuItem){ "Remove Expression", remove_from_watch } : (MenuItem){ "Add to Watch", add_to_watch };
+  }
+  context_menu(expander, x, y, items, n, m, (GDestroyNotify)var_menu_free);
+}
+
 /* A row: an arrow, name = value; the Watch's (data non-NULL) also a button that takes it away. */
 static void setup_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListItem *item, gpointer data)
 {
@@ -489,6 +544,7 @@ static void setup_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListIt
   }
   gtk_tree_expander_set_child(GTK_TREE_EXPANDER(expander), box);
   gtk_list_item_set_child(item, expander);
+  context_menu_attach(expander, on_var_menu, data);
 }
 
 /* The row shows var's value now. */
@@ -528,6 +584,7 @@ static void bind_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListIte
   }
   g_signal_connect_object(var, "value-changed", G_CALLBACK(show_value), box, G_CONNECT_DEFAULT);
   g_object_set_data_full(G_OBJECT(item), "var", var, g_object_unref);
+  g_object_set_data(G_OBJECT(expander), "var", var); /* for its menu; the item holds the reference */
 }
 
 static void unbind_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListItem *item, gpointer data G_GNUC_UNUSED)
@@ -537,6 +594,7 @@ static void unbind_row(GtkSignalListItemFactory *factory G_GNUC_UNUSED, GtkListI
 
   if (var)
     g_signal_handlers_disconnect_by_data(var, box);
+  g_object_set_data(G_OBJECT(gtk_list_item_get_child(item)), "var", NULL);
   g_object_set_data(G_OBJECT(item), "var", NULL);
 }
 
@@ -675,6 +733,68 @@ static void on_breakpoint_activated(GtkListBox *box G_GNUC_UNUSED, GtkListBoxRow
 
   if (path)
     open_file_at(view.app, path, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "line")), 1);
+}
+
+/* A breakpoint's right-click menu: its place, copied. */
+typedef struct {
+  char *path;
+  int line;
+} Place;
+
+static void place_free(Place *p)
+{
+  g_free(p->path);
+  g_free(p);
+}
+
+static void open_place(gpointer data)
+{
+  open_file_at(view.app, ((Place *)data)->path, ((Place *)data)->line, 1);
+}
+
+static void remove_place(gpointer data)
+{
+  breakpoint_remove(view.app, ((Place *)data)->path, ((Place *)data)->line);
+}
+
+static void remove_every(gpointer data G_GNUC_UNUSED)
+{
+  breakpoints_remove_all(view.app);
+}
+
+static void on_breakpoints_menu(GtkWidget *list, double x, double y, gpointer data G_GNUC_UNUSED)
+{
+  static const MenuItem items[] = {
+    { "Open", open_place },
+    { NULL, NULL },
+    { "Remove Breakpoint", remove_place },
+    { "Remove All Breakpoints", remove_every },
+  };
+  GtkListBoxRow *row = gtk_list_box_get_row_at_y(GTK_LIST_BOX(list), (int)y);
+  const char *path = row ? g_object_get_data(G_OBJECT(row), "path") : NULL;
+
+  if (!path)
+    return;
+  Place *p = g_new(Place, 1);
+  p->path = g_strdup(path);
+  p->line = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "line"));
+  context_menu(list, x, y, items, G_N_ELEMENTS(items), p, (GDestroyNotify)place_free);
+}
+
+static void copy_stack(gpointer data G_GNUC_UNUSED)
+{
+  char *text = debug_view_stack_text();
+
+  copy_to_clipboard(text);
+  g_free(text);
+}
+
+static void on_stack_menu(GtkWidget *list, double x, double y, gpointer data G_GNUC_UNUSED)
+{
+  static const MenuItem items[] = { { "Copy Call Stack", copy_stack } };
+
+  if (gtk_widget_get_first_child(list))
+    context_menu(list, x, y, items, G_N_ELEMENTS(items), NULL, NULL);
 }
 
 void debug_view_breakpoints_changed(App *t)
@@ -928,12 +1048,14 @@ GtkWidget *debug_view(App *t)
 
   view.stack = GTK_LIST_BOX(gtk_list_box_new());
   g_signal_connect(view.stack, "row-activated", G_CALLBACK(on_frame_activated), NULL);
+  context_menu_attach(GTK_WIDGET(view.stack), on_stack_menu, NULL);
   gtk_box_append(GTK_BOX(rest), heading("CALL STACK", NULL, NULL, NULL));
   gtk_box_append(GTK_BOX(rest), GTK_WIDGET(view.stack));
 
   view.breakpoints = GTK_LIST_BOX(gtk_list_box_new());
   gtk_list_box_set_selection_mode(view.breakpoints, GTK_SELECTION_NONE);
   g_signal_connect(view.breakpoints, "row-activated", G_CALLBACK(on_breakpoint_activated), NULL);
+  context_menu_attach(GTK_WIDGET(view.breakpoints), on_breakpoints_menu, NULL);
   gtk_box_append(GTK_BOX(rest), heading("BREAKPOINTS", "edit-clear-all-symbolic", "Remove all breakpoints",
                                         G_CALLBACK(on_remove_all)));
   gtk_box_append(GTK_BOX(rest), GTK_WIDGET(view.breakpoints));

@@ -8,6 +8,7 @@
 #include "editor/editor.h"
 #include "editor/editorview.h"
 #include "files/files.h"
+#include "popups/contextmenu.h"
 #include "window/window.h"
 #include "window/palette.h"
 
@@ -54,6 +55,32 @@ void terminal_apply_colors(App *t)
 }
 
 /* A terminal in the editor font. */
+/* clang-format off */
+static void term_copy(gpointer term) { vte_terminal_copy_clipboard_format(term, VTE_FORMAT_TEXT); }
+static void term_paste(gpointer term) { vte_terminal_paste_clipboard(term); }
+static void term_select_all(gpointer term) { vte_terminal_select_all(term); }
+/* clang-format on */
+
+/* A shell (a prompt in it) is cleared by Ctrl+L, which draws the prompt again; a program's output
+ * is wiped with its scrollback. */
+static void term_clear(gpointer term)
+{
+  if (g_object_get_data(G_OBJECT(term), "t-code-shell"))
+    vte_terminal_feed_child(term, "\x0c", 1);
+  else
+    vte_terminal_reset(term, TRUE, TRUE);
+}
+
+static void on_terminal_menu(GtkWidget *term, double x, double y, gpointer data G_GNUC_UNUSED)
+{
+  static const MenuItem items[] = {
+    { "Copy", term_copy },   { "Paste", term_paste }, { NULL, NULL }, { "Select All", term_select_all },
+    { "Clear", term_clear },
+  };
+
+  context_menu(term, x, y, items, G_N_ELEMENTS(items), g_object_ref(term), g_object_unref);
+}
+
 VteTerminal *new_terminal(App *t)
 {
   VteTerminal *term = VTE_TERMINAL(vte_terminal_new());
@@ -64,6 +91,7 @@ VteTerminal *new_terminal(App *t)
   vte_terminal_set_mouse_autohide(term, TRUE);
   gtk_widget_set_hexpand(GTK_WIDGET(term), TRUE);
   gtk_widget_set_vexpand(GTK_WIDGET(term), TRUE);
+  context_menu_attach(GTK_WIDGET(term), on_terminal_menu, NULL);
   return term;
 }
 
@@ -321,6 +349,7 @@ static void add_location_links(App *t)
 void create_shell_pane(App *t)
 {
   t->shell.term = new_terminal(t);
+  g_object_set_data(G_OBJECT(t->shell.term), "t-code-shell", GINT_TO_POINTER(TRUE)); /* Clear: Ctrl+L */
   g_signal_connect(t->shell.term, "child-exited", G_CALLBACK(on_shell_exited), t);
   add_location_links(t);
 }

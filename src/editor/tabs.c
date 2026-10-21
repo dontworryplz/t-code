@@ -8,9 +8,11 @@
 #include "editor/editor.h"
 #include "editor/editorview.h"
 #include "editor/preview.h"
+#include "editor/tabmenu.h"
 #include "files/files.h"
 #include "files/opentabs.h"
 #include "git/compare.h"
+#include "popups/contextmenu.h"
 #include "window/statusbar.h"
 
 #ifdef __GLIBC__
@@ -275,6 +277,12 @@ static GdkContentProvider *on_tab_drag(GtkDragSource *source, double x G_GNUC_UN
   return gdk_content_provider_new_typed(G_TYPE_POINTER, tab);
 }
 
+/* A right click on a tab: its menu (tabmenu.c). */
+static void on_tab_menu(GtkWidget *widget, double x, double y, gpointer tab)
+{
+  tab_menu(tab, widget, x, y);
+}
+
 /* A tab in the strip: its name (update_tab_label fills it) and a close button. */
 static GtkWidget *tab_label(Tab *tab)
 {
@@ -300,6 +308,7 @@ static GtkWidget *tab_label(Tab *tab)
   gtk_drag_source_set_actions(drag, GDK_ACTION_MOVE);
   g_signal_connect(drag, "prepare", G_CALLBACK(on_tab_drag), tab);
   gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(drag));
+  context_menu_attach(box, on_tab_menu, tab);
   return box;
 }
 

@@ -20,6 +20,13 @@ void open_file_at(App *t G_GNUC_UNUSED, const char *path, int line, int column)
   opened.column = column;
 }
 
+/* clang-format off */
+void open_file(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
+void open_to_side(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
+void show_sidebar_page(App *t G_GNUC_UNUSED, const char *page G_GNUC_UNUSED) {}
+void files_reveal(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
+/* clang-format on */
+
 static App app;
 static GtkWidget *panel;
 static char *tmp, *other;

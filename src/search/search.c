@@ -1,6 +1,6 @@
 /*
- * The Search panel, a tab next to the file manager and Source Control (Ctrl+Shift+F), like VS
- * Code's: the text to find with Match Case, Match Whole Word and Use Regular Expression, files to
+ * The Search panel, a tab next to the file manager and Source Control (Ctrl+Shift+F):
+ * the text to find with Match Case, Match Whole Word and Use Regular Expression, files to
  * include and exclude under "⋯", and the results grouped by file. Clicking a file's heading folds
  * its lines; clicking a line opens the file there.
  * ripgrep does the work (it skips what .gitignore ignores and binary files); grep stands in when
@@ -10,8 +10,11 @@
 #include "search/search.h"
 
 #include "editor/editor.h"
+#include "files/files.h"
+#include "popups/contextmenu.h"
 #include "search/searchmatch.h"
 #include "window/palette.h"
+#include "window/window.h"
 
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -201,6 +204,8 @@ static void add_hit(const SearchHit *hit, gpointer data)
   if (!search.file || strcmp(search.file, hit->path) != 0) {
     g_set_str(&search.file, hit->path);
     search.heading = heading_row(hit->path);
+    g_object_set_data_full(G_OBJECT(search.heading), "file", g_build_filename(run->root, hit->path, NULL), g_free);
+    g_object_set_data_full(G_OBJECT(search.heading), "relative", g_strdup(hit->path), g_free);
     gtk_list_box_append(search.list, search.heading);
     search.files++;
   }
@@ -219,6 +224,7 @@ static void add_hit(const SearchHit *hit, gpointer data)
   tip = g_strstrip(g_strdelimit(g_strdup(hit->text), "\t", ' '));
   gtk_widget_set_tooltip_text(row, tip);
   g_object_set_data_full(G_OBJECT(row), "path", g_build_filename(run->root, hit->path, NULL), g_free);
+  g_object_set_data_full(G_OBJECT(row), "text", g_strdup(tip), g_free);
   g_object_set_data(G_OBJECT(row), "line", GINT_TO_POINTER(hit->line));
   g_object_set_data(G_OBJECT(row), "column", GINT_TO_POINTER(hit->column));
   gtk_widget_set_visible(row, !is_folded(search.heading));
@@ -370,6 +376,83 @@ static void on_row_activated(GtkListBox *list G_GNUC_UNUSED, GtkListBoxRow *row,
   }
   open_file_at(search.app, path, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "line")),
                GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "column")));
+}
+
+/* A result's or a file's right-click menu: what it points at, copied (the list may be made again
+ * before an item runs). */
+typedef struct {
+  char *path, *relative, *text;
+  int line, column; /* 0 for a file's heading */
+} Hit;
+
+static void hit_free(Hit *h)
+{
+  g_free(h->path);
+  g_free(h->relative);
+  g_free(h->text);
+  g_free(h);
+}
+
+static void hit_open(gpointer data)
+{
+  Hit *h = data;
+
+  if (h->line > 0)
+    open_file_at(search.app, h->path, h->line, h->column);
+  else
+    open_file(search.app, h->path);
+}
+
+static void hit_open_side(gpointer data)
+{
+  Hit *h = data;
+
+  open_to_side(search.app, h->path);
+  if (h->line > 0)
+    open_file_at(search.app, h->path, h->line, h->column);
+}
+
+/* clang-format off */
+static void hit_copy_path(gpointer data) { copy_to_clipboard(((Hit *)data)->path); }
+static void hit_copy_relative(gpointer data) { copy_to_clipboard(((Hit *)data)->relative); }
+static void hit_copy_line(gpointer data) { copy_to_clipboard(((Hit *)data)->text); }
+/* clang-format on */
+
+static void hit_reveal(gpointer data)
+{
+  show_sidebar_page(search.app, "files");
+  files_reveal(search.app, ((Hit *)data)->path);
+}
+
+static void on_results_menu(GtkWidget *list, double x, double y, gpointer data G_GNUC_UNUSED)
+{
+  static const MenuItem file_items[] = {
+    { "Open File", hit_open },      { "Open to the Side", hit_open_side },       { NULL, NULL },
+    { "Copy Path", hit_copy_path }, { "Copy Relative Path", hit_copy_relative }, { "Reveal in Files", hit_reveal },
+  };
+  static const MenuItem line_items[] = {
+    { "Open", hit_open },           { "Open to the Side", hit_open_side }, { NULL, NULL },
+    { "Copy Line", hit_copy_line }, { "Copy Path", hit_copy_path },
+  };
+  GtkListBoxRow *row = gtk_list_box_get_row_at_y(GTK_LIST_BOX(list), (int)y);
+  const char *line_path = row ? g_object_get_data(G_OBJECT(row), "path") : NULL;
+  const char *file = row ? g_object_get_data(G_OBJECT(row), "file") : NULL;
+  Hit *h;
+
+  if (!line_path && !file)
+    return;
+  h = g_new0(Hit, 1);
+  if (line_path) {
+    h->path = g_strdup(line_path);
+    h->text = g_strdup(g_object_get_data(G_OBJECT(row), "text"));
+    h->line = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "line"));
+    h->column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "column"));
+    context_menu(list, x, y, line_items, G_N_ELEMENTS(line_items), h, (GDestroyNotify)hit_free);
+  } else {
+    h->path = g_strdup(file);
+    h->relative = g_strdup(g_object_get_data(G_OBJECT(row), "relative"));
+    context_menu(list, x, y, file_items, G_N_ELEMENTS(file_items), h, (GDestroyNotify)hit_free);
+  }
 }
 
 /* Folds every file; when all are folded already, unfolds them. */
@@ -527,6 +610,7 @@ GtkWidget *search_panel(App *t)
   gtk_list_box_set_selection_mode(search.list, GTK_SELECTION_SINGLE);
   gtk_list_box_set_activate_on_single_click(search.list, TRUE);
   g_signal_connect(search.list, "row-activated", G_CALLBACK(on_row_activated), NULL);
+  context_menu_attach(GTK_WIDGET(search.list), on_results_menu, NULL);
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), GTK_WIDGET(search.list));
   gtk_widget_set_vexpand(scroll, TRUE);

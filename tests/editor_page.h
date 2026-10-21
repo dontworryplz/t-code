@@ -45,6 +45,7 @@ void select_tab(Tab *tab G_GNUC_UNUSED) {}
 void open_file_at(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED, int line G_GNUC_UNUSED,
                   int column G_GNUC_UNUSED) {}
 void editor_goto(Tab *tab G_GNUC_UNUSED, int line G_GNUC_UNUSED, int column G_GNUC_UNUSED) {}
+void run_command(App *t G_GNUC_UNUSED, const char *name G_GNUC_UNUSED) {}
 void save_editor(Tab *tab G_GNUC_UNUSED) {}
 void refresh_branch(App *t G_GNUC_UNUSED) {}
 void picker_open(App *t G_GNUC_UNUSED, const char *placeholder G_GNUC_UNUSED, PickerQuery query G_GNUC_UNUSED,

@@ -27,6 +27,10 @@ void compare_with_index(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
 void compare_revisions(App *t G_GNUC_UNUSED, const char *old_rev G_GNUC_UNUSED, const char *old_rel G_GNUC_UNUSED,
                        const char *new_rev G_GNUC_UNUSED, const char *new_rel G_GNUC_UNUSED) {}
 void status_show_branch(App *t G_GNUC_UNUSED, const char *branch G_GNUC_UNUSED, gboolean dirty G_GNUC_UNUSED) {}
+void show_sidebar_page(App *t G_GNUC_UNUSED, const char *page G_GNUC_UNUSED) {}
+void files_reveal(App *t G_GNUC_UNUSED, const char *path G_GNUC_UNUSED) {}
+static char *previewed; /* what open_preview() was asked for last */
+void open_preview(App *t G_GNUC_UNUSED, const char *path) { g_set_str(&previewed, path); }
 /* clang-format on */
 
 static App app;
@@ -242,6 +246,41 @@ static void test_commits_folded(void)
   wait_for(2, commits);
 }
 
+/* "Open Commit Details" (a commit's right-click menu) writes its whole message, author, line counts,
+ * files and diff into a Markdown file and previews it. */
+static void test_commit_details(void)
+{
+  char *dir = make_dir("detailed", "x.txt"), *file = g_build_filename(dir, "x.txt", NULL), *text = NULL;
+  const char *const author[] = { "-c", "user.name=Ada Lovelace", "-c", "user.email=ada@example.com", "commit", "-q" };
+
+  git(dir, (const char *[]){ "init", "-q", NULL });
+  git(dir, (const char *[]){ "add", "x.txt", NULL });
+  git(dir, (const char *[]){ author[0], author[1], author[2], author[3], author[4], author[5], "-m", "start", NULL });
+  g_assert_true(g_file_set_contents(file, "one\nchanged\n", -1, NULL));
+  git(dir, (const char *[]){ "add", "x.txt", NULL });
+  git(dir, (const char *[]){ author[0], author[1], author[2], author[3], author[4], author[5], "-m",
+                             "the subject\n\nbody line one\nbody line two", NULL });
+  open_project_at(dir);
+  wait_for(2, 2);
+
+  g_clear_pointer(&previewed, g_free);
+  scm_open_commit_details(0); /* the newest */
+  for (gint64 end = g_get_monotonic_time() + 5 * G_USEC_PER_SEC; !previewed && g_get_monotonic_time() < end;)
+    g_main_context_iteration(NULL, FALSE);
+  g_assert_nonnull(previewed);
+  g_assert_true(g_file_get_contents(previewed, &text, NULL, NULL));
+  g_assert_nonnull(strstr(text, "# the subject\n"));
+  g_assert_nonnull(strstr(text, "**Ada Lovelace** &lt;ada@example.com&gt;"));
+  g_assert_nonnull(strstr(text, "body line one\nbody line two"));
+  g_assert_nonnull(strstr(text, "1 file changed, 1 insertion(+)"));
+  g_assert_nonnull(strstr(text, "| `x.txt` | 1 | 0 |"));
+  g_assert_nonnull(strstr(text, "````diff\n"));
+  g_assert_nonnull(strstr(text, "\n+changed\n"));
+  g_free(text);
+  g_free(file);
+  g_free(dir);
+}
+
 int main(int argc, char **argv)
 {
   int status;
@@ -269,6 +308,7 @@ int main(int argc, char **argv)
   git(no_commits, (const char *[]){ "init", "-q", NULL });
 
   app.project.root = g_strdup(tmp);
+  app.paths.temp = g_build_filename(tmp, "temp", NULL);
   app.dock.scm_stack = GTK_STACK(gtk_stack_new());
   app.scm = scm_panel(&app);
   gtk_stack_add_titled(app.dock.scm_stack, app.scm, "scm", "SOURCE CONTROL");
@@ -280,6 +320,7 @@ int main(int argc, char **argv)
   g_test_add_func("/scm/late-status", test_late_status);
   g_test_add_func("/scm/head-moves", test_head_moves);
   g_test_add_func("/scm/commits-folded", test_commits_folded);
+  g_test_add_func("/scm/commit-details", test_commit_details);
   status = g_test_run();
 
   app.closing = TRUE;

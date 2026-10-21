@@ -28,3 +28,6 @@ void files_apply_font(App *t);
 
 /* Stops a git status still running (at shutdown). */
 void files_stop(App *t);
+
+/* Opens the folders on the way to path and selects it ("Reveal in Files"). */
+void files_reveal(App *t, const char *path);

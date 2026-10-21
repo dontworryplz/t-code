@@ -305,6 +305,15 @@ static const Command commands[] = {
   { "About t-code", NULL, NULL, show_about, FALSE, FALSE, FALSE },
 };
 
+void run_command(App *t, const char *name)
+{
+  for (size_t i = 0; i < G_N_ELEMENTS(commands); i++)
+    if (strcmp(commands[i].name, name) == 0) {
+      commands[i].run(t);
+      return;
+    }
+}
+
 const KeyHelp *window_keys(int *n)
 {
   static KeyHelp keys[G_N_ELEMENTS(commands)];

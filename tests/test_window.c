@@ -1040,6 +1040,42 @@ static void test_open_user_files(void)
   g_free(theme);
 }
 
+/* A comparison opens at its first change: the working file's cursor on that line, not on line 1. */
+static void test_comparison_first_change(void)
+{
+  char *path = g_build_filename(app.project.root, "long.txt", NULL);
+  GString *text = g_string_new(NULL);
+  GtkTextIter cursor;
+  Tab *tab;
+
+  for (int i = 1; i <= 80; i++)
+    g_string_append_printf(text, "line %d\n", i);
+  g_assert_true(g_file_set_contents(path, text->str, -1, NULL));
+  if (!git((const char *[]){ "init", "-q", NULL }) || !git((const char *[]){ "add", "long.txt", NULL }) ||
+      !git((const char *[]){ "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "long", NULL })) {
+    g_test_skip("no git");
+    g_string_free(text, TRUE);
+    g_free(path);
+    return;
+  }
+  app.project.git_top = g_canonicalize_filename(app.project.root, NULL);
+  char *changed = g_strstr_len(text->str, -1, "line 60\n");
+  memcpy(changed, "LINE", 4); /* line 60 differs */
+  g_assert_true(g_file_set_contents(path, text->str, -1, NULL));
+
+  compare_with_head(&app, path);
+  run_until(compared, path);
+  run(500); /* both sides load, their differences are worked out */
+  tab = tab_nth(&app, 0);
+  gtk_text_buffer_get_iter_at_mark(GTK_TEXT_BUFFER(tab->buffer), &cursor,
+                                   gtk_text_buffer_get_insert(GTK_TEXT_BUFFER(tab->buffer)));
+  g_assert_cmpint(gtk_text_iter_get_line(&cursor), ==, 59);
+  quit_editor(tab);
+  run(50);
+  g_string_free(text, TRUE);
+  g_free(path);
+}
+
 /* The title bar's button of page. */
 static GtkWidget *panel_button(const char *page)
 {
@@ -1522,6 +1558,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/temporary-per-group", test_temporary_per_group);
   g_test_add_func("/window/opens-at-left-edge", test_opens_at_left_edge);
   g_test_add_func("/window/comparison-one-tab", test_comparison_one_tab);
+  g_test_add_func("/window/comparison-first-change", test_comparison_first_change);
   g_test_add_func("/window/comparisons-in-a-row", test_comparisons_in_a_row);
   g_test_add_func("/window/save-conflict", test_save_conflict);
   g_test_add_func("/window/socket-requests", test_socket_requests);

@@ -17,6 +17,10 @@ void add_shortcuts_to(App *t, GtkWindow *window);
 /* Opens the command palette. */
 void command_palette(App *t);
 
+/* Runs the command of the table named name (as the command palette lists it), on the current tab.
+ * The editor's right-click menu uses it. */
+void run_command(App *t, const char *name);
+
 /* A command and its shortcut, for the Keybinds window. */
 typedef struct {
   const char *name;

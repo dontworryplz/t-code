@@ -5,6 +5,7 @@
  */
 #include "editor/diffgutter.h"
 
+#include "editor/editor.h"
 #include "editor/editorview.h"
 #include "editor/tabs.h"
 #include "git/linediff.h"
@@ -33,6 +34,7 @@ struct DiffGutter {
   int wrap_width;        /* the width the gaps were made for with word wrap (0: no wrap) */
   GArray *changed;       /* guint8 per line: TRUE where the line differs from the other side */
   guint relayout_id;     /* the gaps are made again (the view's width changed) */
+  gboolean jumped;       /* a comparison went to its first change once */
   gboolean base_pending; /* git show waits for the tab to be shown */
   guint update_id;
   Loading *loading; /* the git show in flight */
@@ -116,6 +118,7 @@ static gboolean update_marks_now(gpointer data)
   if (g->partner)
     sync_pair_gaps(g);
   gtk_widget_queue_draw(g->renderer);
+  editor_view_show_problems(g->tab); /* the strip beside the minimap marks them too */
   return G_SOURCE_REMOVE;
 }
 
@@ -405,6 +408,20 @@ static void sync_pair_gaps(DiffGutter *g)
   apply_side_gaps(og, line_diff_gaps(old_text, new_text, old_heights, new_heights, TRUE));
   apply_side_changes(ng, line_diff_spans(old_text, new_text, FALSE));
   apply_side_changes(og, line_diff_spans(old_text, new_text, TRUE));
+  if (!ng->jumped) { /* a comparison opens at its first change, not at the file's top */
+    int first = -1;
+    for (guint i = 0; ng->changed && i < ng->changed->len && first < 0; i++)
+      if (g_array_index(ng->changed, guint8, i))
+        first = (int)i;
+    for (guint i = 0; ng->gaps && i < ng->gaps->len; i++) { /* lines deleted there */
+      DiffGap *gap = &g_array_index(ng->gaps, DiffGap, i);
+      if (gap->count && (first < 0 || gap->line < first))
+        first = gap->above ? 0 : gap->line;
+    }
+    ng->jumped = TRUE;
+    if (first >= 0)
+      editor_goto(new_tab, first + 1, 1);
+  }
   g_free(new_heights);
   g_free(old_heights);
   g_free(new_text);
@@ -430,9 +447,31 @@ void diff_gutter_pair(Tab *new_tab, Tab *old_tab)
   DiffGutter *ng = new_tab->view->diff, *og = old_tab->view->diff;
   ng->partner = old_tab;
   ng->is_old_side = FALSE;
+  ng->jumped = FALSE;
   og->partner = new_tab;
   og->is_old_side = TRUE;
   sync_pair_gaps(ng);
+}
+
+gboolean diff_gutter_mark(Tab *tab, int line, PalColor *color)
+{
+  DiffGutter *g = tab && tab->view ? tab->view->diff : NULL;
+  guint8 mark;
+
+  if (!g || !g->marks || line < 0 || (guint)line >= g->marks->len || !(mark = g_array_index(g->marks, guint8, line)))
+    return FALSE;
+  *color = mark == LINE_DELETED_ABOVE     ? PAL_DIFF_DELETED
+           : mark != LINE_ADDED           ? PAL_DIFF_MODIFIED
+           : g->partner && g->is_old_side ? PAL_DIFF_DELETED
+                                          : PAL_DIFF_ADDED; /* as the gutter draws it */
+  return TRUE;
+}
+
+int diff_gutter_line_total(Tab *tab)
+{
+  DiffGutter *g = tab && tab->view ? tab->view->diff : NULL;
+
+  return g && g->marks ? (int)g->marks->len : 0;
 }
 
 gboolean diff_gutter_line_gaps(Tab *tab, int line, int *above_px, int *below_px)

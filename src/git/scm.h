@@ -19,3 +19,7 @@ void scm_show_commits(gboolean shown);
 
 /* Empties the panel at once (another project was opened); the next git status fills it again. */
 void scm_reset(void);
+
+/* Opens the n-th commit of Commits (from 0) in a tab: its message, author, line counts and diff
+ * (its right-click menu's "Open Commit Details"; the tests call it). */
+void scm_open_commit_details(int n);

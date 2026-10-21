@@ -14,6 +14,7 @@
 #include "editor/guides.h"
 #include "editor/occurrences.h"
 #include "editor/sticky.h"
+#include "editor/tabs.h"
 #include "lsp/client.h"
 #include "lsp/completion.h"
 #include "lsp/diagnostics.h"
@@ -21,6 +22,7 @@
 #include "lsp/navigate.h"
 #include "lsp/semantic.h"
 #include "lsp/signature.h"
+#include "window/commands.h"
 #include "window/statusbar.h"
 #include "window/terminal.h"
 #include "window/palette.h"
@@ -247,11 +249,29 @@ static int strip_line(Tab *tab, double y, int height)
   return (int)(y / MAX(height, 1) * gtk_text_buffer_get_line_count(buffer));
 }
 
+#define GIT_WIDTH 3 /* the strip's left part: git's added, modified and deleted lines */
+
 /* A mark per line with problems, beside that line in the minimap (see strip_y); errors over
- * warnings over the selected name's occurrences. */
+ * warnings over the selected name's occurrences. Left of them, git's changes in their gutter colors,
+ * a run of changed lines as one bar. */
 static void draw_overview(GtkDrawingArea *area G_GNUC_UNUSED, cairo_t *cr, int width, int height, gpointer data)
 {
   Tab *tab = data;
+  int total = diff_gutter_line_total(tab);
+
+  for (int line = 0; line < total; line++) {
+    PalColor color, next;
+    int last = line;
+    if (!diff_gutter_mark(tab, line, &color))
+      continue;
+    while (last + 1 < total && diff_gutter_mark(tab, last + 1, &next) && next == color)
+      last++;
+    double top = strip_y(tab, line, height), bottom = strip_y(tab, last, height) + MARK_HEIGHT;
+    gdk_cairo_set_source_rgba(cr, palette_rgba(color));
+    cairo_rectangle(cr, 0, top, GIT_WIDTH, bottom - top);
+    cairo_fill(cr);
+    line = last;
+  }
   GArray *lines[3] = { g_array_new(FALSE, FALSE, sizeof(int)), g_array_new(FALSE, FALSE, sizeof(int)),
                        g_array_new(FALSE, FALSE, sizeof(int)) };
   static const PalColor inks[3] = { PAL_FG_DIM, PAL_WARNING, PAL_ERROR };
@@ -261,7 +281,8 @@ static void draw_overview(GtkDrawingArea *area G_GNUC_UNUSED, cairo_t *cr, int w
   for (int k = 0; k < 3; k++) {
     gdk_cairo_set_source_rgba(cr, palette_rgba(inks[k]));
     for (guint i = 0; i < lines[k]->len; i++)
-      cairo_rectangle(cr, 1, strip_y(tab, g_array_index(lines[k], int, i), height), width - 1, MARK_HEIGHT);
+      cairo_rectangle(cr, GIT_WIDTH + 1, strip_y(tab, g_array_index(lines[k], int, i), height), width - GIT_WIDTH - 1,
+                      MARK_HEIGHT);
     cairo_fill(cr);
     g_array_free(lines[k], TRUE);
   }
@@ -401,6 +422,79 @@ GtkSourceStyleScheme *editor_style_scheme(App *t)
   return palette_scheme(t);
 }
 
+/* The editor's right-click menu: after GTK's own (cut, copy, paste), commands of the command
+ * palette for the code under the cursor. */
+static const char *const menu_commands[][2] = {
+  { "Go to Definition", "Go to Definition" },
+  { "Find All References", "Find All References" },
+  { "Rename Symbol…", "Rename Symbol" },
+  { "Format Document", "Format Document" },
+  { NULL, NULL },
+  { "Toggle Line Comment", "Toggle Line Comment" },
+  { NULL, NULL },
+  { "Toggle Breakpoint", "Debug: Toggle Breakpoint" },
+  { "Add to Watch", "Debug: Add to Watch" },
+  { NULL, NULL },
+  { "Compare with HEAD", "Git: Compare with HEAD" },
+  { "File History…", "Git: File History…" },
+};
+
+static void on_menu_command(GSimpleAction *action G_GNUC_UNUSED, GVariant *name, Tab *tab)
+{
+  select_tab(tab); /* the commands work on the current tab */
+  run_command(tab->app, g_variant_get_string(name, NULL));
+}
+
+/* A right click outside the selection puts the cursor there first, so that the menu's commands
+ * are about what was clicked (GtkTextView leaves it where it was). */
+static void on_menu_press(GtkGestureClick *click, int n G_GNUC_UNUSED, double x, double y, Tab *tab)
+{
+  GtkTextView *view = GTK_TEXT_VIEW(tab->source);
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+  GtkTextIter at, start, end;
+  int bx, by;
+
+  gtk_text_view_window_to_buffer_coords(view, GTK_TEXT_WINDOW_WIDGET, (int)x, (int)y, &bx, &by);
+  gtk_text_view_get_iter_at_location(view, &at, bx, by);
+  if (!gtk_text_buffer_get_selection_bounds(buffer, &start, &end) || !gtk_text_iter_in_range(&at, &start, &end))
+    gtk_text_buffer_place_cursor(buffer, &at);
+  gtk_event_controller_reset(GTK_EVENT_CONTROLLER(click)); /* GTK's menu still opens */
+}
+
+static void attach_menu(Tab *tab)
+{
+  GMenu *menu = g_menu_new(), *section = g_menu_new();
+  GSimpleActionGroup *group = g_simple_action_group_new();
+  GSimpleAction *action = g_simple_action_new("run", G_VARIANT_TYPE_STRING);
+  GtkGesture *press = gtk_gesture_click_new();
+
+  g_signal_connect(action, "activate", G_CALLBACK(on_menu_command), tab);
+  g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(action));
+  gtk_widget_insert_action_group(GTK_WIDGET(tab->source), "editor", G_ACTION_GROUP(group));
+  for (size_t i = 0; i < G_N_ELEMENTS(menu_commands); i++) {
+    if (!menu_commands[i][0]) {
+      g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+      g_object_unref(section);
+      section = g_menu_new();
+      continue;
+    }
+    GMenuItem *item = g_menu_item_new(menu_commands[i][0], NULL);
+    g_menu_item_set_action_and_target(item, "editor.run", "s", menu_commands[i][1]);
+    g_menu_append_item(section, item);
+    g_object_unref(item);
+  }
+  g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+  gtk_text_view_set_extra_menu(GTK_TEXT_VIEW(tab->source), G_MENU_MODEL(menu));
+  gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(press), GDK_BUTTON_SECONDARY);
+  gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(press), GTK_PHASE_CAPTURE);
+  g_signal_connect(press, "pressed", G_CALLBACK(on_menu_press), tab);
+  gtk_widget_add_controller(GTK_WIDGET(tab->source), GTK_EVENT_CONTROLLER(press));
+  g_object_unref(section);
+  g_object_unref(menu);
+  g_object_unref(action);
+  g_object_unref(group);
+}
+
 void editor_view_init(Tab *tab, gboolean readonly)
 {
   App *t = tab->app;
@@ -415,8 +509,8 @@ void editor_view_init(Tab *tab, gboolean readonly)
   buffer = gtk_source_buffer_new(NULL);
   gtk_source_buffer_set_style_scheme(buffer, editor_style_scheme(t));
   gtk_source_buffer_set_highlight_matching_brackets(buffer, TRUE);
-  /* The buffer holds the file exactly, its last line break too (shown as an empty last line, like VS
-   * Code): what is saved, what clangd gets and what the diff gutter compares are the same text. */
+  /* The buffer holds the file exactly, its last line break too (shown as an empty last line):
+   * what is saved, what clangd gets and what the diff gutter compares are the same text. */
   gtk_source_buffer_set_implicit_trailing_newline(buffer, FALSE);
   view = guides_view_new(tab, buffer); /* our reference to the buffer stays the tab's */
 
@@ -437,6 +531,7 @@ void editor_view_init(Tab *tab, gboolean readonly)
   debug_hover_attach(tab);
   completion_attach(tab);
   navigate_attach(tab);
+  attach_menu(tab);
 
   gtk_widget_add_css_class(GTK_WIDGET(view), "tcode-source");
   gtk_text_view_set_monospace(GTK_TEXT_VIEW(view), TRUE);

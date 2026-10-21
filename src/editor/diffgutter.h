@@ -6,6 +6,7 @@
 #pragma once
 
 #include "app.h"
+#include "window/palette.h"
 
 typedef struct DiffGutter DiffGutter;
 
@@ -29,7 +30,8 @@ void diff_gutter_head_moved(App *t);
 
 /* Pairs two tabs in a side-by-side comparison (new_tab on the left, old_tab on the right) so
  * missing lines open synchronized gap rows (red for deleted lines on the left, black for newly
- * added lines on the right). Pass NULL for old_tab to unpair new_tab. */
+ * added lines on the right); once both are loaded, the left one goes to its first change. Pass
+ * NULL for old_tab to unpair new_tab. */
 void diff_gutter_pair(Tab *new_tab, Tab *old_tab);
 
 /* Gap pixels above (*above_px) and below (*below_px) `line` in a side-by-side comparison;
@@ -47,6 +49,13 @@ gboolean diff_gutter_line_changed(Tab *tab, int line);
 /* Called while drawing a compared view: when its text width or word wrap changed since its gaps
  * were made (a long line now wraps to another number of rows), they are made again. */
 void diff_gutter_check_width(Tab *tab);
+
+/* The color of line's mark (added, modified, deleted lines), for the strip beside the minimap;
+ * FALSE when it has none. */
+gboolean diff_gutter_mark(Tab *tab, int line, PalColor *color);
+
+/* How many lines have marks worked out (0 before the first, or without a base). */
+int diff_gutter_line_total(Tab *tab);
 
 /* Frees an editor's gutter state. NULL is fine. */
 void diff_gutter_free(DiffGutter *gutter);

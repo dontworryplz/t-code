@@ -758,6 +758,13 @@ static void test_diff_gutter(void)
   g_assert_cmpuint(g_array_index(tab->view->diff->marks, guint8, 0), ==, LINE_ADDED);
   g_assert_cmpuint(g_array_index(tab->view->diff->marks, guint8, 1), ==, LINE_SAME);
   g_assert_cmpuint(g_array_index(tab->view->diff->marks, guint8, 2), ==, LINE_MODIFIED);
+  PalColor color; /* the strip beside the minimap: the same marks, in the gutter's colors */
+  g_assert_cmpint(diff_gutter_line_total(tab), >=, 4);
+  g_assert_true(diff_gutter_mark(tab, 0, &color));
+  g_assert_cmpint(color, ==, PAL_DIFF_ADDED);
+  g_assert_false(diff_gutter_mark(tab, 1, &color));
+  g_assert_true(diff_gutter_mark(tab, 2, &color));
+  g_assert_cmpint(color, ==, PAL_DIFF_MODIFIED);
   g_remove(base);
   g_free(base);
   free_tab(tab);

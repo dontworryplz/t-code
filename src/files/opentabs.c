@@ -5,8 +5,10 @@
 #include "files/opentabs.h"
 
 #include "editor/editor.h"
+#include "editor/tabmenu.h"
 #include "editor/tabs.h"
 #include "files/icons.h"
+#include "popups/contextmenu.h"
 
 #include <string.h>
 
@@ -76,6 +78,15 @@ static void on_close_clicked(GtkButton *button, gpointer data G_GNUC_UNUSED)
   close_one(g_object_get_data(G_OBJECT(button), "t-code-tab"));
 }
 
+/* A right click on a tab's row: the tab's menu, as in the tab strip. */
+static void on_row_menu(GtkWidget *row, double x, double y, gpointer data G_GNUC_UNUSED)
+{
+  Tab *tab = g_object_get_data(G_OBJECT(row), "t-code-tab");
+
+  if (tab && is_open(tab))
+    tab_menu(tab, row, x, y);
+}
+
 /* A label with text in color (Pango markup). */
 static GtkWidget *colored(const char *text, const char *color)
 {
@@ -128,6 +139,7 @@ static GtkWidget *tab_row(Tab *tab)
   gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
   gtk_widget_set_tooltip_text(row, tab->path);
   g_object_set_data(G_OBJECT(row), "t-code-tab", tab);
+  context_menu_attach(row, on_row_menu, NULL);
   gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(middle), GDK_BUTTON_MIDDLE);
   g_signal_connect(middle, "released", G_CALLBACK(on_middle_click), NULL);
   gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(middle));
