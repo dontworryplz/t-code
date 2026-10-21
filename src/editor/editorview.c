@@ -460,7 +460,10 @@ static void on_menu_press(GtkGestureClick *click, int n G_GNUC_UNUSED, double x,
   gtk_text_view_get_iter_at_location(view, &at, bx, by);
   if (!gtk_text_buffer_get_selection_bounds(buffer, &start, &end) || !gtk_text_iter_in_range(&at, &start, &end))
     gtk_text_buffer_place_cursor(buffer, &at);
-  gtk_event_controller_reset(GTK_EVENT_CONTROLLER(click)); /* GTK's menu still opens */
+  /* The click is ours and the menu is opened by hand: letting the click on to GTK's own handler
+   * did not open it. */
+  gtk_gesture_set_state(GTK_GESTURE(click), GTK_EVENT_SEQUENCE_CLAIMED);
+  gtk_widget_activate_action(GTK_WIDGET(view), "menu.popup", NULL);
 }
 
 static void attach_menu(Tab *tab)
