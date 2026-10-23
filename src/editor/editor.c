@@ -11,6 +11,7 @@
 #include "editor/editorview.h"
 #include "editor/folding.h"
 #include "editor/tabs.h"
+#include "editor/recovery.h"
 #include "git/compare.h"
 #include "git/gitstatus.h"
 #include "lsp/client.h"
@@ -160,6 +161,8 @@ static void on_changed(GtkTextBuffer *buffer G_GNUC_UNUSED, Tab *tab)
   if (v->loading)
     return;
   update_position(tab);
+  if (!v->readonly && !editor_in_conflict(tab))
+    recovery_schedule_snapshot(tab);
   if (!tab->app->settings.autosave || v->readonly || editor_in_conflict(tab)) /* the user decides first */
     return;
   if (v->autosave_id)
@@ -245,6 +248,7 @@ static void on_saved(GObject *source, GAsyncResult *result, gpointer data)
         gtk_text_buffer_set_modified(GTK_TEXT_BUFFER(tab->buffer), FALSE);
       refresh_branch(tab->app); /* the work tree changed */
       lsp_saved(tab);
+      recovery_discard_snapshot(tab->path);
     } else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_WRONG_ETAG)) { /* changed on disk meanwhile */
       show_conflict(tab);
     } else if (!v->save_failed) { /* autosave would say it every second */
@@ -434,6 +438,7 @@ static void on_loaded(GObject *source, GAsyncResult *result, gpointer data)
       call_waiters(waiting, TRUE);
     }
     g_free(text);
+    recovery_check_and_prompt(tab);
   }
   g_clear_error(&error);
   g_object_unref(job->cancel);

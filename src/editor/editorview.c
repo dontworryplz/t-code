@@ -619,6 +619,8 @@ void editor_view_free(EditorView *v)
     g_source_remove(v->reload_id);
   if (v->scroll_id)
     g_source_remove(v->scroll_id);
+  if (v->recovery_id)
+    g_source_remove(v->recovery_id);
   g_signal_handlers_disconnect_by_data(v->tab->buffer, v->tab);
   g_object_unref(v->tab->buffer); /* the page went first: the tab still holds it */
   g_object_unref(v->cancel);

@@ -111,10 +111,14 @@ build/test-update: tests/test_update.c src/update/update.c src/update/update.h $
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_update.c src/update/update.c \
 	  $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
 
+build/test-recovery: tests/test_recovery.c src/editor/recovery.c src/editor/recovery.h $(APP_HDR) | build
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_recovery.c src/editor/recovery.c \
+	  $(shell pkg-config --libs gtk4 gio-2.0 2>/dev/null)
+
 
 test: build/test-searchmatch build/test-detect build/test-linediff build/test-fileops build/test-lsp build/test-debug \
       build/test-search-panel build/test-editing build/test-scm build/test-files build/test-window build/test-about \
-      build/test-plugins build/test-update
+      build/test-plugins build/test-update build/test-recovery
 	build/test-searchmatch
 	build/test-detect
 	build/test-linediff
@@ -129,6 +133,7 @@ test: build/test-searchmatch build/test-detect build/test-linediff build/test-fi
 	build/test-about
 	build/test-plugins
 	build/test-update
+	build/test-recovery
 
 # The tests that need no display again, under AddressSanitizer and UBSan: out-of-bounds access, use
 # after free, undefined behavior, and (LeakSanitizer, at exit) every block that was not freed.
@@ -161,6 +166,9 @@ test-asan: | build
 	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gtk4 json-glib-1.0 gio-2.0) -DTCODE_VERSION='"$(VERSION)"' -o build/asan/test-update \
 	  tests/test_update.c src/update/update.c $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
 	$(ASAN_ENV) build/asan/test-update
+	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gtk4 gio-2.0 2>/dev/null) -o build/asan/test-recovery \
+	  tests/test_recovery.c src/editor/recovery.c $(shell pkg-config --libs gtk4 gio-2.0 2>/dev/null)
+	$(ASAN_ENV) build/asan/test-recovery
 
 # System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).
 install: build/t-code

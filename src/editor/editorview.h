@@ -49,9 +49,10 @@ struct EditorView {
   gboolean saving, save_again; /* a save is in flight; another one is due after it */
   gboolean save_failed;        /* told the user once; quiet until a save works again */
   GtkWidget *conflict;         /* the bar shown when the file changed on disk under unsaved changes */
+  GtkWidget *recovery_bar;     /* the bar offering to restore unsaved changes after a crash */
   gboolean overwrite;          /* the next save writes over a file changed on disk */
   GArray *next_waiters;        /* SaveWaiter: for the save after the one in flight */
-  guint autosave_id, reload_id, scroll_id;
+  guint autosave_id, reload_id, scroll_id, recovery_id;
   gboolean scroll_pending;    /* the cursor is scrolled to once the view is shown */
   gboolean lsp_pending;       /* loaded while hidden: the language server gets it once shown */
   int goto_line, goto_column; /* where the cursor goes once loaded (0: the start) */

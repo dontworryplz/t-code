@@ -14,6 +14,7 @@
 #include "git/linediff.c"
 #include "editor/editing.c"
 #include "editor/editorview.c"
+#include "editor/recovery.c"
 #include "editor/findbar.c"
 #include "editor/indentconf.c"
 #include "editor/guides.c"
@@ -41,6 +42,7 @@ gboolean disassembly_is(App *t G_GNUC_UNUSED, Tab *tab G_GNUC_UNUSED) { return F
 gboolean disassembly_breakpoint_at(App *t G_GNUC_UNUSED, int line G_GNUC_UNUSED) { return FALSE; }
 void disassembly_toggle_breakpoint(App *t G_GNUC_UNUSED, int line G_GNUC_UNUSED) {}
 void show_sidebar_page(App *t G_GNUC_UNUSED, const char *page G_GNUC_UNUSED) {}
+void status_say(App *t G_GNUC_UNUSED, const char *message G_GNUC_UNUSED) {}
 
 void status_show_indent(App *t G_GNUC_UNUSED) {}
 int tab_count(App *t G_GNUC_UNUSED) { return 0; }
