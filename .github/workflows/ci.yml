@@ -13,14 +13,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Dependencies
         run: |
-          dnf -y install make gcc git clangd gdb ripgrep \
+          dnf -y install make gcc git clangd gdb \
             gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-devel md4c-devel \
             xorg-x11-server-Xvfb dbus-x11 glibc-langpack-en
       - name: Build
         run: make -j"$(nproc)" all
       # Gtk tests need a session bus and headless display; cairo disables the container Vulkan renderer.
       - name: Tests
-        run: XDG_RUNTIME_DIR=/tmp GSK_RENDERER=cairo dbus-run-session -- xvfb-run -a make -j"$(nproc)" test
+        run: |
+          runtime_dir=$(mktemp -d)
+          chmod 700 "$runtime_dir"
+          trap 'rm -rf "$runtime_dir"' EXIT
+          LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 XDG_RUNTIME_DIR="$runtime_dir" GSK_RENDERER=cairo \
+            dbus-run-session -- xvfb-run -a make -j"$(nproc)" test
   asan:
     # The tests that need no display, leak-strict; -std=c23 wants gcc 14+, like the build above.
     runs-on: ubuntu-24.04
