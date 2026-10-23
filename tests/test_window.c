@@ -368,6 +368,86 @@ static void test_socket_requests(void)
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
   g_free(line);
+  /* Test say */
+  const char *say_cmd = "say Testing status notification\n";
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_nonnull(conn);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), say_cmd, strlen(say_cmd),
+                                          NULL, NULL, NULL));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  run(50);
+  g_assert_cmpstr(gtk_label_get_text(app.status.build), ==, "Testing status notification");
+
+  /* Test get-file */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-file\n", 9, NULL,
+                                          NULL, NULL));
+  GDataInputStream *dis = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
+  gsize read_len = 0;
+  char *got_file = g_data_input_stream_read_line(dis, &read_len, NULL, NULL);
+  g_assert_cmpstr(got_file, ==, lined);
+  g_free(got_file);
+  g_object_unref(dis);
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+
+  /* Test get-project */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-project\n", 12, NULL,
+                                          NULL, NULL));
+  dis = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
+  char *got_proj = g_data_input_stream_read_line(dis, &read_len, NULL, NULL);
+  g_assert_cmpstr(got_proj, ==, app.project.root);
+  g_free(got_proj);
+  g_object_unref(dis);
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+
+  /* Test replace-all */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "replace-all Hello World\n",
+                                          22, NULL, NULL, NULL));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  run(50);
+
+  /* Test get-text */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-text\n", 9, NULL,
+                                          NULL, NULL));
+  dis = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
+  char *got_text = g_data_input_stream_read_line(dis, &read_len, NULL, NULL);
+  g_assert_cmpstr(got_text, ==, "Hello World");
+  g_free(got_text);
+  g_object_unref(dis);
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+
+  /* Test append */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "append  Extra\n", 13,
+                                          NULL, NULL, NULL));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  run(50);
+
+  /* Test insert */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "insert !\n", 9, NULL,
+                                          NULL, NULL));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  run(50);
+
+  /* Test save */
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "save\n", 5, NULL,
+                                          NULL, NULL));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  run(50);
+
   g_free(lined);
   g_object_unref(address);
   g_object_unref(client);

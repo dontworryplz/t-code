@@ -103,9 +103,18 @@ build/test-window: tests/test_window.c tests/broadway.h $(APP_SRC) $(APP_HDR) bu
 build/test-about: tests/test_about.c src/dialogs/about.c $(APP_HDR) build/license.h | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_about.c \
 	  $(shell pkg-config --libs $(PKGS))
+build/test-plugins: tests/test_plugins.c src/plugins/plugins.c src/plugins/plugins.h $(APP_HDR) | build
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_plugins.c src/plugins/plugins.c \
+	  $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+
+build/test-update: tests/test_update.c src/update/update.c src/update/update.h $(APP_HDR) | build
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_update.c src/update/update.c \
+	  $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+
 
 test: build/test-searchmatch build/test-detect build/test-linediff build/test-fileops build/test-lsp build/test-debug \
-      build/test-search-panel build/test-editing build/test-scm build/test-files build/test-window build/test-about
+      build/test-search-panel build/test-editing build/test-scm build/test-files build/test-window build/test-about \
+      build/test-plugins build/test-update
 	build/test-searchmatch
 	build/test-detect
 	build/test-linediff
@@ -118,6 +127,8 @@ test: build/test-searchmatch build/test-detect build/test-linediff build/test-fi
 	build/test-files
 	build/test-window
 	build/test-about
+	build/test-plugins
+	build/test-update
 
 # The tests that need no display again, under AddressSanitizer and UBSan: out-of-bounds access, use
 # after free, undefined behavior, and (LeakSanitizer, at exit) every block that was not freed.
@@ -144,6 +155,12 @@ test-asan: | build
 	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags json-glib-1.0 gio-2.0) -o build/asan/test-debug \
 	  tests/test_debug.c $(DAP_SRC) $(shell pkg-config --libs json-glib-1.0 gio-2.0)
 	$(ASAN_ENV) build/asan/test-debug
+	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gtk4 json-glib-1.0 gio-2.0) -o build/asan/test-plugins \
+	  tests/test_plugins.c src/plugins/plugins.c $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+	$(ASAN_ENV) build/asan/test-plugins
+	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gtk4 json-glib-1.0 gio-2.0) -DTCODE_VERSION='"$(VERSION)"' -o build/asan/test-update \
+	  tests/test_update.c src/update/update.c $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+	$(ASAN_ENV) build/asan/test-update
 
 # System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).
 install: build/t-code

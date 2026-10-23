@@ -51,7 +51,7 @@ static long next_number(const char *s, char **next)
 
 /* TRUE when theirs is a version above ours ("0.4" above "0.3.0"): number by number, and nothing
  * else — 0.3.0-rc2 sits with 0.3.0. */
-static gboolean newer_version(const char *ours, const char *theirs)
+gboolean newer_version(const char *ours, const char *theirs)
 {
   char *a, *b;
 

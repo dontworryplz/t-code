@@ -12,4 +12,6 @@ void updates_start(App *t);
 
 /* The same check, right now ("Check for Updates Now"): it asks even when the setting is off, and
  * the answer shows even when it found nothing new. */
+/* Compares two version strings: TRUE when theirs is newer than ours. */
+gboolean newer_version(const char *ours, const char *theirs);
 void updates_check_now(App *t);

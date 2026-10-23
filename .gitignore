@@ -7,4 +7,5 @@ REVIEW_GUIDE.md
 packaging/packages/
 !docs/plugins.md
 !docs/memory.md
+!docs/tasks.md
 KNOWN_ISSUES.md
