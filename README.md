@@ -93,7 +93,7 @@ sudo dnf install gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-dev
 
 ## Install
 
-### With a package (Fedora, Arch Linux, Debian, Void Linux)
+### With a package (Fedora, Arch Linux, Debian, Void Linux, AUR)
 
 #### [Latest Release v0.3](https://github.com/suacayipkisi/t-code/releases/tag/v0.3)
 
@@ -125,6 +125,48 @@ your package manager (`sudo dnf remove t-code`, `sudo pacman -R t-code`, `sudo a
 A package puts `t-code` in `/usr/bin`, the editor's colors in `/usr/share/t-code/styles/`, and the
 app menu entry and icon.
 
+### AUR source package (not published to AUR yet)
+
+The repository includes a pinned, checksum-verified `packaging/aur/PKGBUILD` for t-code 0.3.0.
+After checking out this repository, build and install it with Arch's `base-devel` tools:
+
+```sh
+cd packaging/aur
+makepkg -si
+```
+
+This is a source recipe, not a published AUR listing. The current v0.3 release predates the
+Flatpak and Snap packaging below; the next tag built from this branch will attach those artifacts.
+
+### Flatpak (x86_64)
+
+Install the unsigned Flatpak bundle from a tag built with this packaging workflow:
+
+```sh
+flatpak install --user ./t-code-0.3.0-x86_64.flatpak
+flatpak run --file-forwarding io.github.tcode @@ "$HOME/projects/example" @@
+```
+
+Open a whole project folder through the folder chooser or file forwarding so the document portal
+grants access to its contents. The sandbox does not inherit host credentials, tools, or plugin
+configuration. See [`packaging/flatpak/README.md`](packaging/flatpak/README.md) for permissions,
+toolchain, and access details.
+
+### Snap (Linux amd64)
+
+The release Snap is strictly confined and not yet published to the Snap Store. Install the
+unsigned release artifact locally:
+
+```sh
+sudo snap install --dangerous ./t-code_0.3.0_amd64.snap
+snap run t-code "$HOME/projects/example"
+```
+
+The Snap can access projects under non-hidden directories in your home. Its configuration and
+plugins are private to the Snap; host credentials, executables and development libraries are not
+imported. F5 debugger tracing is unavailable under strict confinement. See
+[`packaging/snap/README.md`](packaging/snap/README.md) for the exact boundaries.
+
 ### As an AppImage (x86_64, for everything else)
 
 [t-code-x86_64.AppImage](https://github.com/suacayipkisi/t-code/releases): a single file without an
@@ -135,24 +177,36 @@ Settings' font picker suffices). Built by `packaging/appimage.sh` like the packa
 
 ### Building the packages yourself
 
-All packages are built from this repository with one script. The Arch, Debian and Void packages
-(and the Fedora one, when you are not on Fedora) are built in containers, so all you need is
-`podman` or `docker`:
+The distribution packages are built in containers using `podman` or `docker`. The AUR recipe
+builds in an Arch container. Flatpak needs Linux, `flatpak`, `flatpak-builder`, `jq`, and access to
+Flathub. Snap needs Linux amd64, Snapcraft 9, and initialized LXD; its fully confined smoke test
+requires a native snapd/AppArmor host, not a container.
+
+The shared scripts require Bash 4 or newer; macOS's bundled Bash 3.2 is too old. Flatpak and Snap
+builds require Linux even when native distribution packages can use containers.
 
 ```sh
-packaging/build.sh                # all, or pick: packaging/build.sh fedora arch debian void void-musl
-packaging/test.sh                 # tries each package out in a fresh container
+packaging/build.sh                 # all formats; requires the tools above
+packaging/build.sh aur             # AUR source package
+packaging/build.sh flatpak         # Flatpak bundle and repository
+packaging/build.sh snap            # strict Snap package (Linux amd64 + LXD)
+packaging/test.sh                  # all package smoke tests on a prepared Linux host
+packaging/test.sh aur flatpak      # choose package tests
 ```
 
-The packages land in `packaging/packages/<distribution>/` (with the debug and source packages);
-`packaging/packages/release/` gets just the ones to publish and their `SHA256SUMS`. On Fedora, the RPM is
-built directly with `rpmbuild`; install its build dependencies once with
+Artifacts land in `packaging/packages/<format>/`; the release directory contains installable RPM,
+Arch, DEB, XBPS, AppImage, Flatpak and Snap files, Snapcraft build/dependency provenance, and a
+combined `SHA256SUMS`. The AUR build artifact is validated but is not attached as a release package;
+publish the recipe separately to AUR after account/repository setup.
+On Fedora, the RPM is built directly with `rpmbuild`; install its build dependencies once with
 `sudo dnf install rpm-build dnf-plugins-core && sudo dnf builddep packaging/fedora/t-code.spec`.
 
-`packaging/test.sh` installs each package in a fresh container of its distribution (so the
-package manager has to find every dependency), checks the installed files, and starts t-code on
-a headless X server with five C files: one clangd (with its malloc arena limit) has to come up, a Markdown preview has to open, and t-code has to quit cleanly.
-While they build, the packages also run the tests that need no display.
+`packaging/test.sh` installs each distribution package into a fresh container, resolves its
+dependencies, checks installed files and starts t-code under Xvfb with clangd, a project, preview,
+and socket interactions. Flatpak smoke installs the bundle in a temporary user installation and
+launches it in its real sandbox. Snap smoke requires a disposable Linux host with strict
+confinement and passwordless sudo; it installs the unsigned package and leaves it installed for
+inspection. The package build also runs tests that do not need a display.
 
 ### From the source, into ~/.local
 
