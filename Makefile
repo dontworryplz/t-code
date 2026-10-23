@@ -11,7 +11,7 @@ CFLAGS  += -Wall -Wextra -std=c23
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
 DATADIR    ?= $(PREFIX)/share
-APP_CFLAGS := $(shell pkg-config --cflags $(PKGS)) -Isrc -Ibuild
+APP_CFLAGS := $(shell pkg-config --cflags $(PKGS) 2>/dev/null) -Isrc -Ibuild
 
 all: build/t-code build/compile_commands.json
 

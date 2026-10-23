@@ -29,7 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: dnf -y install make gcc glib2-devel json-glib-devel
+        run: |
+          dnf -y install make gcc libasan libubsan \
+            gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-devel md4c-devel
       - name: Build under ASan
         run: make test-asan
   format:
