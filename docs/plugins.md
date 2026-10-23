@@ -52,7 +52,7 @@ The control socket (`$TCODE_SOCKET`) already supports line-oriented command rout
 | `open` | `<path> [line] [column]` | Opens a file at the given position |
 | `get-file` | *(none)* | Returns the active tab's file path |
 | `get-project` | *(none)* | Returns current project directory root |
-| `get-text` | *(none)* | Returns buffer text of the active editor |
+| `get-text` | *(none)* | Returns the active editor buffer, terminated by NUL so multiline text is unambiguous |
 | `insert` | `<text>` | Inserts text at the cursor position |
 | `append` | `<text>` | Appends text at the end of the buffer |
 | `replace-all`| `<text>` | Replaces the buffer content |
@@ -62,6 +62,9 @@ The control socket (`$TCODE_SOCKET`) already supports line-oriented command rout
 | `preview` | `<file>` | Opens Markdown preview tab |
 | `diff` | `<path> <old_path>` | Opens side-by-side diff comparison |
 | `debug` | `<program>` | Hands binary to the integrated debugger |
+
+
+Requests normally end with a newline. Send NUL-terminated requests when an argument contains newlines, such as `replace-all`; a connection using NUL framing should terminate each request with NUL. `get-file` and `get-project` return one newline-terminated response. `get-text` returns the full buffer followed by a NUL byte, preserving embedded newlines and distinguishing an empty buffer from a closed connection.
 
 #### Execution Flow
 

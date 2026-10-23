@@ -71,7 +71,6 @@ int fuzzy_score(const char *query, const char *text)
   return total * 16 - (int)strlen(text);
 }
 
-
 static void write_file(const char *rel_path, const char *content, int mode)
 {
   char *full = g_build_filename(tmp_dir, rel_path, NULL);
@@ -271,7 +270,6 @@ static void test_palette_query(void)
   plugins_stop(&app);
   g_free(scan_path);
 }
-
 
 int main(int argc, char **argv)
 {

@@ -85,6 +85,7 @@ static void handle(App *t, const char *command, const char *arg, GOutputStream *
           g_free(text);
         }
       }
+      g_output_stream_write_all(out, "\0", 1, NULL, NULL, NULL);
       g_output_stream_flush(out, NULL, NULL);
     }
     return;

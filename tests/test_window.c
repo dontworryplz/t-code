@@ -63,6 +63,48 @@ static void run_until(gboolean (*done)(gconstpointer), gconstpointer data)
     g_main_context_iteration(NULL, FALSE);
 }
 
+typedef struct {
+  char *text;
+  gsize length;
+  char delimiter;
+  GError *error;
+  gboolean done;
+} SocketResponse;
+
+static void socket_response_read(GObject *source, GAsyncResult *result, gpointer data)
+{
+  SocketResponse *response = data;
+
+  response->text =
+      g_data_input_stream_read_upto_finish(G_DATA_INPUT_STREAM(source), result, &response->length, &response->error);
+  if (!response->error) {
+    int delimiter = g_data_input_stream_read_byte(G_DATA_INPUT_STREAM(source), NULL, &response->error);
+    if (!response->error && delimiter != response->delimiter)
+      g_set_error(&response->error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "unexpected socket response delimiter");
+  }
+  if (!response->text && response->length == 0 && !response->error)
+    response->text = g_strdup("");
+  response->done = TRUE;
+}
+
+static gboolean socket_response_done(gconstpointer data)
+{
+  return ((const SocketResponse *)data)->done;
+}
+
+static char *read_socket_response(GSocketConnection *conn, const char *stop, gsize stop_length)
+{
+  GDataInputStream *input = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
+  SocketResponse response = { .delimiter = stop[0] };
+  g_data_input_stream_read_upto_async(input, stop, stop_length, G_PRIORITY_DEFAULT, NULL, socket_response_read,
+                                      &response);
+  run_until(socket_response_done, &response);
+  g_assert_true(response.done);
+  g_assert_no_error(response.error);
+  g_object_unref(input);
+  return response.text;
+}
+
 /* The open tabs' file names in order, "*" after temporary ones: "a.txt* b.txt". */
 static char *tabs(void)
 {
@@ -381,14 +423,11 @@ static void test_socket_requests(void)
 
   /* Test get-file */
   conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
-  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-file\n", 9, NULL,
-                                          NULL, NULL));
-  GDataInputStream *dis = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
-  gsize read_len = 0;
-  char *got_file = g_data_input_stream_read_line(dis, &read_len, NULL, NULL);
+  g_assert_true(
+      g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-file\n", 9, NULL, NULL, NULL));
+  char *got_file = read_socket_response(conn, "\n", 1);
   g_assert_cmpstr(got_file, ==, lined);
   g_free(got_file);
-  g_object_unref(dis);
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
 
@@ -396,54 +435,68 @@ static void test_socket_requests(void)
   conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
   g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-project\n", 12, NULL,
                                           NULL, NULL));
-  dis = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
-  char *got_proj = g_data_input_stream_read_line(dis, &read_len, NULL, NULL);
+  char *got_proj = read_socket_response(conn, "\n", 1);
   g_assert_cmpstr(got_proj, ==, app.project.root);
   g_free(got_proj);
-  g_object_unref(dis);
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
 
-  /* Test replace-all */
+  /* Test replace-all with multiline content over NUL-delimited requests. */
+  const char *expected_text = "Hello World\nSecond line";
   conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
-  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "replace-all Hello World\n",
-                                          22, NULL, NULL, NULL));
+  char *replace = g_strdup_printf("replace-all %s%c", expected_text, '\0');
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), replace,
+                                          strlen(replace) + 1, NULL, NULL, NULL));
+  g_free(replace);
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
   run(50);
 
-  /* Test get-text */
+  /* Test get-text returns the entire buffer followed by a NUL terminator. */
   conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
-  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-text\n", 9, NULL,
-                                          NULL, NULL));
-  dis = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
-  char *got_text = g_data_input_stream_read_line(dis, &read_len, NULL, NULL);
-  g_assert_cmpstr(got_text, ==, "Hello World");
+  g_assert_true(
+      g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-text\n", 9, NULL, NULL, NULL));
+  char *got_text = read_socket_response(conn, "", 1);
+  g_assert_cmpstr(got_text, ==, expected_text);
   g_free(got_text);
-  g_object_unref(dis);
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "replace-all \0", 13, NULL,
+                                          NULL, NULL));
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(conn);
+  run(50);
+
+  conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  g_assert_true(
+      g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "get-text\n", 9, NULL, NULL, NULL));
+  got_text = read_socket_response(conn, "", 1);
+  g_assert_cmpstr(got_text, ==, "");
+  g_free(got_text);
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
 
   /* Test append */
   conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
-  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "append  Extra\n", 13,
-                                          NULL, NULL, NULL));
+  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "append  Extra\n", 13, NULL,
+                                          NULL, NULL));
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
   run(50);
 
   /* Test insert */
   conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
-  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "insert !\n", 9, NULL,
-                                          NULL, NULL));
+  g_assert_true(
+      g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "insert !\n", 9, NULL, NULL, NULL));
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
   run(50);
 
   /* Test save */
   conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
-  g_assert_true(g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "save\n", 5, NULL,
-                                          NULL, NULL));
+  g_assert_true(
+      g_output_stream_write_all(g_io_stream_get_output_stream(G_IO_STREAM(conn)), "save\n", 5, NULL, NULL, NULL));
   g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
   g_object_unref(conn);
   run(50);

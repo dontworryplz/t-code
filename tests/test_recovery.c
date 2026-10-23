@@ -28,7 +28,8 @@ static void test_recovery_lifecycle(void)
 
   /* Write a simulated snapshot directly */
   gint64 now = g_get_real_time() / G_USEC_PER_SEC;
-  char *content = g_strdup_printf("TCODE_RECOVERY_V1 %" G_GINT64_FORMAT " %s\nint recovered = 42;\n", now + 10, filepath);
+  char *content =
+      g_strdup_printf("TCODE_RECOVERY_V1 %" G_GINT64_FORMAT " %s\nint recovered = 42;\n", now + 10, filepath);
   char *journal_dir = g_path_get_dirname(journal);
   g_mkdir_with_parents(journal_dir, 0700);
   g_free(journal_dir);
