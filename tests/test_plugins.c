@@ -138,7 +138,7 @@ static void test_valid_plugin(void)
   g_assert_cmpstr(c1->trigger, ==, "<Control><Alt>1");
   GtkShortcutController *controller = GTK_SHORTCUT_CONTROLLER(gtk_shortcut_controller_new());
   plugins_add_shortcuts(controller, &app);
-  g_assert_cmpuint(gtk_shortcut_controller_get_n_shortcuts(controller), ==, 1);
+  g_assert_cmpuint(g_list_model_get_n_items(G_LIST_MODEL(controller)), ==, 1);
   g_object_unref(controller);
   g_assert_true(c1->plugin == p);
 

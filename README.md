@@ -210,10 +210,13 @@ When a plugin command is triggered from the Command Palette (`Ctrl+Shift+P`):
    - `TCODE_COMMAND_ID`: executed command identifier.
    - `TCODE_ACTIVE_FILE`: absolute path to active editor file.
    - `TCODE_PROJECT_ROOT`: root directory of the current project.
-2. The plugin can interact with t-code via `$TCODE_SOCKET` (e.g., `say <message>`, `get-file`, `get-project`, `get-text`, `replace-all <text>`, `insert <text>`, `append <text>`, `save`).
-3. Plugins terminate immediately upon completion, maintaining zero background resource usage.
-
-Manage plugins via `Ctrl+Shift+P` > **Plugins: Reload Installed Plugins** or **Plugins: Open Plugins Folder**, or from Settings ("Edit by Hand" > "Plugins folder"). Detailed design and socket protocol documentation is in [`docs/plugins.md`](docs/plugins.md).
+2. The plugin interacts with t-code via `$TCODE_SOCKET` (for example, `say <message>`, `get-file`,
+   `get-project`, `get-text`, `replace-all <text>`, `insert <text>`, `append <text>`, and `save`).
+   Sending `subscribe` keeps the socket open for JSON-lines `did_open` and `did_save` events.
+3. The manifest's `keys` value labels the palette command; optional GTK `trigger` binds a shortcut.
+   Plugins are also available from the palette, and terminate immediately after their command unless
+   they explicitly subscribe to events.
+   See [`docs/plugins.md`](docs/plugins.md) for the manifest and socket protocol.
 
 ## Contributing
 

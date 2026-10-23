@@ -41,8 +41,9 @@ Plugins are discovered in `~/.config/t-code/plugins/<plugin_id>/` and `/usr/shar
 ```
 
 `keys` is the label shown beside the command. `trigger` is GTK's shortcut syntax; commands without
-it remain available in the palette. A duplicate trigger keeps the first discovered command, and an
-invalid trigger is skipped. Reload Installed Plugins refreshes bindings in both windows.
+it remain available in the palette. When duplicate triggers are found, the first discovered plugin
+command keeps the binding; invalid triggers are skipped. Reload Installed Plugins refreshes bindings
+in both windows.
 
 #### Socket Protocol
 
@@ -63,16 +64,33 @@ The control socket (`$TCODE_SOCKET`) already supports line-oriented command rout
 | `preview` | `<file>` | Opens Markdown preview tab |
 | `diff` | `<path> <old_path>` | Opens side-by-side diff comparison |
 | `debug` | `<program>` | Hands binary to the integrated debugger |
+| `subscribe` | *(none)* | Keeps the connection open and streams JSON-lines document events |
 
+Requests normally end with a newline. Send NUL-terminated requests when an argument contains
+newlines, such as `replace-all`; a connection using NUL framing should terminate each request with
+NUL. `get-file` and `get-project` return one newline-terminated response. `get-text` returns the
+full buffer followed by a NUL byte, preserving embedded newlines and distinguishing an empty buffer
+from a closed connection.
 
-Requests normally end with a newline. Send NUL-terminated requests when an argument contains newlines, such as `replace-all`; a connection using NUL framing should terminate each request with NUL. `get-file` and `get-project` return one newline-terminated response. `get-text` returns the full buffer followed by a NUL byte, preserving embedded newlines and distinguishing an empty buffer from a closed connection.
+Send `subscribe\n` and keep the socket connection open. The server first replies
+`{"event":"subscribed"}\n`, then sends one JSON object per line:
+
+```json
+{"event":"did_open","path":"/absolute/path/to/file.c"}
+{"event":"did_save","path":"/absolute/path/to/file.c"}
+```
+
+`did_open` is sent once the file has loaded, including a new file that does not exist yet; load
+failures other than “not found” do not emit it. `did_save` follows a successful disk write, including
+autosaves. Closing the client connection unsubscribes it.
 
 #### Execution Flow
 
-1. User invokes a plugin command via Command Palette (`Ctrl+P` > `>`) or assigned shortcut.
-2. `t-code` sets environment variables (`$TCODE_SOCKET`, `$TCODE_FILE`, `$TCODE_LINE`, `$TCODE_PROJECT`) and spawns the plugin executable asynchronously via GLib's `g_spawn_async_with_pipes()`.
-3. The plugin connects to `$TCODE_SOCKET`, inspects or updates buffer state, and terminates.
-4. Output (stderr/stdout) can be piped to the status bar or the Problems panel.
+1. User invokes a plugin command via Command Palette (`Ctrl+P` > `>`) or its assigned shortcut.
+2. `t-code` sets `$TCODE_SOCKET`, `$TCODE_ACTIVE_FILE`, `$TCODE_PROJECT_ROOT`, `$TCODE_PLUGIN_ID`,
+   and `$TCODE_COMMAND_ID`, then spawns the executable asynchronously.
+3. The plugin can make one-shot socket requests and exit, or keep a `subscribe` connection open to
+   receive `did_open` and `did_save` events.
 
 ---
 
@@ -95,6 +113,6 @@ Native plugins are loaded via `g_module_open()` on demand. They are intended for
 
 ## Roadmap
 
-- **v0.4:** Stabilize socket commands (`get-file`, `get-text`, `replace-all`, `say`), document `$TCODE_SOCKET`.
-- **v0.5:** Plugin manifest discovery (`~/.config/t-code/plugins/`), palette command injection, and keyboard shortcut binding.
-- **v0.6:** Event notification hooks (e.g., `did_open`, `did_save` broadcasts over a socket stream).
+- **v0.4:** Stabilize socket commands (`get-file`, `get-text`, `replace-all`, `say`), document `$TCODE_SOCKET`. **Delivered.**
+- **v0.5:** Plugin manifest discovery (`~/.config/t-code/plugins/`), palette command injection, and keyboard shortcut binding. **Delivered.**
+- **v0.6:** Event notification hooks (`did_open`, `did_save`) over a socket stream. **Delivered.**

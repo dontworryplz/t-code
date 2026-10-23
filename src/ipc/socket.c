@@ -5,7 +5,7 @@
  *   open <path>        open-side <path>    open-window <path> preview <path>     project <dir>
  *   compare <path>     history <path>      terminal <dir>     copy <text>
  *   debug <path>       debug-failed <dir>  say <text>         insert <text>      append <text>
- *   replace-all <text> get-file            get-project        get-text           save
+ *   replace-all <text> get-file            get-project        get-text           save subscribe
  * Paths are absolute. "compare" and "history" are git comparisons (git/compare.c), "terminal"
  * does cd in the shell, "copy" puts text on the clipboard, "debug" starts the debugger on a program
  * that was just built for it (t-code --send, from project/run.c; a folder: pick one in it), "debug-failed"
@@ -23,12 +23,78 @@
 #include "window/statusbar.h"
 #include "window/terminal.h"
 #include <gio/gunixsocketaddress.h>
+#include <json-glib/json-glib.h>
 #include <string.h>
 #include <unistd.h>
+
+static gboolean event_client_add(App *t, GOutputStream *out)
+{
+  if (!t->socket_events)
+    t->socket_events = g_ptr_array_new_with_free_func(g_object_unref);
+  for (guint i = 0; i < t->socket_events->len; i++)
+    if (g_ptr_array_index(t->socket_events, i) == out)
+      return FALSE;
+  g_ptr_array_add(t->socket_events, g_object_ref(out));
+  return TRUE;
+}
+
+static void event_client_remove(App *t, GOutputStream *out)
+{
+  for (guint i = 0; t->socket_events && i < t->socket_events->len; i++)
+    if (g_ptr_array_index(t->socket_events, i) == out) {
+      g_ptr_array_remove_index(t->socket_events, i);
+      return;
+    }
+}
+
+static void broadcast_event(App *t, const char *event, const char *path)
+{
+  JsonNode *node = json_node_init_string(json_node_alloc(), path);
+  char *quoted = json_to_string(node, FALSE);
+  char *message = g_strdup_printf("{\"event\":\"%s\",\"path\":%s}\n", event, quoted);
+  gsize length = strlen(message);
+
+  json_node_unref(node);
+  g_free(quoted);
+  for (guint i = 0; t->socket_events && i < t->socket_events->len;) {
+    GOutputStream *out = g_ptr_array_index(t->socket_events, i);
+    if (!g_output_stream_write_all(out, message, length, NULL, NULL, NULL) ||
+        !g_output_stream_flush(out, NULL, NULL))
+      g_ptr_array_remove_index(t->socket_events, i);
+    else
+      i++;
+  }
+  g_free(message);
+}
+
+void socket_did_open(App *t, const char *path)
+{
+  broadcast_event(t, "did_open", path);
+}
+
+
+static void subscribe_events(App *t, GOutputStream *out)
+{
+  static const char response[] = "{\"event\":\"subscribed\"}\n";
+
+  event_client_add(t, out);
+  if (!g_output_stream_write_all(out, response, sizeof response - 1, NULL, NULL, NULL))
+    event_client_remove(t, out);
+}
+
+void socket_did_save(App *t, const char *path)
+{
+  broadcast_event(t, "did_save", path);
+}
+
 
 /* One request (see the top of this file). */
 static void handle(App *t, const char *command, const char *arg, GOutputStream *out)
 {
+  if (strcmp(command, "subscribe") == 0) {
+    subscribe_events(t, out);
+    return;
+  }
   if (strcmp(command, "say") == 0) {
     status_say(t, arg);
     return;
@@ -133,21 +199,22 @@ static void on_request(GObject *source, GAsyncResult *result, gpointer data)
 {
   GDataInputStream *in = G_DATA_INPUT_STREAM(source);
   App *t = data;
+  GSocketConnection *conn = g_object_get_data(G_OBJECT(in), "connection");
+  GOutputStream *out = conn ? g_io_stream_get_output_stream(G_IO_STREAM(conn)) : NULL;
   gsize length = 0;
   char *request = g_data_input_stream_read_upto_finish(in, result, &length, NULL);
   GError *error = NULL;
 
   /* The end it stopped at is still there; at EOF there is none. */
   g_data_input_stream_read_byte(in, NULL, &error);
-  if (!request || (error && length == 0)) { /* closed */
+  if (!request || (error && length == 0)) {
+    event_client_remove(t, out);
     g_clear_error(&error);
     g_free(request);
     g_object_unref(in);
     return;
   }
   g_clear_error(&error);
-  GSocketConnection *conn = g_object_get_data(G_OBJECT(in), "connection");
-  GOutputStream *out = conn ? g_io_stream_get_output_stream(G_IO_STREAM(conn)) : NULL;
 
   if (g_utf8_validate(request, length, NULL)) {
     char *space = strchr(request, ' ');
@@ -167,17 +234,21 @@ static void on_request(GObject *source, GAsyncResult *result, gpointer data)
 static void on_filled(GObject *source, GAsyncResult *result, gpointer data)
 {
   GDataInputStream *in = G_DATA_INPUT_STREAM(source);
+  App *t = data;
   gssize got = g_buffered_input_stream_fill_finish(G_BUFFERED_INPUT_STREAM(in), result, NULL);
   gsize size = 0;
   const char *buffer = g_buffered_input_stream_peek_buffer(G_BUFFERED_INPUT_STREAM(in), &size);
 
-  if (got <= 0 && size == 0) { /* closed */
+  if (got <= 0 && size == 0) {
+    GSocketConnection *conn = g_object_get_data(G_OBJECT(in), "connection");
+    GOutputStream *out = conn ? g_io_stream_get_output_stream(G_IO_STREAM(conn)) : NULL;
+    event_client_remove(t, out);
     g_object_unref(in);
     return;
   }
   if (memchr(buffer, '\0', size))
     g_object_set_data(G_OBJECT(in), "nul", GINT_TO_POINTER(TRUE));
-  read_request(in, data);
+  read_request(in, t);
 }
 
 static void read_request(GDataInputStream *in, App *t)
@@ -212,6 +283,8 @@ void start_socket(App *t)
   unlink(t->paths.socket);
   address = g_unix_socket_address_new(t->paths.socket);
   t->service = g_socket_service_new();
+  if (!t->socket_events)
+    t->socket_events = g_ptr_array_new_with_free_func(g_object_unref);
   if (!g_socket_listener_add_address(G_SOCKET_LISTENER(t->service), address, G_SOCKET_TYPE_STREAM,
                                      G_SOCKET_PROTOCOL_DEFAULT, NULL, NULL, &error)) {
     g_warning("t-code: cannot listen on %s: %s", t->paths.socket, error->message);
@@ -228,4 +301,5 @@ void stop_socket(App *t)
     g_socket_service_stop(t->service);
   if (t->paths.socket)
     unlink(t->paths.socket);
+  g_clear_pointer(&t->socket_events, g_ptr_array_unref);
 }

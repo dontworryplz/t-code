@@ -105,6 +105,16 @@ static char *read_socket_response(GSocketConnection *conn, const char *stop, gsi
   return response.text;
 }
 
+static char *read_socket_line(GDataInputStream *input)
+{
+  SocketResponse response = { .delimiter = '\n' };
+  g_data_input_stream_read_upto_async(input, "\n", 1, G_PRIORITY_DEFAULT, NULL, socket_response_read, &response);
+  run_until(socket_response_done, &response);
+  g_assert_true(response.done);
+  g_assert_no_error(response.error);
+  return response.text;
+}
+
 /* The open tabs' file names in order, "*" after temporary ones: "a.txt* b.txt". */
 static char *tabs(void)
 {
@@ -509,6 +519,61 @@ static void test_socket_requests(void)
   g_free(plain);
   g_free(odd);
 }
+
+static gboolean no_socket_event_clients(gconstpointer data G_GNUC_UNUSED);
+static void test_socket_events(void)
+{
+  char *path = file("socket-events.c");
+  GSocketClient *client = g_socket_client_new();
+  GSocketAddress *address = g_unix_socket_address_new(app.paths.socket);
+  GSocketConnection *conn = g_socket_client_connect(client, G_SOCKET_CONNECTABLE(address), NULL, NULL);
+  GOutputStream *out;
+  GDataInputStream *input;
+
+  g_assert_nonnull(conn);
+  out = g_io_stream_get_output_stream(G_IO_STREAM(conn));
+  input = g_data_input_stream_new(g_io_stream_get_input_stream(G_IO_STREAM(conn)));
+  g_assert_true(g_output_stream_write_all(out, "subscribe\n", 10, NULL, NULL, NULL));
+  char *message = read_socket_line(input);
+  g_assert_cmpstr(message, ==, "{\"event\":\"subscribed\"}");
+  g_free(message);
+
+  open_file(&app, path);
+  run_until(has_tab, path);
+  Tab *tab = find_tab(&app, TAB_EDITOR, path);
+  g_assert_nonnull(tab);
+  run_until(loaded, tab);
+  g_assert_false(tab->view->loading);
+  message = read_socket_line(input);
+  char *expected = g_strdup_printf("{\"event\":\"did_open\",\"path\":\"%s\"}", path);
+  g_assert_cmpstr(message, ==, expected);
+  g_free(expected);
+  g_free(message);
+
+  gtk_text_buffer_insert_at_cursor(GTK_TEXT_BUFFER(tab->buffer), "edited", -1);
+  save_editor(tab);
+  run_until(saved, tab);
+  message = read_socket_line(input);
+  expected = g_strdup_printf("{\"event\":\"did_save\",\"path\":\"%s\"}", path);
+  g_assert_cmpstr(message, ==, expected);
+  g_free(expected);
+  g_free(message);
+
+  g_io_stream_close(G_IO_STREAM(conn), NULL, NULL);
+  g_object_unref(input);
+  g_object_unref(conn);
+  g_object_unref(address);
+  g_object_unref(client);
+  run_until(no_socket_event_clients, NULL);
+  close_everything();
+  g_free(path);
+}
+static gboolean no_socket_event_clients(gconstpointer data G_GNUC_UNUSED)
+{
+  return !app.socket_events || app.socket_events->len == 0;
+}
+
+
 
 static gboolean no_second_window(gconstpointer data G_GNUC_UNUSED)
 {
@@ -1958,6 +2023,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/comparisons-in-a-row", test_comparisons_in_a_row);
   g_test_add_func("/window/save-conflict", test_save_conflict);
   g_test_add_func("/window/socket-requests", test_socket_requests);
+  g_test_add_func("/window/socket-events", test_socket_events);
   g_test_add_func("/window/second-window", test_second_window);
   g_test_add_func("/window/tab-strip", test_tab_strip);
   g_test_add_func("/window/open-tabs", test_open_tabs);

@@ -141,6 +141,7 @@ struct App {
   } paths;
 
   GSocketService *service;
+  GPtrArray *socket_events; /* subscribed control-socket output streams */
   Lsp *lsp;            /* clangd, retained for its compile-flag status hint */
   GPtrArray *lsps;     /* lazily started language servers, each idle-stopped after its last file */
   GPtrArray *plugins;  /* installed plugins (plugins/plugins.h) */

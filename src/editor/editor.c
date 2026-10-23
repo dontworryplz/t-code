@@ -19,6 +19,7 @@
 #include "lsp/diagnostics.h"
 #include "project/session.h"
 #include "window/statusbar.h"
+#include "ipc/socket.h"
 
 #define AUTOSAVE_MS 1000  /* after the last change */
 #define RELOAD_MS 200     /* a burst of changes on disk is looked at once */
@@ -248,7 +249,7 @@ static void on_saved(GObject *source, GAsyncResult *result, gpointer data)
         gtk_text_buffer_set_modified(GTK_TEXT_BUFFER(tab->buffer), FALSE);
       refresh_branch(tab->app); /* the work tree changed */
       lsp_saved(tab);
-      recovery_discard_snapshot(tab->path);
+      socket_did_save(tab->app, tab->path);
     } else if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_WRONG_ETAG)) { /* changed on disk meanwhile */
       show_conflict(tab);
     } else if (!v->save_failed) { /* autosave would say it every second */
@@ -437,6 +438,8 @@ static void on_loaded(GObject *source, GAsyncResult *result, gpointer data)
       v->next_waiters = g_array_new(FALSE, FALSE, sizeof(SaveWaiter));
       call_waiters(waiting, TRUE);
     }
+    if (ok || g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
+      socket_did_open(tab->app, tab->path);
     g_free(text);
     recovery_check_and_prompt(tab);
   }
