@@ -5,18 +5,16 @@ PACKAGING="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$PACKAGING")"
 OUT="$PACKAGING/packages"
 VERSION="$(sed -n 's/^VERSION *:= *//p' "$ROOT/Makefile")"
-DISTROS=(fedora arch debian void void-musl appimage)
+DISTROS=(fedora arch aur debian void void-musl appimage flatpak snap)
 
 # The images the packages are built and tested in.
 declare -A IMAGE=(
-  [fedora]=registry.fedoraproject.org/fedora:44
-  [arch]=docker.io/library/archlinux:latest
-  [debian]=docker.io/library/debian:trixie
-  [void]=ghcr.io/void-linux/void-glibc-full:latest
-  [void-musl]=ghcr.io/void-linux/void-musl-full:latest
-  # the AppImage: a distro whose GTK4 is new enough, which linuxdeploy bundles and the rest come
-  # with it (packaging/appimage.sh)
-  [appimage]=docker.io/library/debian:trixie
+  ["fedora"]=registry.fedoraproject.org/fedora:44
+  ["arch"]=docker.io/library/archlinux:latest
+  ["debian"]=docker.io/library/debian:trixie
+  ["void"]=ghcr.io/void-linux/void-glibc-full:latest
+  ["appimage"]=docker.io/library/debian:trixie
+  ["aur"]=docker.io/library/archlinux:latest
 )
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -50,14 +48,18 @@ run_in_container() { # <distro> <out dir> <command...>
 
 # Every version string has to agree with the Makefile's.
 check_versions() {
-  local spec pkgbuild changelog
+  local spec pkgbuild aur_pkgbuild aur_srcinfo changelog flatpak_version snap_version
   spec="$(sed -n 's/^Version: *//p' "$PACKAGING/fedora/t-code.spec")"
   pkgbuild="$(sed -n 's/^pkgver=//p' "$PACKAGING/arch/PKGBUILD")"
+  aur_pkgbuild="$(sed -n 's/^pkgver=//p' "$PACKAGING/aur/PKGBUILD")"
+  aur_srcinfo="$(sed -n 's/^[[:space:]]*pkgver = //p' "$PACKAGING/aur/.SRCINFO")"
   changelog="$(sed -n '1s/^t-code (\([^-]*\)-.*/\1/p' "$PACKAGING/debian/debian/changelog")"
+  flatpak_version="$(sed -n 's/.*"x-tcode-version": "\([^"]*\)".*/\1/p' "$PACKAGING/flatpak/io.github.tcode.json")"
+  snap_version="$(sed -n "s/^version: '\\([^']*\\)'/\\1/p" "$PACKAGING/snap/snapcraft.yaml")"
   [[ -n "$VERSION" ]] || die "No VERSION in Makefile"
-  for v in "$spec" "$pkgbuild" "$changelog"; do
+  for v in "$spec" "$pkgbuild" "$aur_pkgbuild" "$aur_srcinfo" "$changelog" "$flatpak_version" "$snap_version"; do
     [[ "$v" == "$VERSION" ]] ||
-      die "Version mismatch: Makefile $VERSION, spec $spec, PKGBUILD $pkgbuild, changelog $changelog"
+      die "Version mismatch: Makefile $VERSION, Fedora $spec, Arch $pkgbuild, AUR PKGBUILD $aur_pkgbuild/.SRCINFO $aur_srcinfo, Debian $changelog, Flatpak $flatpak_version, Snap $snap_version"
   done
 }
 

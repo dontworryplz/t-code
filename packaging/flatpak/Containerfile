@@ -1,0 +1,12 @@
+FROM registry.fedoraproject.org/fedora:44
+
+RUN dnf -y install \
+      flatpak flatpak-builder jq git python3 desktop-file-utils \
+      xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon shadow-utils \
+    && dnf clean all \
+    && useradd --create-home tester
+
+COPY . /opt/t-code-flatpak/
+USER tester
+WORKDIR /home/tester
+ENTRYPOINT ["bash", "/opt/t-code-flatpak/smoke-test.sh"]

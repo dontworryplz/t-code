@@ -1,0 +1,164 @@
+{
+    "id": "io.github.tcode",
+    "runtime": "org.gnome.Sdk",
+    "runtime-version": "50",
+    "sdk": "org.gnome.Sdk",
+    "sdk-extensions": [
+        "org.freedesktop.Sdk.Extension.llvm20"
+    ],
+    "command": "t-code",
+    "default-branch": "stable",
+    "x-tcode-version": "0.3.0",
+    "x-tcode-release-tag": "v0.3",
+    "finish-args": [
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--share=ipc",
+        "--device=dri",
+        "--share=network",
+        "--allow=devel",
+        "--env=SHELL=/bin/bash"
+    ],
+    "cleanup": [
+        "/include",
+        "/lib/cmake",
+        "/lib/pkgconfig",
+        "/lib/girepository-1.0",
+        "/share/gir-1.0",
+        "/share/gtk-doc",
+        "/share/vala",
+        "*.a",
+        "*.la"
+    ],
+    "modules": [
+        {
+            "name": "clangd",
+            "buildsystem": "simple",
+            "build-commands": [
+                "install -Dm755 /usr/lib/sdk/llvm20/bin/clangd /app/bin/clangd",
+                "mkdir -p /app/lib",
+                "cp -a /usr/lib/sdk/llvm20/lib/*.so* /app/lib/",
+                "cp -a /usr/lib/sdk/llvm20/lib/clang /app/lib/",
+                "install -Dm644 LLVM-LICENSE.TXT /app/share/licenses/llvm/LICENSE.TXT"
+            ],
+            "sources": [
+                {
+                    "type": "file",
+                    "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-20.1.8/llvm/LICENSE.TXT",
+                    "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee",
+                    "dest-filename": "LLVM-LICENSE.TXT"
+                }
+            ]
+        },
+        {
+            "name": "fast_float",
+            "buildsystem": "cmake-ninja",
+            "post-install": [
+                "install -d /app/share/licenses/fast_float",
+                "install -m644 ${FLATPAK_BUILDER_BUILDDIR}/LICENSE-* /app/share/licenses/fast_float/"
+            ],
+            "sources": [
+                {
+                    "type": "git",
+                    "url": "https://github.com/fastfloat/fast_float.git",
+                    "tag": "v8.0.2",
+                    "commit": "50a80a73ab2ab256ba1c3bf86923ddd8b4202bc7"
+                }
+            ]
+        },
+        {
+            "name": "simdutf",
+            "buildsystem": "cmake-ninja",
+            "config-opts": [
+                "-DBUILD_SHARED_LIBS=ON",
+                "-DSIMDUTF_TESTS=OFF",
+                "-DSIMDUTF_TOOLS=OFF"
+            ],
+            "post-install": [
+                "install -d /app/share/licenses/simdutf",
+                "install -m644 ${FLATPAK_BUILDER_BUILDDIR}/LICENSE-* /app/share/licenses/simdutf/"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "url": "https://github.com/simdutf/simdutf/archive/refs/tags/v7.4.0.tar.gz",
+                    "sha256": "8fd729ebfd5ec56cb0395bcc176c4801e1f8a0ea834d166d52279d7b9e801283"
+                }
+            ]
+        },
+        {
+            "name": "vte",
+            "buildsystem": "meson",
+            "config-opts": [
+                "-Dgtk3=false",
+                "-Dgtk4=true",
+                "-Dglade=false",
+                "-Dvapi=false",
+                "-Dgir=false",
+                "-Ddocs=false",
+                "-Dapp=false",
+                "-D_systemd=false"
+            ],
+            "post-install": [
+                "install -d /app/share/licenses/vte",
+                "install -m644 ${FLATPAK_BUILDER_BUILDDIR}/COPYING.* /app/share/licenses/vte/"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "url": "https://download.gnome.org/sources/vte/0.84/vte-0.84.0.tar.xz",
+                    "sha256": "0414e31583836aeb7878da25f67c515f7e8879917ecc37c92e26b83e8d8fc3e3"
+                }
+            ]
+        },
+        {
+            "name": "md4c",
+            "buildsystem": "cmake-ninja",
+            "config-opts": [
+                "-DBUILD_SHARED_LIBS=ON",
+                "-DBUILD_HTML_LIBRARY=OFF",
+                "-DBUILD_MD2HTML_EXECUTABLE=OFF"
+            ],
+            "post-install": [
+                "install -Dm644 ${FLATPAK_BUILDER_BUILDDIR}/LICENSE.md /app/share/licenses/md4c/LICENSE.md"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "url": "https://codeload.github.com/mity/md4c/tar.gz/refs/tags/v0.6.0",
+                    "archive-type": "tar-gzip",
+                    "sha256": "4d151298125a81da3b2efa2e0eed8bdb7a9318569804e4fa4d7a2375ab83ef70"
+                }
+            ]
+        },
+        {
+            "name": "t-code",
+            "buildsystem": "simple",
+            "build-commands": [
+                "make -j${FLATPAK_BUILDER_N_JOBS} CC=gcc build/t-code",
+                "make CC=gcc PREFIX=/app install",
+                "install -Dm644 io.github.tcode.desktop /app/share/applications/io.github.tcode.desktop",
+                "install -Dm644 io.github.tcode.metainfo.xml /app/share/metainfo/io.github.tcode.metainfo.xml",
+                "install -Dm644 LICENSE /app/share/licenses/t-code/LICENSE",
+                "install -Dm644 THIRD-PARTY.md /app/share/licenses/t-code/THIRD-PARTY.md"
+            ],
+            "sources": [
+                {
+                    "type": "archive",
+                    "url": "https://codeload.github.com/suacayipkisi/t-code/tar.gz/f594a9f2746292adb3a59afc26b0fcd541f899c6",
+                    "archive-type": "tar-gzip",
+                    "sha256": "6a1945f37c246e2f9f3d416f6bebc5aa0e9d262461c51e82c983da98dd04a99a",
+                    "x-tcode-source": true
+                },
+                {
+                    "type": "file",
+                    "path": "io.github.tcode.desktop"
+                },
+                {
+                    "type": "file",
+                    "path": "io.github.tcode.metainfo.xml"
+                }
+            ]
+        }
+    ]
+}

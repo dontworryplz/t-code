@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 t-code contributors -->
+<component type="desktop-application">
+  <id>io.github.tcode</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>t-code</name>
+  <summary>Develop C and C++ projects</summary>
+  <developer id="io.github.suacayipkisi">
+    <name>suacayipkisi</name>
+  </developer>
+  <description>
+    <p>
+      t-code is a native C and C++ editor with a project file tree, editor tabs,
+      a terminal, and clangd language support. Work with Git changes, render
+      Markdown previews, and build and debug programs from the editor.
+    </p>
+    <ul>
+      <li>Complete code, navigate symbols, and apply clangd quick fixes</li>
+      <li>Review Git diffs and edit several files in split views</li>
+      <li>Run Make, CMake, and Meson builds with the included development tools</li>
+      <li>Debug sandboxed programs with GDB</li>
+    </ul>
+    <p>
+      This package runs projects and terminal commands inside a sandbox. Open
+      a project folder with the file chooser to grant access to its contents.
+      Host-installed tools, libraries, credentials, and files outside the
+      selected folder are not automatically available.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.tcode.desktop</launchable>
+  <url type="homepage">https://github.com/suacayipkisi/t-code</url>
+  <url type="bugtracker">https://github.com/suacayipkisi/t-code/issues</url>
+  <url type="vcs-browser">https://github.com/suacayipkisi/t-code</url>
+  <provides>
+    <binary>t-code</binary>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>C and C++ editing with a project tree and terminal</caption>
+      <image type="source" width="1920" height="1118">https://raw.githubusercontent.com/suacayipkisi/t-code/f594a9f2746292adb3a59afc26b0fcd541f899c6/docs/dark_classic-rounded.png</image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.3.0" date="2026-10-21">
+      <url>https://github.com/suacayipkisi/t-code/releases/tag/v0.3</url>
+      <description>
+        <p>Adds a GDB debugger, code folding, quick fixes, and configurable themes.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -1,0 +1,136 @@
+name: t-code
+base: core26
+version: '0.3.0'
+summary: Native C and C++ IDE with clangd and an integrated terminal
+description: |
+  t-code is a GTK4 IDE with a file tree, editor tabs, clangd completion,
+  Git integration, Markdown previews, project builds and a terminal.
+  This strictly confined package includes its own C/C++ compiler, clangd,
+  Git, Make, CMake, Meson, Ninja, Python and GDB. Projects and plugins run
+  inside the same sandbox. GDB cannot trace programs under the default
+  strict policy, so F5 debugging is unavailable in this package.
+grade: stable
+confinement: strict
+license: MIT
+icon: desktop/io.github.tcode.svg
+website: https://github.com/suacayipkisi/t-code
+source-code: https://github.com/suacayipkisi/t-code
+issues: https://github.com/suacayipkisi/t-code/issues
+platforms:
+  amd64:
+
+apps:
+  t-code:
+    extensions: [gnome]
+    command: usr/bin/t-code
+    command-chain: [bin/t-code-env]
+    desktop: usr/share/applications/io.github.tcode.desktop
+    common-id: io.github.tcode
+    plugs:
+      - home
+      - network
+
+layout:
+  /usr/share/gtksourceview-5:
+    bind: $SNAP/usr/share/gtksourceview-5
+  /usr/share/vte:
+    bind: $SNAP/usr/share/vte
+
+parts:
+  t-code:
+    plugin: nil
+    source: .
+    build-packages:
+      - gcc-15
+      - make
+      - pkgconf
+      - libgtk-4-dev
+      - libgtksourceview-5-dev
+      - libjson-glib-dev
+      - libvte-2.91-gtk4-dev
+      - libmd4c-dev
+    stage-packages:
+      - libgtksourceview-5-0
+      - libgtksourceview-5-common
+      - libjson-glib-1.0-0
+      - libvte-2.91-gtk4-0
+      - libvte-2.91-common
+      - libmd4c0
+      - fonts-cascadia-code
+      - hicolor-icon-theme
+      - bash
+    override-build: |
+      set -eu
+      pkg-config --atleast-version=5.16 gtksourceview-5
+      pkg-config --atleast-version=0.78 vte-2.91-gtk4
+      make -j"${CRAFT_PARALLEL_BUILD_COUNT}" CC=/usr/bin/gcc-15 build/t-code
+      make CC=/usr/bin/gcc-15 DESTDIR="$CRAFT_PART_INSTALL" PREFIX=/usr install
+      install -Dm644 LICENSE "$CRAFT_PART_INSTALL/usr/share/licenses/t-code/LICENSE"
+      install -Dm644 THIRD-PARTY.md "$CRAFT_PART_INSTALL/usr/share/licenses/t-code/THIRD-PARTY.md"
+      install -Dm644 packaging/snap/README.md "$CRAFT_PART_INSTALL/usr/share/doc/t-code/snap.md"
+      install -Dm755 packaging/snap/launch.sh "$CRAFT_PART_INSTALL/bin/t-code-env"
+      install -Dm755 packaging/snap/compiler.sh "$CRAFT_PART_INSTALL/bin/gcc"
+      for compiler in cc c++ g++ clang clang++; do
+        ln -s gcc "$CRAFT_PART_INSTALL/bin/$compiler"
+      done
+      install -Dm755 packaging/snap/meson.sh "$CRAFT_PART_INSTALL/bin/meson"
+      install -Dm644 packaging/snap/smoke.py "$CRAFT_PART_INSTALL/usr/lib/t-code/snap-smoke.py"
+      printf '%s\n' "$CRAFT_ARCH_TRIPLET_BUILD_FOR" > "$CRAFT_PART_INSTALL/usr/lib/t-code/toolchain-triplet"
+      sed -i 's|Exec=/usr/bin/t-code|Exec=t-code|; s|Icon=io.github.tcode|Icon=${SNAP}/usr/share/icons/hicolor/scalable/apps/io.github.tcode.svg|' \
+        "$CRAFT_PART_INSTALL/usr/share/applications/io.github.tcode.desktop"
+    prime:
+      - -usr/share/man
+      - -usr/share/lintian
+
+  toolchain:
+    plugin: nil
+    stage-packages:
+      - clangd
+      - clang
+      - clang-format
+      - clang-tidy
+      - git
+      - openssh-client
+      - ca-certificates
+      - curl
+      - ripgrep
+      - gcc-15
+      - g++-15
+      - binutils
+      - libc6
+      - libc6-dev
+      - libgcc-s1
+      - libstdc++6
+      - make
+      - cmake
+      - meson
+      - ninja-build
+      - pkgconf
+      - gdb
+      - python3
+      - python3.14
+      - python3.14-minimal
+      - libpython3.14-stdlib
+      - libpython3.14-minimal
+      - python3-venv
+      - python3-setuptools
+      - perl-base
+    override-build: |
+      set -eu
+      mkdir -p "$CRAFT_PART_INSTALL/etc/ssl/certs"
+      cat "$CRAFT_PART_INSTALL"/usr/share/ca-certificates/mozilla/*.crt \
+        > "$CRAFT_PART_INSTALL/etc/ssl/certs/ca-certificates.crt"
+      # The GCC sysroot needs both usr-merged aliases, including on non-merged build hosts.
+      for alias in lib lib64; do
+        if [ ! -e "$CRAFT_PART_INSTALL/$alias" ] && [ ! -L "$CRAFT_PART_INSTALL/$alias" ]; then
+          ln -s "usr/$alias" "$CRAFT_PART_INSTALL/$alias"
+        fi
+      done
+    organize:
+      usr: toolchain/usr
+      etc: toolchain/etc
+      lib: toolchain/lib
+      lib64: toolchain/lib64
+    prime:
+      - -toolchain/usr/share/man
+      - -toolchain/usr/share/lintian

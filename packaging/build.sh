@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
-# Builds the t-code packages into packaging/packages/<distro>/:
-#   fedora  .rpm (+ .src.rpm), with rpmbuild on this machine when it runs Fedora, else in a container
-#   arch    .pkg.tar.zst, in an Arch Linux container
-#   debian  .deb, in a Debian 13 (trixie) container
-#   void, void-musl  .xbps, in Void Linux containers (glibc and musl)
-# Usage: packaging/build.sh [fedora|arch|debian|void|void-musl|appimage|all]...   (default: all)
-# packaging/packages/release/ then holds just the packages to publish (no debug or source
-# packages) with their SHA256SUMS. packaging/test.sh installs them in fresh containers and checks
-# that they work.
+# Builds packages under packaging/packages/<distro>/ and collects release artifacts.
+# Usage: packaging/build.sh [fedora|arch|aur|debian|void|void-musl|appimage|flatpak|snap|all]...
+# (default: all). packaging/test.sh installs native packages in fresh containers and smoke-tests
+# sandboxed formats through their format-specific launchers.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 build_fedora() {
@@ -38,6 +33,27 @@ build_arch() {
   rm -f "$out/t-code-$VERSION.tar.gz"
 }
 
+build_aur() {
+  local out="$OUT/aur"
+  rm -rf "$out" && mkdir -p "$out"
+  info "Building the AUR source package in ${IMAGE[aur]}"
+  run_in_container aur "$out" bash /src/packaging/aur/build-in-container.sh
+}
+
+build_flatpak() {
+  local out="$OUT/flatpak"
+  rm -rf "$out" && mkdir -p "$out"
+  info "Building the Flatpak bundle from this working tree"
+  bash "$PACKAGING/flatpak/build.sh" --local-source "$ROOT" "$out"
+}
+
+build_snap() {
+  local out="$OUT/snap"
+  rm -rf "$out" && mkdir -p "$out"
+  info "Building the strict Snap in LXD"
+  bash "$PACKAGING/snap/build.sh" "$ROOT" "$out"
+}
+
 build_debian() {
   local out="$OUT/debian"
   rm -rf "$out" && make_tarball "$out"
@@ -46,7 +62,7 @@ build_debian() {
   rm -f "$out/t-code-$VERSION.tar.gz"
 }
 
-# The installable package of each distribution built for this version, side by side for a release.
+# Installable release packages, plus Snapcraft provenance; source/debug packages stay out.
 collect_release() {
   local release="$OUT/release" files=()
   rm -rf "$release" && mkdir -p "$release"
@@ -55,9 +71,17 @@ collect_release() {
            "$OUT/debian/t-code_$VERSION-"[0-9]*_amd64.deb \
            "$OUT/void/t-code-${VERSION}_"[0-9]*.x86_64.xbps \
            "$OUT/void-musl/t-code-${VERSION}_"[0-9]*.x86_64-musl.xbps \
-           "$OUT/appimage/t-code-$VERSION-x86_64.AppImage"; do
+           "$OUT/appimage/t-code-$VERSION-x86_64.AppImage" \
+           "$OUT/flatpak/t-code-$VERSION-"*.flatpak \
+           "$OUT/snap/t-code_${VERSION}_amd64.snap"; do
     [[ -f "$f" ]] && files+=("$f")
   done
+  if [[ -f "$OUT/snap/t-code_${VERSION}_amd64.snap" ]]; then
+    for f in "$OUT/snap/build-environment.txt" "$OUT/snap/build-manifest.yaml"; do
+      [[ -f "$f" ]] || die "Missing Snap build provenance: $f"
+      files+=("$f")
+    done
+  fi
   ((${#files[@]})) || return 0
   cp "${files[@]}" "$release/"
   (cd "$release" && sha256sum -- * > SHA256SUMS)
@@ -77,16 +101,19 @@ targets=("$@")
 check_versions
 for distro in "${targets[@]}"; do
   case "$distro" in
-    fedora | arch | debian) "build_$distro" ;;
+    fedora | arch | aur | debian) "build_$distro" ;;
     void | void-musl) build_void "$distro" ;;
     appimage) build_appimage ;;
-    *) die "Unknown target '$distro' (fedora, arch, debian, void, void-musl or all)" ;;
+    flatpak) build_flatpak ;;
+    snap) build_snap ;;
+    *) die "Unknown target '$distro' (fedora, arch, aur, debian, void, void-musl, appimage, flatpak, snap or all)" ;;
   esac
 done
 collect_release
 info "Packages (t-code $VERSION):"
 find "$OUT" -path "$OUT/release" -prune -o -type f \
-  \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.xbps' -o -name '*.AppImage' \) \
+  \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.xbps' \
+     -o -name '*.AppImage' -o -name '*.flatpak' -o -name '*.snap' \) \
   -print | sort | sed "s|^$ROOT/|  |"
 info "To publish (packaging/packages/release/):"
 ls "$OUT/release" | sed 's|^|  |'
