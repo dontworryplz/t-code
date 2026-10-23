@@ -108,6 +108,7 @@ typedef struct {
 } Pending;
 
 struct Lsp {
+  gatomicrefcount refs;
   ServerKind kind;
   char *workspace; /* the project folder, retained while the server is idle */
   App *app;
@@ -116,6 +117,7 @@ struct Lsp {
   char *root;     /* the folder it runs in */
   gboolean ready; /* initialize answered */
   gboolean utf16; /* positions count UTF-16 units, not UTF-8 bytes */
+  gboolean stopping;
   JsonNode *capabilities;
   GHashTable *pending; /* id -> Pending */
   gint64 next_id;
@@ -128,6 +130,17 @@ struct Lsp {
   GString *written;       /* didChangeWatchedFiles changes not sent yet, comma separated */
   guint written_id;
 };
+
+static void lsp_ref(Lsp *l)
+{
+  g_atomic_ref_count_inc(&l->refs);
+}
+
+static void lsp_unref(Lsp *l)
+{
+  if (g_atomic_ref_count_dec(&l->refs))
+    g_free(l);
+}
 
 char *lsp_uri_to_path(const char *uri)
 {
@@ -270,19 +283,27 @@ typedef struct {
   gint64 id;
 } Cancelled;
 
+static void cancelled_free(gpointer data)
+{
+  Cancelled *c = data;
+
+  lsp_unref(c->lsp);
+  g_free(c);
+}
+
 /* After a request was cancelled (not inside the cancel signal, where disconnecting would hang). */
 static gboolean cancel_now(gpointer data)
 {
   Cancelled *c = data;
-  Pending *p = g_hash_table_lookup(c->lsp->pending, &c->id);
+  Lsp *l = c->lsp;
+  Pending *p = l->stopping ? NULL : g_hash_table_lookup(l->pending, &c->id);
 
   if (p) {
     char *params = g_strdup_printf("{\"id\":%" G_GINT64_FORMAT "}", c->id);
-    notify(c->lsp, "$/cancelRequest", params);
+    notify(l, "$/cancelRequest", params);
     g_free(params);
     finish(p, NULL);
   }
-  g_free(c);
   return G_SOURCE_REMOVE;
 }
 
@@ -292,7 +313,8 @@ static void on_cancelled(GCancellable *cancel G_GNUC_UNUSED, Pending *p)
 
   p->cancelled = TRUE;
   *c = (Cancelled){ p->lsp, p->id };
-  g_idle_add(cancel_now, c);
+  lsp_ref(c->lsp);
+  g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, cancel_now, c, cancelled_free);
 }
 
 static void send_request(Lsp *l, Tab *tab, const char *method, const char *params, GCancellable *cancel, LspReply reply,
@@ -576,6 +598,7 @@ static Lsp *lsp_of(Tab *tab)
     }
   }
   l = g_new0(Lsp, 1);
+  g_atomic_ref_count_init(&l->refs);
   l->app = t;
   l->kind = kind;
   l->workspace = g_strdup(t->project.root);
@@ -1022,6 +1045,7 @@ void lsp_stop(App *t)
   for (guint i = 0; i < t->lsps->len; i++) {
     Lsp *l = g_ptr_array_index(t->lsps, i);
 
+    l->stopping = TRUE;
     server_stop(l);
     if (l->idle_id)
       g_source_remove(l->idle_id);
@@ -1032,7 +1056,7 @@ void lsp_stop(App *t)
     if (l->written)
       g_string_free(l->written, TRUE);
     g_free(l->workspace);
-    g_free(l);
+    lsp_unref(l);
   }
   g_ptr_array_free(t->lsps, TRUE);
   t->lsps = NULL;

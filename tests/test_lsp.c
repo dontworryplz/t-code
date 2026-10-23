@@ -529,6 +529,35 @@ static void test_cancel(void)
   free_tab(tab);
 }
 
+/* A queued cancellation must not retain a freed LSP across shutdown. */
+static void test_cancel_shutdown(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/cancel-shutdown.c", "x\n");
+  GCancellable *cancel = g_cancellable_new();
+  Answer answer = { 0 };
+  GtkTextIter iter;
+  char *position, *params;
+
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  iter = iter_at(tab, 0, 0);
+  position = lsp_position_params(tab, &iter);
+  params = g_strdup_printf("{%s}", position);
+  lsp_request(tab, "textDocument/hover", params, cancel, on_answer, &answer);
+  g_cancellable_cancel(cancel); /* cancel_now is queued, but has not run */
+  lsp_stop(&app);
+  g_assert_true(answer.called);
+  g_assert_null(answer.value);
+  g_assert_null(app.lsps);
+  while (g_main_context_iteration(NULL, FALSE)) {
+  }
+
+  g_object_unref(cancel);
+  g_free(params);
+  g_free(position);
+  free_tab(tab);
+}
+
 /* An editor that goes takes its waiting requests with it: they get NULL at once. */
 static void test_close_waiting(void)
 {
@@ -1170,6 +1199,7 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/edits", test_edits);
   g_test_add_func("/lsp/edits-encodings", test_edits_encodings);
   g_test_add_func("/lsp/workspace-symbols", test_workspace_symbols);
+  g_test_add_func("/lsp/cancel-shutdown", test_cancel_shutdown);
   g_test_add_func("/lsp/language-routing", test_language_routing);
   return g_test_run();
 }
