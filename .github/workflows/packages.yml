@@ -2,9 +2,10 @@ name: Packages
 
 # Pull requests exercise every package format; v* tags also publish the collected artifacts.
 on:
-  pull_request:
   push:
+    branches: ["**"]
     tags: ["v*"]
+  pull_request:
 
 permissions:
   contents: read
