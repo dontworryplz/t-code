@@ -1199,7 +1199,7 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/edits", test_edits);
   g_test_add_func("/lsp/edits-encodings", test_edits_encodings);
   g_test_add_func("/lsp/workspace-symbols", test_workspace_symbols);
-  g_test_add_func("/lsp/cancel-shutdown", test_cancel_shutdown);
   g_test_add_func("/lsp/language-routing", test_language_routing);
+  g_test_add_func("/lsp/cancel-shutdown", test_cancel_shutdown);
   return g_test_run();
 }
