@@ -1,38 +1,55 @@
 name: Packages
 
-# A push of a v* tag builds every package (rpm, pkg, deb, xbps and the AppImage) and attaches
-# packaging/packages/release/ to the release. Drafting is fine: pkgver/changelog/spec in
-# check_versions keep the versions together.
+# Pull requests exercise every package format; v* tags also publish the collected artifacts.
 on:
+  pull_request:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   packages:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: podman (the packages build in containers, like on a machine)
-        run: sudo apt-get update && sudo apt-get install -y podman
-      - name: Build every package
+      - name: Install package builders and smoke-test tools
         run: |
-          set -e
-          for p in fedora arch debian void void-musl appimage; do
-            packaging/build.sh "$p"
-          done
-      - name: Package tests (each in a fresh container of its distribution)
+          sudo apt-get update
+          sudo apt-get install -y podman flatpak flatpak-builder jq desktop-file-utils xvfb xauth dbus-x11 squashfs-tools
+      - name: Set up Snapcraft and LXD for strict core26 packaging
+        run: |
+          sudo snap install lxd
+          sudo snap install snapcraft --classic --channel=9.x/stable
+          sudo lxd init --auto
+          sudo lxd waitready
+          sudo usermod --append --groups lxd "$USER"
+      - name: Build every package and collect release artifacts
+        run: sg lxd -c '"$GITHUB_WORKSPACE/packaging/build.sh"'
+      - name: Package smoke tests
         run: packaging/test.sh
       - uses: actions/upload-artifact@v4
         with:
           name: packages
           path: packaging/packages/release/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: packages
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: packaging/packages/release/
       - name: Release with the packages
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: packaging/packages/release/*
