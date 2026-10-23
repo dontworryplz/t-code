@@ -129,10 +129,10 @@ static void update_summary(void)
 /* Empties the result list. */
 static void clear_results(void)
 {
-  GtkWidget *child;
+  GtkListBoxRow *row;
 
-  while ((child = gtk_widget_get_first_child(GTK_WIDGET(search.list))))
-    gtk_list_box_remove(search.list, child);
+  while ((row = gtk_list_box_get_row_at_index(search.list, 0)))
+    gtk_list_box_remove(search.list, GTK_WIDGET(row));
   search.hits = search.files = 0;
   search.truncated = FALSE;
   search.heading = NULL;

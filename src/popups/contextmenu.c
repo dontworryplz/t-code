@@ -10,7 +10,10 @@ typedef struct {
   int n, chosen; /* the item picked, or -1 */
   gpointer data;
   GDestroyNotify free_data;
+  guint finish_id;
 } Menu;
+
+static Menu *active_menu;
 
 static void on_item(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer data)
 {
@@ -19,31 +22,62 @@ static void on_item(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_
   menu->chosen = GPOINTER_TO_INT(data);
 }
 
-/* The menu has closed: its item runs (the widget may go then), and the menu goes. */
-static gboolean finish(gpointer data)
-{
-  Menu *menu = data;
+static void on_closed(GtkPopover *popover G_GNUC_UNUSED, Menu *menu);
 
+static void menu_free(Menu *menu, gboolean run_chosen)
+{
+  if (!menu)
+    return;
+  if (menu == active_menu)
+    active_menu = NULL;
+  if (menu->finish_id) {
+    g_source_remove(menu->finish_id);
+    menu->finish_id = 0;
+  }
   gtk_widget_insert_action_group(menu->widget, "ctx", NULL);
-  gtk_widget_unparent(menu->popover);
-  if (menu->chosen >= 0 && menu->items[menu->chosen].run)
+  if (menu->popover) {
+    g_signal_handlers_disconnect_by_func(menu->popover, on_closed, menu);
+    if (gtk_widget_get_parent(menu->popover))
+      gtk_widget_unparent(menu->popover);
+    menu->popover = NULL;
+  }
+  if (run_chosen && menu->chosen >= 0 && menu->items[menu->chosen].run)
     menu->items[menu->chosen].run(menu->data);
   if (menu->free_data)
     menu->free_data(menu->data);
   g_object_unref(menu->widget);
   g_free(menu->items);
   g_free(menu);
+}
+
+/* The menu has closed: its item runs (the widget may go then), and the menu goes. */
+static gboolean finish(gpointer data)
+{
+  Menu *menu = data;
+
+  menu->finish_id = 0;
+  menu_free(menu, TRUE);
   return G_SOURCE_REMOVE;
 }
 
 static void on_closed(GtkPopover *popover G_GNUC_UNUSED, Menu *menu)
 {
-  g_idle_add(finish, menu); /* an item's action comes in after closed */
+  if (!menu->finish_id)
+    menu->finish_id = g_idle_add(finish, menu); /* an item's action comes in after closed */
+}
+
+void context_menu_close(void)
+{
+  if (active_menu)
+    menu_free(active_menu, FALSE);
 }
 
 void context_menu(GtkWidget *widget, double x, double y, const MenuItem *items, int n, gpointer data,
                   GDestroyNotify free_data)
 {
+  if (active_menu)
+    menu_free(active_menu, FALSE);
+
   Menu *menu = g_new0(Menu, 1);
   GSimpleActionGroup *group = g_simple_action_group_new();
   GMenu *model = g_menu_new(), *section = g_menu_new();
@@ -54,6 +88,7 @@ void context_menu(GtkWidget *widget, double x, double y, const MenuItem *items, 
   menu->chosen = -1;
   menu->data = data;
   menu->free_data = free_data;
+  active_menu = menu;
   for (int i = 0; i < n; i++) {
     if (!items[i].label) { /* a line: the items so far are a section */
       g_menu_append_section(model, NULL, G_MENU_MODEL(section));

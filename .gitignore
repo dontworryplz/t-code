@@ -6,3 +6,4 @@ review/
 REVIEW_GUIDE.md
 packaging/packages/
 docs/*.md
+KNOWN_ISSUES.md

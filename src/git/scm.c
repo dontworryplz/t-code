@@ -455,10 +455,10 @@ static void push(void)
 
 static void clear_list(GtkListBox *list)
 {
-  GtkWidget *child;
+  GtkListBoxRow *row;
 
-  while ((child = gtk_widget_get_first_child(GTK_WIDGET(list))))
-    gtk_list_box_remove(list, child);
+  while ((row = gtk_list_box_get_row_at_index(list, 0)))
+    gtk_list_box_remove(list, GTK_WIDGET(row));
 }
 
 /* A small flat button with a symbol (+, −, ↶, ⟳), shown on hover. */
