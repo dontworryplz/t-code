@@ -119,6 +119,18 @@ static const char *const hot_red_given[] = { "accent-fg", "#000000",          "s
                                              "#cc0000",   "editor-selection", "#000000",   "current-line", "#e00000",
                                              NULL };
 
+static const char *const cooltrix_given[] = {
+  "raised",     "#121b15",          "input",          "#142018",      "border",
+  "#19291f",    "border-strong",    "#264030",        "fg-dim",       "#7d9e87",
+  "fg-faint",   "#4e6b56",          "cursor",         "#00ff66",      "selection",
+  "#18432c",    "editor-selection", "#163b27",        "current-line", "#111b15",
+  "bracket",    "#1e4a30",          "search",         "#384c20",      "guide",
+  "#16281e",    "guide-active",     "#264b33",        "pair1",        "#ffd166",
+  "pair2",      "#b87cf8",          "pair3",          "#38bdf8",      "diff-modified",
+  "#38bdf8",    "git-modified",     "#ffd166",        "link",         "#38bdf8",
+  "warning-bg", "#2e2509",          "warning-border", "#5c4a12",      NULL
+};
+
 /* clang-format off */
 static const Theme theme_table[] = {
   { "dark-classic", "Dark Classic", FALSE, "#1f1f1f", "#181818", "#cccccc", "#0078d4",
@@ -222,6 +234,10 @@ static const Theme theme_table[] = {
     { "#008f11", "#00ff41", "#39ff14", "#00d832", "#7cff7c", "#00c82c", "#adffad", "#9aff9a", "#00ff41", "#ccffcc", "#00ff41" },
     { "#000000", "#00aa22", "#00ff41", "#66ff66", "#008f11", "#22cc44", "#33ff77", "#00dd33",
       "#003b00", "#00cc33", "#00ff41", "#99ff99", "#00aa22", "#44ff66", "#66ff99", "#ccffcc" }, NULL },
+  { "cooltrix", "Cooltrix", FALSE, "#0d1310", "#080c0a", "#e2ebf0", "#00ff66",
+    { "#5c8269", "#b87cf8", "#cf8bfb", "#4deeea", "#38bdf8", "#e2ebf0", "#fbc531", "#2ee66b", "#ffd166", "#7bed9f", "#a7c4b0" },
+    { "#0d1410", "#f85149", "#2ee66b", "#ffd166", "#38bdf8", "#b87cf8", "#4deeea", "#e2ebf0",
+      "#3a5944", "#ff7b72", "#39ff84", "#ffe082", "#79c0ff", "#d2a8ff", "#76ffff", "#ffffff" }, cooltrix_given },
   { "pink", "Pink", TRUE, "#ffe4f1", "#ffc9e3", "#8b0a50", "#e0218a",
     { "#d87093", "#e0218a", "#ff1493", "#c71585", "#da1884", "#8b0a50", "#ff69b4", "#b03060", "#ff6ec7", "#ff00ff", "#e0218a" },
     { "#8b0a50", "#e0218a", "#da1884", "#ff69b4", "#c71585", "#ff1493", "#ff6ec7", "#ffe4f1",
