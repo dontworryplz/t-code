@@ -423,7 +423,7 @@ static void test_workspace_symbols(void)
   Tab *tab;
 
   g_mkdir_with_parents("/tmp/t-code-test", 0700);
-  g_assert_true(g_file_set_contents(path, "    needleSymbol\n", -1, NULL));
+  g_assert_true(g_file_set_contents(path, "\n    needleSymbol\n", -1, NULL));
   tab = new_tab("/tmp/t-code-test/workspace.c", "int main(void) {}\n");
   lsp_open(tab);
   g_assert_true(server_agrees(tab));
