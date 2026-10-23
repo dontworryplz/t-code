@@ -45,10 +45,40 @@ skip_output=
 if [[ -n "$source_dir" && "$out" == "$source_dir/"* ]]; then
   skip_output="${out#"$source_dir"/}"
 fi
-manifest="$out/io.github.tcode.json"
+manifest_dir="$here"
+source_path=
+packaging_path="$here"
+staging=
+if [[ -n "$source_dir" ]]; then
+  source_path="$source_dir"
+  if [[ "$here" != "$source_dir" && "$here" != "$source_dir/"* ]]; then
+    staging="$(mktemp -d)"
+    mkdir -p "$staging/source" "$staging/packaging"
+    tar_excludes=(--exclude=.git --exclude=build --exclude=.flatpak-builder --exclude=packaging/packages)
+    if [[ -n "$skip_output" ]]; then
+      tar_excludes+=(--exclude="$skip_output")
+    fi
+    tar -C "$source_dir" "${tar_excludes[@]}" -cf - . | tar -C "$staging/source" -xf -
+    cp -a "$here/." "$staging/packaging/"
+    manifest_dir="$staging"
+    source_path="$staging/source"
+    packaging_path="$staging/packaging"
+  else
+    manifest_dir="$source_dir"
+  fi
+fi
+manifest_tmp="$(mktemp "$manifest_dir/.io.github.tcode.XXXXXX")"
+manifest="$manifest_tmp.json"
+mv "$manifest_tmp" "$manifest"
+trap 'rm -f "$manifest"; [[ -z "$staging" ]] || rm -rf "$staging"' EXIT
+skip_manifest=
+if [[ -n "$source_dir" && "$manifest_dir" == "$source_dir" ]]; then
+  skip_manifest="${manifest#"$source_dir"/}"
+fi
 
-# Absolute metadata paths keep both the checkout and an exported source tree read-only.
-jq --arg packaging "$here" --arg source "$source_dir" --arg output "$skip_output" '
+# Keep every local manifest source within the manifest directory for --sandbox builds.
+jq --arg packaging "$packaging_path" --arg source "$source_path" \
+  --arg output "$skip_output" --arg manifest "$skip_manifest" '
   .modules |= map(
     if .name == "t-code" then
       .sources |= map(
@@ -56,7 +86,8 @@ jq --arg packaging "$here" --arg source "$source_dir" --arg output "$skip_output
           {
             "type": "dir",
             "path": $source,
-            "skip": ([".git", "build", ".flatpak-builder", "packaging/packages", $output] | map(select(length > 0)))
+            "skip": ([".git", "build", ".flatpak-builder", "packaging/packages", $output, $manifest] |
+                     map(select(length > 0)))
           }
         elif .type == "file" and has("path") then
           .path = ($packaging + "/" + .path)
