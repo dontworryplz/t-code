@@ -455,7 +455,7 @@ void show_settings(App *t)
           open_button(open_user_theme));
   add_row(GTK_GRID(grid), &row, "Editor colors", "Your copy of the editor's color scheme (dark-classic.xml)",
           open_button(open_editor_colors));
-  add_row(GTK_GRID(grid), &row, "Plugins folder", "Installed plugins (~/.local/share/t-code/plugins)",
+  add_row(GTK_GRID(grid), &row, "Plugins folder", "Installed plugins (~/.config/t-code/plugins)",
           open_button(open_plugins_folder));
 
   if (last_page && gtk_stack_get_child_by_name(GTK_STACK(stack), last_page))

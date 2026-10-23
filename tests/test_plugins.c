@@ -31,6 +31,10 @@ void status_say(App *t, const char *message)
   (void)message;
 }
 
+void refresh_shortcuts(App *t)
+{
+  (void)t;
+}
 static GPtrArray *test_picker_rows = NULL;
 
 void picker_add(App *t, guint generation, const char *label, const char *detail, const char *payload)
@@ -106,7 +110,8 @@ static void test_valid_plugin(void)
                      "  \"description\": \"A sample test plugin\",\n"
                      "  \"executable\": \"run.sh\",\n"
                      "  \"commands\": [\n"
-                     "    { \"id\": \"c1\", \"name\": \"Command One\", \"keys\": \"Ctrl+Alt+1\" },\n"
+                     "    { \"id\": \"c1\", \"name\": \"Command One\", \"keys\": \"Ctrl+Alt+1\", "
+                     "\"trigger\": \"<Control><Alt>1\" },\n"
                      "    { \"id\": \"c2\", \"name\": \"Command Two\" }\n"
                      "  ]\n"
                      "}\n";
@@ -130,6 +135,11 @@ static void test_valid_plugin(void)
   g_assert_cmpstr(c1->id, ==, "c1");
   g_assert_cmpstr(c1->name, ==, "Command One");
   g_assert_cmpstr(c1->keys, ==, "Ctrl+Alt+1");
+  g_assert_cmpstr(c1->trigger, ==, "<Control><Alt>1");
+  GtkShortcutController *controller = GTK_SHORTCUT_CONTROLLER(gtk_shortcut_controller_new());
+  plugins_add_shortcuts(controller, &app);
+  g_assert_cmpuint(gtk_shortcut_controller_get_n_shortcuts(controller), ==, 1);
+  g_object_unref(controller);
   g_assert_true(c1->plugin == p);
 
   PluginCommand *c2 = g_ptr_array_index(p->commands, 1);
@@ -270,17 +280,40 @@ static void test_palette_query(void)
   plugins_stop(&app);
   g_free(scan_path);
 }
+static void test_user_config_directory(void)
+{
+  write_file("config-home/t-code/plugins/config-only-unique/plugin.json",
+             "{\"name\":\"Config Plugin\",\"commands\":[{\"id\":\"run\",\"name\":\"Run\"}],"
+             "\"executable\":\"run.sh\"}",
+             0644);
+  write_file("config-home/t-code/plugins/config-only-unique/run.sh", "#!/bin/sh\nexit 0\n", 0755);
+  App app = { 0 };
+  gboolean found = FALSE;
+
+  plugins_init(&app);
+  for (guint i = 0; app.plugins && i < app.plugins->len; i++) {
+    Plugin *plugin = g_ptr_array_index(app.plugins, i);
+    if (g_strcmp0(plugin->id, "config-only-unique") == 0)
+      found = TRUE;
+  }
+  g_assert_true(found);
+  plugins_stop(&app);
+}
+
 
 int main(int argc, char **argv)
 {
-  g_test_init(&argc, &argv, NULL);
   tmp_dir = g_dir_make_tmp("t-code-test-plugins-XXXXXX", NULL);
-
+  char *config_home = g_build_filename(tmp_dir, "config-home", NULL);
+  g_setenv("XDG_CONFIG_HOME", config_home, TRUE);
+  g_free(config_home);
+  g_test_init(&argc, &argv, NULL);
   g_test_add_func("/plugins/empty-dir", test_empty_dir);
   g_test_add_func("/plugins/valid-plugin", test_valid_plugin);
   g_test_add_func("/plugins/invalid-plugins", test_invalid_plugins);
   g_test_add_func("/plugins/subprocess-execution", test_subprocess_execution);
   g_test_add_func("/plugins/palette-query", test_palette_query);
+  g_test_add_func("/plugins/user-config-directory", test_user_config_directory);
 
   int status = g_test_run();
 

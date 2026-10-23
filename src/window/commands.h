@@ -13,6 +13,8 @@ void add_shortcuts(App *t);
 /* The same for another window (the second window): commands that are not about the focused editor
  * bring the main window up first. */
 void add_shortcuts_to(App *t, GtkWindow *window);
+/* Rebuilds built-in and plugin shortcuts after a plugin reload. */
+void refresh_shortcuts(App *t);
 
 /* Opens the command palette. */
 void command_palette(App *t);

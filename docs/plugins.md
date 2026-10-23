@@ -21,27 +21,28 @@ Plugins run as independent subprocesses communicating with `t-code` via its UNIX
 
 #### Manifest (`plugin.json`)
 
-Plugins are discovered in `~/.config/t-code/plugins/<plugin_name>/` or within a repository's `.t-code/plugins/`:
+Plugins are discovered in `~/.config/t-code/plugins/<plugin_id>/` and `/usr/share/t-code/plugins/<plugin_id>/`.
 
 ```json
 {
-  "name": "git-blame-line",
-  "version": "0.1.0",
-  "description": "Shows git blame info for the active line",
+  "name": "Git Blame",
+  "version": "1.0.0",
+  "description": "Shows blame for the active line",
+  "executable": "blame.sh",
   "commands": [
     {
       "id": "git-blame.show",
-      "title": "Git: Show Line Blame",
-      "shortcut": "Ctrl+Shift+G B",
-      "exec": "blame.sh"
+      "name": "Git: Show Line Blame",
+      "keys": "Ctrl+Alt+B",
+      "trigger": "<Control><Alt>b"
     }
-  ],
-  "hooks": {
-    "on_save": "lint.sh",
-    "on_cursor_moved": null
-  }
+  ]
 }
 ```
+
+`keys` is the label shown beside the command. `trigger` is GTK's shortcut syntax; commands without
+it remain available in the palette. A duplicate trigger keeps the first discovered command, and an
+invalid trigger is skipped. Reload Installed Plugins refreshes bindings in both windows.
 
 #### Socket Protocol
 

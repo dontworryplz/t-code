@@ -13,6 +13,8 @@
 #include <gio/gio.h>
 #include <json-glib/json-glib.h>
 
+#include "window/commands.h"
+
 static void plugin_command_free(PluginCommand *cmd)
 {
   if (!cmd)
@@ -20,6 +22,7 @@ static void plugin_command_free(PluginCommand *cmd)
   g_free(cmd->id);
   g_free(cmd->name);
   g_free(cmd->keys);
+  g_free(cmd->trigger);
   g_free(cmd);
 }
 
@@ -159,11 +162,14 @@ static void load_plugin_from_dir(App *t, const char *plugin_dir, const char *dir
     const char *cid = json_object_get_string_member(cobj, "id");
     const char *cname = json_object_get_string_member(cobj, "name");
     const char *ckeys = json_object_has_member(cobj, "keys") ? json_object_get_string_member(cobj, "keys") : NULL;
+    const char *trigger =
+        json_object_has_member(cobj, "trigger") ? json_object_get_string_member(cobj, "trigger") : NULL;
 
     PluginCommand *cmd = g_new0(PluginCommand, 1);
     cmd->id = g_strdup(cid);
     cmd->name = g_strdup(cname);
     cmd->keys = ckeys ? g_strdup(ckeys) : NULL;
+    cmd->trigger = trigger ? g_strdup(trigger) : NULL;
     cmd->plugin = p;
     g_ptr_array_add(p->commands, cmd);
   }
@@ -204,8 +210,8 @@ void plugins_init(App *t)
   if (!t->plugins)
     t->plugins = g_ptr_array_new_with_free_func((GDestroyNotify)plugin_free);
 
-  /* 1. User directory: ~/.local/share/t-code/plugins */
-  char *user_dir = g_build_filename(g_get_user_data_dir(), "t-code", "plugins", NULL);
+  /* 1. User directory: ~/.config/t-code/plugins */
+  char *user_dir = g_build_filename(g_get_user_config_dir(), "t-code", "plugins", NULL);
   g_mkdir_with_parents(user_dir, 0755);
   plugins_scan_dir(t, user_dir);
   g_free(user_dir);
@@ -236,6 +242,7 @@ void plugins_reload(App *t)
 {
   plugins_stop(t);
   plugins_init(t);
+  refresh_shortcuts(t);
   status_say(t, "Plugins reloaded");
 }
 
@@ -306,6 +313,59 @@ gboolean plugins_palette_choose(App *t, const char *payload)
   plugin_run_command(t, plugin_id, command_id);
   g_free(plugin_id);
   return TRUE;
+}
+typedef struct {
+  App *app;
+  char *payload;
+} PluginShortcut;
+
+static void plugin_shortcut_free(gpointer data)
+{
+  PluginShortcut *shortcut = data;
+  g_free(shortcut->payload);
+  g_free(shortcut);
+}
+
+static gboolean plugin_shortcut_activate(GtkWidget *widget G_GNUC_UNUSED, GVariant *args G_GNUC_UNUSED, gpointer data)
+{
+  PluginShortcut *shortcut = data;
+  return plugins_palette_choose(shortcut->app, shortcut->payload);
+}
+
+void plugins_add_shortcuts(GtkShortcutController *controller, App *t)
+{
+  GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+  for (guint i = 0; t->plugins && i < t->plugins->len; i++) {
+    Plugin *plugin = g_ptr_array_index(t->plugins, i);
+    for (guint j = 0; j < plugin->commands->len; j++) {
+      PluginCommand *cmd = g_ptr_array_index(plugin->commands, j);
+      GtkShortcutTrigger *trigger;
+      PluginShortcut *shortcut;
+      char *payload;
+
+      if (!cmd->trigger || !*cmd->trigger)
+        continue;
+      if (g_hash_table_contains(seen, cmd->trigger)) {
+        g_warning("Plugin shortcut '%s' is already assigned; skipping %s", cmd->trigger, cmd->name);
+        continue;
+      }
+      trigger = gtk_shortcut_trigger_parse_string(cmd->trigger);
+      if (!trigger) {
+        g_warning("Plugin shortcut '%s' for %s is invalid", cmd->trigger, cmd->name);
+        continue;
+      }
+      g_hash_table_add(seen, g_strdup(cmd->trigger));
+      payload = g_strdup_printf("plugin:%s:%s", plugin->id, cmd->id);
+      shortcut = g_new0(PluginShortcut, 1);
+      shortcut->app = t;
+      shortcut->payload = payload;
+      gtk_shortcut_controller_add_shortcut(
+          controller, gtk_shortcut_new(trigger, gtk_callback_action_new(plugin_shortcut_activate, shortcut,
+                                                                         plugin_shortcut_free)));
+    }
+  }
+  g_hash_table_destroy(seen);
 }
 
 typedef struct {
@@ -401,7 +461,7 @@ void plugin_run_command(App *t, const char *plugin_id, const char *command_id)
 
 void open_plugins_folder(App *t)
 {
-  char *dir = g_build_filename(g_get_user_data_dir(), "t-code", "plugins", NULL);
+  char *dir = g_build_filename(g_get_user_config_dir(), "t-code", "plugins", NULL);
   g_mkdir_with_parents(dir, 0755);
   char *uri = g_filename_to_uri(dir, NULL, NULL);
   if (uri) {

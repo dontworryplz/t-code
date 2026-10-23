@@ -390,7 +390,25 @@ void add_shortcuts_to(App *t, GtkWindow *window)
         gtk_shortcut_new(gtk_shortcut_trigger_parse_string(commands[i].trigger),
                          gtk_callback_action_new(on_shortcut, (gpointer)&commands[i], NULL)));
   }
+  plugins_add_shortcuts(GTK_SHORTCUT_CONTROLLER(controller), t);
+  g_object_set_data(G_OBJECT(window), "t-code-shortcut-controller", controller);
   gtk_widget_add_controller(GTK_WIDGET(window), controller);
+}
+
+void refresh_shortcuts(App *t)
+{
+  GtkWindow *windows[] = { t->window, t->editors.second };
+
+  for (guint i = 0; i < G_N_ELEMENTS(windows); i++) {
+    if (!windows[i])
+      continue;
+    GtkEventController *controller = g_object_get_data(G_OBJECT(windows[i]), "t-code-shortcut-controller");
+    if (controller) {
+      g_object_set_data(G_OBJECT(windows[i]), "t-code-shortcut-controller", NULL);
+      gtk_widget_remove_controller(GTK_WIDGET(windows[i]), controller);
+    }
+    add_shortcuts_to(t, windows[i]);
+  }
 }
 
 /* Command palette ---------------------------------------------------------------------------- */

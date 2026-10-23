@@ -13,7 +13,8 @@ typedef struct Plugin Plugin;
 typedef struct PluginCommand {
   char *id;
   char *name;
-  char *keys;
+  char *keys;    /* display text */
+  char *trigger; /* GTK shortcut trigger, e.g. <Control><Alt>1 */
   Plugin *plugin;
 } PluginCommand;
 
@@ -44,6 +45,9 @@ int plugins_palette_query(App *t, const char *text, guint generation);
 
 /* Handles selection of a plugin payload (format "plugin:<plugin_id>:<command_id>"). */
 gboolean plugins_palette_choose(App *t, const char *payload);
+
+/* Adds manifest shortcuts to a window's shared shortcut controller. */
+void plugins_add_shortcuts(GtkShortcutController *controller, App *t);
 
 /* Runs a plugin command asynchronously in a subprocess. */
 void plugin_run_command(App *t, const char *plugin_id, const char *command_id);

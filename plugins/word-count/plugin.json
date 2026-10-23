@@ -6,7 +6,9 @@
   "commands": [
     {
       "id": "count",
-      "name": "Word Count: Count Words in Current Tab"
+      "name": "Word Count: Count Words in Current Tab",
+      "keys": "Ctrl+Alt+W",
+      "trigger": "<Control><Alt>w"
     }
   ]
 }

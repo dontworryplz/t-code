@@ -182,7 +182,7 @@ change (`tools/headless.sh`).
 
 ## Plugins
 
-t-code features a native, out-of-process Plugin System with zero idle memory overhead. Plugins are discovered in `~/.local/share/t-code/plugins/<plugin_id>/` and `/usr/share/t-code/plugins/<plugin_id>/`.
+t-code features a native, out-of-process Plugin System with zero idle memory overhead. Plugins are discovered in `~/.config/t-code/plugins/<plugin_id>/` and `/usr/share/t-code/plugins/<plugin_id>/`.
 
 Each plugin provides a `plugin.json` manifest:
 
@@ -195,7 +195,9 @@ Each plugin provides a `plugin.json` manifest:
   "commands": [
     {
       "id": "count",
-      "name": "Word Count: Count Words in Current Tab"
+      "name": "Word Count: Count Words in Current Tab",
+      "keys": "Ctrl+Alt+W",
+      "trigger": "<Control><Alt>w"
     }
   ]
 }
