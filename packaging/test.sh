@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs the packages from packaging/packages/<distro>/ into a fresh container of that distro
 # (so the package manager has to pull in every dependency itself) and runs smoke-test.sh there.
-# Usage: packaging/test.sh [fedora|arch|debian|void|void-musl|all]...   (default: all)
+# Usage: packaging/test.sh [fedora|arch|debian|void|void-musl|appimage|all]...   (default: all)
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Installs the package, then what smoke-test.sh needs: a headless X server, a session bus,
@@ -47,7 +47,11 @@ failed=()
 for distro in "${targets[@]}"; do
   case "$distro" in
     fedora | arch | debian | void | void-musl) test_distro "$distro" || failed+=("$distro") ;;
-    *) die "Unknown target '$distro' (fedora, arch, debian, void, void-musl or all)" ;;
+    # The AppImage has no package manager behind it (build_appimage checks its file exists and
+    # gives its SHA256SUMS; it itself is tried out when it is started).
+    appimage) [[ -e "$OUT/appimage/t-code-$VERSION-x86_64.AppImage" ]] ||
+      { warn "No built AppImage in $OUT/appimage, run packaging/appimage.sh"; failed+=("appimage"); } ;;
+    *) die "Unknown target '$distro' (fedora, arch, debian, void, void-musl, appimage or all)" ;;
   esac
 done
 ((${#failed[@]} == 0)) || die "Failed: ${failed[*]}"

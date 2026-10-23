@@ -164,6 +164,7 @@ struct App {
     gboolean minimap;
     gboolean sticky_scroll; /* the heads of the blocks around the editor's top stay at its top */
     gboolean reopen_last;   /* started from the app menu: open the last project */
+    gboolean check_updates; /* at start-up, the latest release on GitHub goes against t-code's */
     gboolean autosave;      /* a changed editor saves a second after its last change */
     gboolean tabs_to_spaces;
     int tab_size;

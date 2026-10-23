@@ -122,6 +122,14 @@ your package manager (`sudo dnf remove t-code`, `sudo pacman -R t-code`, `sudo a
 A package puts `t-code` in `/usr/bin`, the editor's colors in `/usr/share/t-code/styles/`, and the
 app menu entry and icon.
 
+### As an AppImage (x86_64, for everything else)
+
+[t-code-x86_64.AppImage](https://github.com/suacayipkisi/t-code/releases): a single file without an
+install — t-code with its GTK4, GtkSourceView, VTE and the rest bundled inside. It needs nothing of
+the distribution but the ones t-code's packages pull (`clangd`, `git`), and stops asking for them:
+the color theme stays in the file (give the editor its fonts from the system as before, so
+Settings' font picker suffices). Built by `packaging/appimage.sh` like the packages above.
+
 ### Building the packages yourself
 
 All packages are built from this repository with one script. The Arch, Debian and Void packages
@@ -172,6 +180,8 @@ change (`tools/headless.sh`).
 ## Contributing
 
 If you want to contribute, all contributions will be gladly accepted. Please open a pull request.
+A plugin system is being thought out in [`docs/plugins.md`](docs/plugins.md) — comments there are
+as welcome as code.
 
 ## AI Usage in Project  
 
@@ -326,7 +336,9 @@ preview, in a rounded or a square look; the editor, the terminals and the panels
 word wrap (off by default; with it off, long lines run off the screen and scroll sideways with
 the horizontal scrollbar or Shift + wheel), tab size (2 by default), spaces for Tab, detecting a file's own indentation, autosave,
 format on save (`Ctrl+S` formats C and C++ first; off by default), clang-tidy checks (the project's
-`.clang-tidy`; off by default), fonts, text size and reopening the last project. Changes apply at
+`.clang-tidy`; off by default), checking for updates (the latest release on GitHub against this
+one, asking once when a newer one is out; "Check for Updates Now" from the palette asks at any
+moment), fonts, text size and reopening the last project. Changes apply at
 once, to the open editors too, and are kept in `~/.config/t-code/settings.ini` (a comment over
 each key; a hand edit applies at once).
 
@@ -428,6 +440,7 @@ src/                 t-code, the window (src/app.h: the shared types and a map o
                      build and run (run.c)
   files/             the Files panel (files.c): a folder's entries read and watched (folder.c), file
                      operations (fileops.c), git colors (gitmarks.c), file icons (icons.c)
+  update/            the new-release check: GitHub's latest release against this one (update.c)
   ipc/               requests from scripts and tools over $TCODE_SOCKET (socket.c)
 styles/              the editor's colors: Dark Classic as a GtkSourceView style scheme
 tests/               make test: editing and the find bar, the language server client (with a fake

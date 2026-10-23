@@ -4,7 +4,7 @@
 #   arch    .pkg.tar.zst, in an Arch Linux container
 #   debian  .deb, in a Debian 13 (trixie) container
 #   void, void-musl  .xbps, in Void Linux containers (glibc and musl)
-# Usage: packaging/build.sh [fedora|arch|debian|void|void-musl|all]...   (default: all)
+# Usage: packaging/build.sh [fedora|arch|debian|void|void-musl|appimage|all]...   (default: all)
 # packaging/packages/release/ then holds just the packages to publish (no debug or source
 # packages) with their SHA256SUMS. packaging/test.sh installs them in fresh containers and checks
 # that they work.
@@ -54,7 +54,8 @@ collect_release() {
            "$OUT/arch/t-code-$VERSION-"[0-9]*-x86_64.pkg.tar.zst \
            "$OUT/debian/t-code_$VERSION-"[0-9]*_amd64.deb \
            "$OUT/void/t-code-${VERSION}_"[0-9]*.x86_64.xbps \
-           "$OUT/void-musl/t-code-${VERSION}_"[0-9]*.x86_64-musl.xbps; do
+           "$OUT/void-musl/t-code-${VERSION}_"[0-9]*.x86_64-musl.xbps \
+           "$OUT/appimage/t-code-$VERSION-x86_64.AppImage"; do
     [[ -f "$f" ]] && files+=("$f")
   done
   ((${#files[@]})) || return 0
@@ -78,13 +79,14 @@ for distro in "${targets[@]}"; do
   case "$distro" in
     fedora | arch | debian) "build_$distro" ;;
     void | void-musl) build_void "$distro" ;;
+    appimage) build_appimage ;;
     *) die "Unknown target '$distro' (fedora, arch, debian, void, void-musl or all)" ;;
   esac
 done
 collect_release
 info "Packages (t-code $VERSION):"
 find "$OUT" -path "$OUT/release" -prune -o -type f \
-  \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.xbps' \) \
+  \( -name '*.rpm' -o -name '*.pkg.tar.*' -o -name '*.deb' -o -name '*.xbps' -o -name '*.AppImage' \) \
   -print | sort | sed "s|^$ROOT/|  |"
 info "To publish (packaging/packages/release/):"
 ls "$OUT/release" | sed 's|^|  |'

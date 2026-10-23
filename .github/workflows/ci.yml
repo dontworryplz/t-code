@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    # The same container the Fedora packages build in: gcc 14+, GTK4, GtkSourceView 5, VTE, md4c.
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          dnf -y install make gcc git clangd gdb \
+            gtk4-devel gtksourceview5-devel json-glib-devel vte291-gtk4-devel md4c-devel \
+            xorg-x11-server-Xvfb dbus-x11 glibc-langpack-en
+      - name: Build
+        run: make -j"$(nproc)" all
+      # The display-touched tests run on a headless X server; a containerless renderer
+      # (Vulkan) is turned off and cairo draws.
+      - name: Tests
+        run: XDG_RUNTIME_DIR=/tmp GSK_RENDERER=cairo xvfb-run -a make -j"$(nproc)" test
+  asan:
+    # The tests that need no display, leak-strict; -std=c23 wants gcc 14+, like the build above.
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: dnf -y install make gcc glib2-devel json-glib-devel
+      - name: Build under ASan
+        run: make test-asan
+  format:
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: dnf -y install git clang clang-tools-extra
+      - name: clang-format stays quiet
+        run: clang-format --dry-run --Werror $(git ls-files 'src/*.c' 'src/*.h')

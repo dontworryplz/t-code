@@ -126,6 +126,7 @@ void session_load_settings(App *t)
   t->settings.minimap = get_bool(kf, "settings", "minimap", TRUE);
   t->settings.sticky_scroll = get_bool(kf, "settings", "sticky-scroll", TRUE);
   t->settings.reopen_last = get_bool(kf, "settings", "reopen-last-project", TRUE);
+  t->settings.check_updates = get_bool(kf, "settings", "check-updates", TRUE);
   t->settings.autosave = get_bool(kf, "settings", "autosave", TRUE);
   t->settings.tabs_to_spaces = get_bool(kf, "settings", "tabs-to-spaces", TRUE);
   t->settings.tab_size = CLAMP(get_int(kf, "settings", "tab-size", 2), 1, 16);
@@ -218,6 +219,9 @@ void session_save_settings(App *t)
   explain(kf, "file-manager-font", " The Files panel (its file icons need a Nerd Font)");
   g_key_file_set_boolean(kf, "settings", "reopen-last-project", t->settings.reopen_last);
   explain(kf, "reopen-last-project", " When started from the app menu (not from a folder in a terminal)");
+  g_key_file_set_boolean(kf, "settings", "check-updates", t->settings.check_updates);
+  explain(kf, "check-updates",
+          " Once at start-up, the latest release on GitHub goes against this version; a newer one asks");
   store_to(kf, path);
   g_key_file_set_double(session, "window", "font-scale", t->font_scale);
   store(session);

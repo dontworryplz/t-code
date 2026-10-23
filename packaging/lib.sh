@@ -5,7 +5,7 @@ PACKAGING="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$PACKAGING")"
 OUT="$PACKAGING/packages"
 VERSION="$(sed -n 's/^VERSION *:= *//p' "$ROOT/Makefile")"
-DISTROS=(fedora arch debian void void-musl)
+DISTROS=(fedora arch debian void void-musl appimage)
 
 # The images the packages are built and tested in.
 declare -A IMAGE=(
@@ -14,6 +14,9 @@ declare -A IMAGE=(
   [debian]=docker.io/library/debian:trixie
   [void]=ghcr.io/void-linux/void-glibc-full:latest
   [void-musl]=ghcr.io/void-linux/void-musl-full:latest
+  # the AppImage: a distro whose GTK4 is new enough, which linuxdeploy bundles and the rest come
+  # with it (packaging/appimage.sh)
+  [appimage]=docker.io/library/debian:trixie
 )
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -56,6 +59,18 @@ check_versions() {
     [[ "$v" == "$VERSION" ]] ||
       die "Version mismatch: Makefile $VERSION, spec $spec, PKGBUILD $pkgbuild, changelog $changelog"
   done
+}
+
+# The AppImage, built like the other packages: make_tarball's tree goes into the container with
+# packaging/appimage/build-in-container.sh, which bundles it with linuxdeploy's GTK plugin.
+build_appimage() {
+  local out="$OUT/appimage"
+  rm -rf "$out" && make_tarball "$out"
+  info "Building the AppImage in ${IMAGE[appimage]}"
+  run_in_container appimage "$out" bash /src/packaging/appimage/build-in-container.sh
+  rm -f "$out/t-code-$VERSION.tar.gz"
+  [[ -e "$out/t-code-$VERSION-x86_64.AppImage" ]] &&
+    (cd "$out" && sha256sum -- * > SHA256SUMS)
 }
 
 # t-code-<version>.tar.gz from the working tree: tracked files plus new ones git does not ignore,

@@ -27,6 +27,7 @@
 #include "project/project.h"
 #include "project/run.h"
 #include "project/userfiles.h"
+#include "update/update.h"
 #include "window/secondwindow.h"
 #include "window/statusbar.h"
 #include "window/window.h"
@@ -58,6 +59,7 @@ static void focus_left(App *t) { focus_group(t, 0); }
 static void focus_right(App *t) { focus_group(t, 1); }
 static void zoom_in(App *t) { set_font_scale(t, t->font_scale * 1.1); }
 static void zoom_out(App *t) { set_font_scale(t, t->font_scale / 1.1); }
+static void check_updates_now(App *t) { updates_check_now(t); }
 static void zoom_reset(App *t) { set_font_scale(t, 1.0); }
 static void toggle_files(App *t) { toggle_pane(t, t->layout.left); }
 static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell.term)); }
@@ -310,6 +312,7 @@ static const Command commands[] = {
   { "Preferences: Open Editor Colors", NULL, NULL, open_editor_colors, FALSE, FALSE, FALSE },
   { "Keyboard Shortcuts", NULL, NULL, show_keybinds, FALSE, FALSE, FALSE },
   { "About t-code", NULL, NULL, show_about, FALSE, FALSE, FALSE },
+  { "Check for Updates Now", NULL, NULL, check_updates_now, FALSE, FALSE, FALSE },
 };
 
 void run_command(App *t, const char *name)

@@ -19,6 +19,7 @@
 #include "project/session.h"
 #include "project/userfiles.h"
 #include "search/search.h"
+#include "update/update.h"
 #include "window/commands.h"
 #include "window/paths.h"
 #include "window/statusbar.h"
@@ -1308,4 +1309,5 @@ void build_window(App *t, GtkApplication *app)
   start_status_updates(t);
   gtk_window_present(t->window);
   files_focus(t);
+  updates_start(t); /* the release check (Settings' "Check for updates") starts from here */
 }

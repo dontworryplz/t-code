@@ -1,0 +1,39 @@
+name: Packages
+
+# A push of a v* tag builds every package (rpm, pkg, deb, xbps and the AppImage) and attaches
+# packaging/packages/release/ to the release. Drafting is fine: pkgver/changelog/spec in
+# check_versions keep the versions together.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: podman (the packages build in containers, like on a machine)
+        run: sudo apt-get update && sudo apt-get install -y podman
+      - name: Build every package
+        run: |
+          set -e
+          for p in fedora arch debian void void-musl appimage; do
+            packaging/build.sh "$p"
+          done
+      - name: Package tests (each in a fresh container of its distribution)
+        run: packaging/test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: packaging/packages/release/
+      - name: Release with the packages
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/packages/release/*
+          generate_release_notes: true

@@ -204,6 +204,14 @@ static void on_reopen_last(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gp
   session_save_settings(t);
 }
 
+static void on_check_updates(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpointer data G_GNUC_UNUSED)
+{
+  App *t = app_of(GTK_WIDGET(toggle));
+
+  t->settings.check_updates = gtk_switch_get_active(toggle);
+  session_save_settings(t);
+}
+
 static void on_text_size(GtkSpinButton *spin, gpointer data G_GNUC_UNUSED)
 {
   App *t = app_of(GTK_WIDGET(spin));
@@ -390,6 +398,10 @@ void show_settings(App *t)
   add_row(GTK_GRID(grid), &row, "Reopen the last project",
           "When started from the app menu (not from a folder in a terminal)",
           switch_for(t->settings.reopen_last, G_CALLBACK(on_reopen_last)));
+  add_row(GTK_GRID(grid), &row, "Check for updates",
+          "Once at start-up, the latest release on GitHub goes against t-code; a newer one asks (also"
+          " \"Check for Updates Now\")",
+          switch_for(t->settings.check_updates, G_CALLBACK(on_check_updates)));
 
   grid = add_page(GTK_STACK(stack), "editor", "Editor", &row);
   add_row(GTK_GRID(grid), &row, "Minimap", "A small picture of the file next to the scrollbar",

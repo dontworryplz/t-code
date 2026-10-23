@@ -1309,7 +1309,7 @@ static void test_settings_pages(void)
     g_assert_true(GTK_IS_SCROLLED_WINDOW(page));
     switches += count_of(page, GTK_TYPE_SWITCH);
   }
-  g_assert_cmpint(switches, ==, 11); /* none lost on the way */
+  g_assert_cmpint(switches, ==, 12); /* none lost on the way */
   g_assert_cmpstr(gtk_stack_get_visible_child_name(stack), ==, "general");
 
   gtk_stack_set_visible_child_name(stack, "appearance");
@@ -1333,6 +1333,7 @@ static void on_activate(GApplication *gapp, gpointer data G_GNUC_UNUSED)
   int *status = g_object_get_data(G_OBJECT(gapp), "status");
 
   build_window(&app, GTK_APPLICATION(gapp));
+  app.settings.check_updates = FALSE; /* the tests must not ask GitHub for new releases */
   run(100);
   *status = g_test_run();
   app.closing = TRUE;
