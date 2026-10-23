@@ -15,9 +15,14 @@ override_dh_auto_install:
 # The other tests open windows and need a display.
 override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	@echo "Debian checks: verifying installed binary"
 	build/t-code --version | grep -qx 't-code $(DEB_VERSION_UPSTREAM)'
+	@echo "Debian checks: compiling headless tests"
 	$(MAKE) build/test-searchmatch build/test-detect build/test-linediff
+	@echo "Debian checks: running searchmatch"
 	build/test-searchmatch
+	@echo "Debian checks: running detect"
 	build/test-detect
+	@echo "Debian checks: running linediff"
 	build/test-linediff
 endif
