@@ -203,7 +203,7 @@ Each plugin provides a `plugin.json` manifest:
 }
 ```
 
-When a plugin command is triggered from the Command Palette (`Ctrl+Shift+P`):
+When invoked from the Command Palette (`Ctrl+Shift+P`) or its manifest shortcut:
 1. The executable is launched asynchronously with environment variables:
    - `TCODE_SOCKET`: UNIX control socket path.
    - `TCODE_PLUGIN_ID`: plugin identifier.
@@ -214,9 +214,9 @@ When a plugin command is triggered from the Command Palette (`Ctrl+Shift+P`):
    `get-project`, `get-text`, `replace-all <text>`, `insert <text>`, `append <text>`, and `save`).
    Sending `subscribe` keeps the socket open for JSON-lines `did_open` and `did_save` events.
 3. The manifest's `keys` value labels the palette command; optional GTK `trigger` binds a shortcut.
-   Plugins are also available from the palette, and terminate immediately after their command unless
-   they explicitly subscribe to events.
-   See [`docs/plugins.md`](docs/plugins.md) for the manifest and socket protocol.
+   The command remains available in the palette either way. One-shot plugins can exit immediately;
+   an event subscriber stays connected until it closes its socket.
+See [`docs/plugins.md`](docs/plugins.md) for the manifest and socket protocol.
 
 ## Contributing
 
