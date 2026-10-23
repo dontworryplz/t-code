@@ -89,7 +89,7 @@ static int column_in(const char *text, gint64 character, gboolean utf16)
 
 /* Opens path at an LSP position: from its tab's text when it is open and loaded, else from the
  * file's line. */
-static void open_at(App *t, const char *path, JsonNode *position)
+static void open_at(App *t, const char *path, JsonNode *position, gboolean utf16)
 {
   Tab *tab = find_tab(t, TAB_EDITOR, path);
   int line = (int)json_int_at(position, "line", 0) + 1;
@@ -98,12 +98,12 @@ static void open_at(App *t, const char *path, JsonNode *position)
   if (tab && tab->view && !tab->view->loading) {
     GtkTextIter iter;
     select_tab(tab);
-    lsp_iter_at(tab, position, &iter);
+    lsp_iter_at_encoding(tab, position, &iter, utf16);
     editor_goto(tab, line, gtk_text_iter_get_line_offset(&iter) + 1);
   } else {
     GHashTable *files = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_strfreev);
     char *text = line_of(t, path, line - 1, files);
-    open_file_at(t, path, line, column_in(text, character, lsp_utf16(t)));
+    open_file_at(t, path, line, column_in(text, character, utf16));
     g_free(text);
     g_hash_table_destroy(files);
   }
@@ -115,6 +115,7 @@ typedef struct {
   App *app;
   char *path;    /* the editor asking, by path: it may close meanwhile */
   gboolean save; /* formatting: save once it is done */
+  gboolean utf16; /* position encoding of the requesting server */
   guint changes; /* formatting: the text's change count when it was asked */
 } Asked;
 
@@ -138,7 +139,7 @@ static void on_definition(JsonNode *result, gpointer data)
   if (path && start) {
     if (from)
       remember(from);
-    open_at(asked->app, path, start);
+    open_at(asked->app, path, start, asked->utf16);
   }
   g_free(path);
   asked_free(asked);
@@ -151,6 +152,7 @@ void go_to_definition(Tab *tab)
 
   asked->app = tab->app;
   asked->path = g_strdup(tab->path);
+  asked->utf16 = lsp_utf16(tab);
   lsp_request(tab, "textDocument/definition", params, NULL, on_definition, asked);
   g_free(params);
 }
@@ -268,7 +270,7 @@ static void on_references(JsonNode *result, gpointer data)
     int line = (int)json_int_at(ref, "range.start.line", 0);
     char *text = path ? line_of(asked->app, path, line, files) : NULL;
     if (path) {
-      int column = column_in(text, json_int_at(ref, "range.start.character", 0), lsp_utf16(asked->app));
+      int column = column_in(text, json_int_at(ref, "range.start.character", 0), asked->utf16);
       g_ptr_array_add(references, g_strdup_printf("%s\x1f%d\x1f%d\x1f%s", path, line + 1, column, g_strstrip(text)));
     }
     g_free(text);
@@ -290,6 +292,7 @@ void find_references(Tab *tab)
 
   asked->app = tab->app;
   asked->path = g_strdup(tab->path);
+  asked->utf16 = lsp_utf16(tab);
   lsp_request(tab, "textDocument/references", params, NULL, on_references, asked);
   g_free(params);
 }
@@ -342,6 +345,7 @@ void switch_source_header(Tab *tab)
 
   asked->app = tab->app;
   asked->path = g_strdup(tab->path);
+  asked->utf16 = lsp_utf16(tab);
   if (lsp_has(tab))
     lsp_request(tab, "textDocument/switchSourceHeader", params, NULL, on_switched, asked);
   else
@@ -455,10 +459,130 @@ void go_to_symbol(Tab *tab)
 
   asked->app = tab->app;
   asked->path = g_strdup(tab->path);
+  asked->utf16 = lsp_utf16(tab);
   lsp_request(tab, "textDocument/documentSymbol", params, NULL, on_symbols, asked);
   g_free(params);
   g_free(document);
 }
+/* Workspace symbols ---------------------------------------------------------------------------- */
+
+typedef struct {
+  App *app;
+  guint generation;
+  char *query;
+  gboolean utf16;
+} SymbolRequest;
+
+static char *workspace_path;
+static void on_workspace_symbols(JsonNode *result, gpointer data);
+
+
+static void symbol_request_free(SymbolRequest *request)
+{
+  g_free(request->query);
+  g_free(request);
+}
+
+static void workspace_symbols_query(App *t, const char *text, guint generation)
+{
+  Tab *tab = workspace_path ? find_tab(t, TAB_EDITOR, workspace_path) : NULL;
+  SymbolRequest *request;
+  char *quoted, *params;
+
+  if (!tab || !lsp_has(tab)) {
+    picker_message(t, generation, "Language server is not ready");
+    return;
+  }
+  request = g_new0(SymbolRequest, 1);
+  request->app = t;
+  request->generation = generation;
+  request->query = g_strdup(text);
+  quoted = json_quote(text);
+  request->utf16 = lsp_utf16(tab);
+  params = g_strdup_printf("{\"query\":%s}", quoted);
+  picker_message(t, generation, "Searching workspace symbols…");
+  lsp_request(tab, "workspace/symbol", params, NULL, on_workspace_symbols, request);
+  g_free(params);
+  g_free(quoted);
+}
+
+static void workspace_symbols_choose(App *t, const char *payload)
+{
+  char **fields = g_strsplit(payload, "\x1f", 4);
+  int line = atoi(fields[1]);
+  gint64 character = g_ascii_strtoll(fields[2], NULL, 10);
+  GHashTable *files = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_strfreev);
+  char *text = line_of(t, fields[0], line, files);
+  int column = column_in(text, character, strcmp(fields[3], "1") == 0);
+
+  open_file_at(t, fields[0], line + 1, column);
+  g_free(text);
+  g_hash_table_destroy(files);
+  g_strfreev(fields);
+}
+
+static void on_workspace_symbols(JsonNode *result, gpointer data)
+{
+  SymbolRequest *request = data;
+  JsonArray *array = result && JSON_NODE_HOLDS_ARRAY(result) ? json_node_get_array(result) : NULL;
+  int shown = 0;
+
+  if (!array) {
+    picker_message(request->app, request->generation, "Workspace symbol search failed");
+    symbol_request_free(request);
+    return;
+  }
+  for (guint i = 0; i < json_array_get_length(array); i++) {
+    JsonNode *symbol = json_array_get_element(array, i);
+    const char *name = json_string_at(symbol, "name");
+    const char *uri = json_string_at(symbol, "location.uri");
+    JsonNode *position = json_at(symbol, "location.range.start");
+    char *path, *basename, *detail, *payload;
+    gint64 line, character;
+    char *match;
+
+    if (!name || !uri || !position)
+      continue;
+    path = lsp_uri_to_path(uri);
+    if (!path)
+      continue;
+    match = g_strdup_printf("%s %s", name, path);
+    if (fuzzy_score(request->query, match) < 0) {
+      g_free(match);
+      g_free(path);
+      continue;
+    }
+    g_free(match);
+    line = json_int_at(position, "line", 0);
+    character = json_int_at(position, "character", 0);
+    basename = g_path_get_basename(path);
+    const char *container = json_string_at(symbol, "containerName");
+    detail = g_strdup_printf("%s%s%s — %s:%" G_GINT64_FORMAT, kind_name(json_int_at(symbol, "kind", 0)),
+                             container ? " in " : "", container ? container : "", basename, line + 1);
+    payload = g_strdup_printf("%s\x1f%" G_GINT64_FORMAT "\x1f%" G_GINT64_FORMAT "\x1f%d", path, line, character,
+                              request->utf16);
+    picker_add(request->app, request->generation, name, detail, payload);
+    shown++;
+    g_free(payload);
+    g_free(detail);
+    g_free(basename);
+    g_free(path);
+  }
+  if (!shown)
+    picker_message(request->app, request->generation,
+                   json_array_get_length(array) ? "No matching workspace symbols" : "No workspace symbols found");
+  symbol_request_free(request);
+}
+
+void go_to_workspace_symbol(Tab *tab)
+{
+  if (!tab || !tab->view)
+    return;
+  g_free(workspace_path);
+  workspace_path = g_strdup(tab->path);
+  picker_open(tab->app, "Go to a workspace symbol", workspace_symbols_query, workspace_symbols_choose);
+}
+
 
 /* Quick fixes ------------------------------------------------------------------------------ */
 
@@ -490,6 +614,7 @@ static void actions_query(App *t, const char *text, guint generation)
     picker_message(t, generation, actions && actions->len ? "No matching fixes" : "No quick fixes here");
 }
 
+static gboolean actions_utf16;
 /* Its edit goes in; a command is run by the server, which sends the edit back (workspace/applyEdit). */
 static void actions_choose(App *t, const char *payload)
 {
@@ -501,7 +626,7 @@ static void actions_choose(App *t, const char *payload)
   JsonNode *action = json_from_string(g_ptr_array_index(actions, i), NULL);
   JsonNode *command = json_at(action, "command");
   if (json_at(action, "edit"))
-    navigate_apply_edit(t, json_at(action, "edit"), FALSE);
+    navigate_apply_edit(t, json_at(action, "edit"), FALSE, actions_utf16);
   if (command && JSON_NODE_HOLDS_VALUE(command))
     command = action; /* a Command: {title, command, arguments} */
   if (command && JSON_NODE_HOLDS_OBJECT(command) && json_string_at(command, "command")) {
@@ -536,6 +661,7 @@ static void on_actions(JsonNode *result, gpointer data)
   }
   g_free(actions_path);
   actions_path = g_strdup(asked->path);
+  actions_utf16 = asked->utf16;
   picker_open(asked->app, "Quick fix: pick one to apply", actions_query, actions_choose);
   asked_free(asked);
 }
@@ -559,6 +685,7 @@ void quick_fix(Tab *tab)
 
   asked->app = tab->app;
   asked->path = g_strdup(tab->path);
+  asked->utf16 = lsp_utf16(tab);
   lsp_request(tab, "textDocument/codeAction", params, NULL, on_actions, asked);
   g_free(params);
   g_free(diagnostics);
@@ -575,7 +702,7 @@ static void on_formatted(JsonNode *result, gpointer data)
 
   /* Typed on meanwhile: the edits are for the text it had, and would land in the wrong places. */
   if (tab && result && tab->view->changes == asked->changes)
-    edits_apply(tab, result);
+    edits_apply(tab, result, asked->utf16);
   if (tab && asked->save)
     save_editor(tab); /* formatted or not (no server, nothing to change) */
   asked_free(asked);
@@ -596,6 +723,7 @@ static void format_then(Tab *tab, gboolean save)
     asked->app = tab->app;
     asked->path = g_strdup(tab->path);
     asked->save = save;
+    asked->utf16 = lsp_utf16(tab);
     asked->changes = tab->view->changes;
     lsp_request(tab, "textDocument/formatting", params, NULL, on_formatted, asked);
   }
@@ -623,17 +751,17 @@ static int rename_line, rename_column;
 static char *old_name;
 
 /* Applies one file's edits: to its editor when it is open (saved when save), else to the file. */
-static void edit_file(App *t, const char *uri, JsonNode *edits, gboolean save)
+static void edit_file(App *t, const char *uri, JsonNode *edits, gboolean save, gboolean utf16)
 {
   char *path = lsp_uri_to_path(uri), *text = NULL;
   Tab *tab = path ? find_tab(t, TAB_EDITOR, path) : NULL;
 
   if (tab && tab->view && !tab->view->loading) {
-    edits_apply(tab, edits);
+    edits_apply(tab, edits, utf16);
     if (save)
       save_editor(tab); /* like the files that are not open, which are written at once */
   } else if (path && g_file_get_contents(path, &text, NULL, NULL)) {
-    char *changed = edits_apply_text(text, edits, lsp_utf16(t));
+    char *changed = edits_apply_text(text, edits, utf16);
     g_file_set_contents(path, changed, -1, NULL);
     g_free(changed);
   }
@@ -642,7 +770,7 @@ static void edit_file(App *t, const char *uri, JsonNode *edits, gboolean save)
 }
 
 /* A WorkspaceEdit: "changes" (uri -> edits) or "documentChanges" (a list of uri and edits). */
-void navigate_apply_edit(App *t, JsonNode *edit, gboolean save)
+void navigate_apply_edit(App *t, JsonNode *edit, gboolean save, gboolean utf16)
 {
   JsonNode *changes = json_at(edit, "changes"), *documents = json_at(edit, "documentChanges");
 
@@ -650,7 +778,7 @@ void navigate_apply_edit(App *t, JsonNode *edit, gboolean save)
     JsonObject *object = json_node_get_object(changes);
     GList *uris = json_object_get_members(object);
     for (GList *each = uris; each; each = each->next)
-      edit_file(t, each->data, json_object_get_member(object, each->data), save);
+      edit_file(t, each->data, json_object_get_member(object, each->data), save, utf16);
     g_list_free(uris);
   }
   for (guint i = 0;
@@ -659,7 +787,7 @@ void navigate_apply_edit(App *t, JsonNode *edit, gboolean save)
     JsonNode *document = json_array_get_element(json_node_get_array(documents), i);
     const char *uri = json_string_at(document, "textDocument.uri");
     if (uri)
-      edit_file(t, uri, json_at(document, "edits"), save);
+      edit_file(t, uri, json_at(document, "edits"), save, utf16);
   }
   refresh_branch(t); /* Source Control shows the changed files */
 }
@@ -668,7 +796,7 @@ static void on_renamed(JsonNode *result, gpointer data)
 {
   Asked *asked = data;
 
-  navigate_apply_edit(asked->app, result, TRUE);
+  navigate_apply_edit(asked->app, result, TRUE, asked->utf16);
   asked_free(asked);
 }
 
@@ -695,6 +823,7 @@ static void rename_choose(App *t, const char *name)
   asked = g_new0(Asked, 1);
   asked->app = t;
   asked->path = g_strdup(tab->path);
+  asked->utf16 = lsp_utf16(tab);
   quoted = json_quote(name);
   extra = g_strconcat(",\"newName\":", quoted, NULL);
   params = at_cursor(tab, extra);

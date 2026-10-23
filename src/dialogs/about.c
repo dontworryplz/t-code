@@ -164,7 +164,7 @@ void show_about(App *t)
                         "version", TCODE_VERSION,
                         "logo-icon-name", "io.github.tcode",
                         "comments", "A lightweight C/C++ IDE:\n"
-                                    "a file manager, editor tabs and a shell, sharing one clangd",
+                                    "a file manager, editor tabs and a shell, sharing language servers",
                         "website", "https://github.com/suacayipkisi/t-code",
                         "website-label", "github.com/suacayipkisi/t-code",
                         "copyright", "© 2026 suacayipkisi",

@@ -20,11 +20,11 @@ Python, JavaScript, Rust, Go, Java and other languages' projects.
 whose tabs ran [micro](https://micro-editor.github.io) in terminals (0.1.1) lives on in the
 [`micro-main`](../../tree/micro-main) branch.
 
-One window, one process (besides clangd and your shell):
+One window, one process (besides its language servers and your shell):
 
 - **left:** the Files panel (open tabs over the project's folder tree, with file icons and git
   colors), Source Control, Search and Run and Debug
-- **middle:** editor tabs (GtkSourceView), sharing one clangd
+- **middle:** editor tabs (GtkSourceView), sharing each language server for the project
 - **bottom:** your shell and the debugged program's terminal
 
 Every panel can be dragged by its icon to another dock (left, bottom, right, stacked or side by
@@ -46,8 +46,8 @@ the mouse. On top of that:
   argument being typed in bold.
 - **Go to Definition** (`F12`, `Ctrl+Click`) and back (`Alt+←`), **Find All References**
   (`Shift+F12`), **Rename Symbol** (`F2`, in every file), **Format Document** (`Shift+Alt+F`, with
-  the project's `.clang-format`), **Go to Symbol in File** (`Ctrl+Shift+.`), **Switch Source /
-  Header** (`Alt+O`).
+  the project's `.clang-format`), **Go to Symbol in File** (`Ctrl+Shift+.`), **Go to Symbol in
+  Workspace** (from the command palette), **Switch Source / Header** (`Alt+O`).
 - **Quick fixes** (`Ctrl+.`): clangd's fixes for the problems on the line (a missing `;` or
   `#include`, a misspelled name) and its refactorings, one pick away.
 - **Code folding** (the arrow beside a block, `Ctrl+Shift+[` / `]`) and **sticky scroll**: the
@@ -69,13 +69,16 @@ the mouse. On top of that:
 - A minimap, indent guides (the block around the cursor in its bracket color), the git diff gutter
   (green added, blue changed, red deleted), autosave a second after the last change.
 
-clangd starts when the first C or C++ file is shown and stops a minute after the last one closes.
-It gets a file only once its tab is shown, so a restored session with many tabs costs it little.
-Other files (Markdown, Makefiles, scripts) get completion from the words in the file.
-"clangd: Restart Language Server" in the command palette restarts it (also one that gave up after
-crashes or was installed meanwhile). When clangd cannot find the includes and the project has no
-`compile_commands.json` or `compile_flags.txt`, the status bar shows **⚠ No compile flags**; a
-click explains how to give it the flags (and points out a misnamed `compile-flags.txt`).
+clangd starts when the first C or C++ file is shown; Python (`.py`), Go (`.go`) and Rust (`.rs`)
+files use `pylsp`, `gopls` and `rust-analyzer` respectively when the executable is on `PATH`.
+Each server starts on first use and stops a minute after the last file it serves closes. Files are
+sent only once their tab is shown, so restored sessions cost the servers little. Other files
+(Markdown, Makefiles and scripts) get completion from the words in the file. "Restart Language
+Servers" in the command palette restarts active servers (including one that gave up after crashes);
+after installing an optional server, reopen its file to activate it. When clangd cannot find
+includes and the project has no `compile_commands.json` or `compile_flags.txt`, the status bar shows
+**⚠ No compile flags**; a click explains how to give it the flags (and points out a misnamed
+`compile-flags.txt`).
 
 ## Requirements
 
@@ -237,6 +240,7 @@ palette) finds any command by name.
 | anywhere    | `Ctrl+Shift+P`, `F1`                   | command palette                           |
 | anywhere    | `Ctrl+G`                               | go to line                                |
 | anywhere    | `F5` / `Ctrl+F5` / `Ctrl+Shift+B`      | debug (continue when paused) / build and run / build only (see below) |
+| anywhere    | command palette: `Test`              | run the detected or configured project tests in the shell |
 | anywhere    | `F9`, `F10` / `F11` / `Shift+F11`      | breakpoint / step over / into / out (debugging) |
 | anywhere    | `Shift+F5` / `Ctrl+Shift+F5` / `F6`    | stop / restart / pause (debugging)        |
 | anywhere    | `Ctrl+Shift+D` / `Ctrl+Shift+G`        | Run and Debug / Source Control panel      |
@@ -308,13 +312,18 @@ opens the Disassembly View: the function's instructions with its source lines, s
 instruction and instruction breakpoints. A Makefile's program is picked once and remembered.
 
 **Build and run.** `Ctrl+F5` / Run saves, then builds and runs in the shell (Build stops after
-building), looking upwards from the current file: a `CMakeLists.txt` is configured and built in
-`build/` and the newest program there runs; a `Makefile` runs `make`, then `make run` if there is
-a `run` target; otherwise the current C or C++ file is compiled on its own (with AddressSanitizer
-and UBSan) into `build/` and run. Ctrl+click a `file.c:12:5` in the compiler's output to go there.
+building), looking upwards from the current file: CMake uses `CMakeLists.txt`, Meson uses
+`meson.build`, and Make uses a Makefile; otherwise the current C or C++ file is compiled on its own
+(with AddressSanitizer and UBSan) into `build/` and run. Ctrl+click a `file.c:12:5` in compiler
+output to go there.
 Other languages run too: a script by its interpreter (Python, JavaScript / TypeScript with node,
 shell, Lua, Ruby, Perl, PHP, Go, Java, or any file with `#!`), and projects by their files: Cargo,
 `go.mod`, `package.json`'s `start` / `dev` script, Maven, Gradle, Python from its root with its venv.
+
+**Test.** The command palette's **Test** saves changed files and runs the active task profile's
+`test` command, or detects CMake/CTest, Meson, `make test`, Cargo, Go, Node's `test` script, Maven,
+Gradle or `pytest` in a Python project. Output stays in the integrated shell; Ctrl-click a
+`file:line:column` location to open the failing source.
 
 **Git.** The editor marks changed lines in the gutter (blue changed, green added, red
 where lines were deleted), following new commits by itself. **Compare with HEAD** (`Ctrl+Alt+D`)
@@ -324,9 +333,10 @@ word wrap): changed lines are tinted, their changed words colored (green new, re
 rows stand for missing lines; it opens at the first change. Closing the tab closes both sides; "Git: Stop Comparing" in the
 command palette keeps the file, back to comparing with the last commit. The Files panel colors files by their git state (modified,
 added, untracked, conflicted, ignored) with the letter at the end of the row. The **Source
-Control** panel (`Ctrl+Shift+G`) commits, pushes, stages, unstages and discards, and lists the
-commits: the pointer on one shows its message, author, date and line counts, and "Open Commit
-Details" shows it with its diff.
+Control** panel (`Ctrl+Shift+G`) commits, pushes, stages and unstages changes, and discards after
+confirmation. Right-click a modified file to stage or unstage an individual hunk. It also lists
+commits: the pointer on one shows its message, author, date and line counts, and "Open Commit Details"
+shows it with its diff.
 
 **Files panel.** A folder is read when you open it and shows new, removed and renamed files by
 itself; the git colors follow commits and saves. Files and folders can be cut, copied and pasted
@@ -343,7 +353,7 @@ closes when its last tab does. A file is never open in both groups at once, sinc
 saving the same file would overwrite each other.
 
 **Second window.** "Open in New Window" (the Files panel's menu, a tab's menu) moves a file into a
-second window of the same project, sharing clangd; closing it moves its tabs back.
+second window of the same project, sharing its language servers; closing it moves its tabs back.
 
 **Projects.** The title bar has buttons to open another folder and to pick a recent one.
 For a second project next to the first, middle-click the dock icon (or pick "New Window" from
@@ -437,8 +447,8 @@ make test-asan                       # the tests without GTK under AddressSaniti
 
 The tests also check memory: `tests/test_lsp.c` opens and closes a file 200 times against a fake
 language server and fails if the heap grows by 8 KB (it grows by a few hundred bytes; a leak of 130
-bytes a round fails it), and the package tests check that one clangd serves all editors with the
-arena limit.
+bytes a round fails it), and the package tests check that one clangd serves all C/C++ editors with
+the arena limit.
 
 ## Files
 
@@ -461,9 +471,9 @@ src/                 t-code, the window (src/app.h: the shared types and a map o
                      (signature.c), definition / references / rename / format (navigate.c, edits.c),
                      colors by meaning (semantic.c), finding the compile database (compiledb.c)
   search/            the Search tab, Ctrl+Shift+F (ripgrep); searchmatch.c is its GLib-only part
-  git/               the Source Control tab (scm.c), git status in the background (gitstatus.c),
-                     comparing with HEAD or a commit from the history (compare.c), line differences
-                     for the gutter (linediff.c)
+  git/               the Source Control tab (scm.c), per-hunk patches (patch.c), git status in the
+                     background (gitstatus.c), comparing with HEAD or history (compare.c), line
+                     differences for the gutter (linediff.c)
   popups/            the popup list (picker.c) used by Ctrl+P (quickopen.c), the palette, history,
                      references and rename
   dialogs/           the Settings, Keyboard Shortcuts and About windows

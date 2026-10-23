@@ -122,7 +122,7 @@ static void on_clang_tidy(GtkSwitch *toggle, GParamSpec *spec G_GNUC_UNUSED, gpo
   App *t = app_of(GTK_WIDGET(toggle));
 
   t->settings.clang_tidy = gtk_switch_get_active(toggle);
-  lsp_restart(t);
+  lsp_restart_clangd(t);
   session_save_settings(t);
 }
 
@@ -335,7 +335,7 @@ void settings_changed(App *t, gboolean restart_lsp)
   if (g_strcmp0(palette_id(), t->settings.color_theme) != 0)
     color_theme_apply(t, t->settings.color_theme);
   if (restart_lsp)
-    lsp_restart(t);
+    lsp_restart_clangd(t);
 }
 
 /* A page of the window: its grid of rows (its heading in it), scrolling when the window is smaller. */

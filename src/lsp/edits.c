@@ -12,7 +12,7 @@ typedef struct {
   const char *text;
 } Edit;
 
-void edits_apply(Tab *tab, JsonNode *edits)
+void edits_apply(Tab *tab, JsonNode *edits, gboolean utf16)
 {
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
   JsonArray *array = edits && JSON_NODE_HOLDS_ARRAY(edits) ? json_node_get_array(edits) : NULL;
@@ -24,8 +24,8 @@ void edits_apply(Tab *tab, JsonNode *edits)
   for (guint i = 0; i < n; i++) {
     JsonNode *edit = json_array_get_element(array, i);
     GtkTextIter start, end;
-    lsp_iter_at(tab, json_at(edit, "range.start"), &start);
-    lsp_iter_at(tab, json_at(edit, "range.end"), &end);
+    lsp_iter_at_encoding(tab, json_at(edit, "range.start"), &start, utf16);
+    lsp_iter_at_encoding(tab, json_at(edit, "range.end"), &end, utf16);
     list[i].start = gtk_text_buffer_create_mark(buffer, NULL, &start, FALSE);
     list[i].end = gtk_text_buffer_create_mark(buffer, NULL, &end, FALSE);
     list[i].text = json_string_at(edit, "newText");

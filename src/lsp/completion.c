@@ -420,7 +420,7 @@ static void activate(GtkSourceCompletionProvider *provider, GtkSourceCompletionC
   to = gtk_text_buffer_create_mark(buffer, NULL, &end, FALSE);
   gtk_text_buffer_begin_user_action(buffer);
   if (p->more)
-    edits_apply(self->tab, p->more);
+    edits_apply(self->tab, p->more, lsp_utf16(self->tab));
   gtk_text_buffer_get_iter_at_mark(buffer, &begin, from);
   gtk_text_buffer_get_iter_at_mark(buffer, &end, to);
   gtk_text_buffer_delete(buffer, &begin, &end);

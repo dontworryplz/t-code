@@ -33,6 +33,8 @@ void switch_source_header(Tab *tab);
 
 /* Lists the file's functions, types and the like in the popup list; one goes to it. */
 void go_to_symbol(Tab *tab);
+/* Lists symbols across the project through the language server; the chosen result opens its file. */
+void go_to_workspace_symbol(Tab *tab);
 
 /* Asks for a new name for the symbol at the cursor and renames it everywhere. */
 void rename_symbol(Tab *tab);
@@ -42,4 +44,4 @@ void rename_symbol(Tab *tab);
 void quick_fix(Tab *tab);
 
 /* Applies a WorkspaceEdit to the files it names (the open ones saved when save). */
-void navigate_apply_edit(App *t, JsonNode *edit, gboolean save);
+void navigate_apply_edit(App *t, JsonNode *edit, gboolean save, gboolean utf16);

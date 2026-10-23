@@ -872,6 +872,13 @@ static char *command_for(const char *path, gboolean and_run)
   return project_command(&app, and_run);
 }
 
+static char *test_command_for(const char *path)
+{
+  open_file(&app, path);
+  run(200);
+  return project_test_command(&app);
+}
+
 /* A script runs with its interpreter (a Python file in a folder with a Makefile too), Build checks
  * its syntax; an executable with "#!" runs itself; C still goes to make. */
 static void test_run_scripts(void)
@@ -945,6 +952,158 @@ static char *put(const char *root, const char *name, const char *text, int mode)
   g_chmod(path, mode);
   g_free(dir);
   return path;
+}
+
+/* Configured and conventional project test commands run in the integrated shell's working tree. */
+static void test_run_tests(void)
+{
+  char *root = g_build_filename(app.project.root, "run tests", NULL);
+  char *task_root = g_build_filename(root, "task project", NULL);
+  char *make_root = g_build_filename(root, "make project", NULL);
+  char *cmake_root = g_build_filename(root, "cmake project", NULL);
+  char *meson_root = g_build_filename(root, "meson project", NULL);
+  char *node_root = g_build_filename(root, "node project", NULL);
+  char *go_root = g_build_filename(root, "go project", NULL);
+  char *cargo_root = g_build_filename(root, "cargo project", NULL);
+  char *python_root = g_build_filename(root, "python project", NULL);
+  char *maven_root = g_build_filename(root, "maven project", NULL);
+  char *gradle_root = g_build_filename(root, "gradle project", NULL);
+  char *node_empty_root = g_build_filename(root, "node without tests", NULL);
+  char *fake_bin = g_build_filename(root, "bin", NULL);
+  char *saved_path = g_strdup(g_getenv("PATH")), *path_env;
+  char *path, *command, *output, *work_dir;
+
+  work_dir = g_build_filename(task_root, "work", NULL);
+  g_mkdir_with_parents(work_dir, 0755);
+  g_free(work_dir);
+  g_free(put(task_root, ".t-code/tasks.json",
+             "{\"default\":\"tests\",\"profiles\":{\"tests\":{\"test\":\"pwd\",\"cwd\":\"work\"}}}", 0644));
+  path = put(task_root, "src/main.c", "int main(void) { return 0; }\n", 0644);
+  command = test_command_for(path);
+  output = shell_output(command);
+  char *expected = g_strdup_printf("%s/work\n", task_root);
+  g_assert_cmpstr(output, ==, expected);
+  g_free(expected);
+  g_free(output);
+  g_free(command);
+  g_free(path);
+  path = put(root, "single.c", "int main(void) { return 0; }\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "no test runner detected for this file"));
+  g_assert_nonnull(strstr(command, "; false"));
+  g_free(command);
+  g_free(path);
+
+  g_free(put(make_root, "Makefile", "test:\n\t@echo make-test\n", 0644));
+  path = put(make_root, "src/main.c", "int main(void) { return 0; }\n", 0644);
+  command = test_command_for(path);
+  output = shell_output(command);
+  g_assert_cmpstr(output, ==, "make-test\n");
+  g_free(output);
+  g_free(command);
+  g_free(path);
+  g_free(put(fake_bin, "ctest", "#!/bin/sh\nexit 0\n", 0755));
+  g_free(put(fake_bin, "meson", "#!/bin/sh\nexit 0\n", 0755));
+  path_env = g_strdup_printf("%s:%s", fake_bin, saved_path ? saved_path : "");
+  g_setenv("PATH", path_env, TRUE);
+
+  g_free(put(cmake_root, "CMakeLists.txt", "cmake_minimum_required(VERSION 3.16)\nproject(test_runner NONE)\n", 0644));
+  path = put(cmake_root, "src/main.c", "int main(void) { return 0; }\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "cmake --build"));
+  g_assert_nonnull(strstr(command, "ctest -N"));
+  g_assert_nonnull(strstr(command, "ctest --output-on-failure"));
+  g_assert_nonnull(strstr(command, "Total Tests: [1-9]"));
+  g_free(command);
+  g_free(path);
+  g_free(put(meson_root, "meson.build", "project('demo', 'c')\nexecutable('demo', 'src/main.c')\n", 0644));
+  path = put(meson_root, "src/main.c", "int main(void) { return 0; }\n", 0644);
+  command = command_for(path, FALSE);
+  g_assert_nonnull(strstr(command, "meson setup"));
+  g_assert_nonnull(strstr(command, "meson compile -C"));
+  g_assert_nonnull(strstr(command, "--buildtype=debug"));
+  g_free(command);
+  command = command_for(path, TRUE);
+  g_assert_nonnull(strstr(command, "No executable in Meson build/"));
+  g_assert_nonnull(strstr(command, "meson-private"));
+  g_free(command);
+  char *summary = project_summary(&app);
+  g_assert_cmpstr(summary, ==, "Meson: meson project");
+  g_free(summary);
+  g_assert_true(project_can_debug(&app));
+  command = project_test_command(&app);
+  g_assert_nonnull(strstr(command, "meson test -C"));
+  g_free(command);
+  g_setenv("PATH", saved_path ? saved_path : "", TRUE);
+  g_free(path_env);
+  g_free(path);
+
+  g_free(put(node_root, "package.json", "{\"scripts\":{\"test\":\"echo node-test\"}}\n", 0644));
+  path = put(node_root, "src/index.js", "console.log('app')\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "npm test"));
+  g_free(command);
+  g_free(path);
+  g_free(put(node_empty_root, "package.json", "{\"name\":\"without-tests\"}\n", 0644));
+  path = put(node_empty_root, "index.js", "console.log('app')\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "no test script in package.json"));
+  g_assert_nonnull(strstr(command, "; false"));
+  g_free(command);
+  g_free(path);
+
+  g_free(put(go_root, "go.mod", "module example.test/demo\n\ngo 1.22\n", 0644));
+  path = put(go_root, "main.go", "package main\nfunc main() {}\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "go test ./..."));
+  g_free(command);
+  g_free(path);
+
+  g_free(put(cargo_root, "Cargo.toml", "[package]\nname=\"demo\"\nversion=\"0.1.0\"\n", 0644));
+  path = put(cargo_root, "src/main.rs", "fn main() {}\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "cargo test"));
+  g_free(command);
+  g_free(path);
+
+  g_free(put(python_root, "pyproject.toml", "[project]\nname = \"demo\"\n", 0644));
+  path = put(python_root, "main.py", "print('app')\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "-m pytest"));
+  g_free(command);
+  g_free(path);
+  g_free(put(maven_root, "pom.xml", "<project><modelVersion>4.0.0</modelVersion></project>\n", 0644));
+  path = put(maven_root, "src/main/java/App.java", "class App {}\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "mvn test"));
+  g_free(command);
+  g_free(path);
+
+  g_free(put(gradle_root, "build.gradle", "", 0644));
+  path = put(gradle_root, "src/main/java/App.java", "class App {}\n", 0644);
+  command = test_command_for(path);
+  g_assert_nonnull(strstr(command, "gradle test"));
+  g_free(command);
+  g_free(path);
+
+  close_all_tabs(&app);
+  run(100);
+  char *argv[] = { "rm", "-rf", root, NULL };
+  g_assert_true(g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL, NULL, NULL));
+  g_free(python_root);
+  g_free(cargo_root);
+  g_free(go_root);
+  g_free(node_root);
+  g_free(gradle_root);
+  g_free(maven_root);
+  g_free(node_empty_root);
+  g_free(cmake_root);
+  g_free(make_root);
+  g_free(task_root);
+  g_free(meson_root);
+  g_free(saved_path);
+  g_free(fake_bin);
+  g_free(root);
 }
 
 /* Whether Run's command for path contains part (and, when program is installed, what running it
@@ -1809,6 +1968,7 @@ int main(int argc, char **argv)
   g_test_add_func("/window/theme-renamed", test_theme_renamed);
   g_test_add_func("/window/preview-look", test_preview_look);
   g_test_add_func("/window/run-scripts", test_run_scripts);
+  g_test_add_func("/window/run-tests", test_run_tests);
   g_test_add_func("/window/run-projects", test_run_projects);
   g_test_add_func("/window/debugging", test_debugging);
   g_test_add_func("/window/debugging-conditions", test_debugging_conditions);

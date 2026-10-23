@@ -7,6 +7,7 @@
 #include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <glib/gstdio.h>
 
 #define IDLE_SECONDS 1
 #define FLUSH_MS 2
@@ -192,7 +193,26 @@ static int fake_server(void)
                           json_int_at(message, "params.position.character", 0));
       fake_send(reply);
       g_free(reply);
-    }
+    } else if (g_strcmp0(method, "workspace/symbol") == 0) {
+      const char *query = json_string_at(message, "params.query");
+      char *reply;
+      if (g_strcmp0(query, "fail") == 0) {
+        reply = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT
+                                ",\"error\":{\"code\":-32603,\"message\":\"test failure\"}}",
+                                json_int_at(message, "id", 0));
+      } else if (g_strcmp0(query, "needle") == 0) {
+        reply = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":["
+                                "{\"name\":\"needleSymbol\",\"kind\":12,\"containerName\":\"Box\","
+                                "\"location\":{\"uri\":\"file:///tmp/t-code-test/target.c\","
+                                "\"range\":{\"start\":{\"line\":1,\"character\":4},"
+                                "\"end\":{\"line\":1,\"character\":16}}}}]}",
+                                json_int_at(message, "id", 0));
+      } else {
+        reply = g_strdup_printf("{\"jsonrpc\":\"2.0\",\"id\":%" G_GINT64_FORMAT ",\"result\":[]}",
+                                json_int_at(message, "id", 0));
+      }
+      fake_send(reply);
+      g_free(reply);
     g_object_unref(parser);
     g_free(body);
   }
@@ -215,6 +235,7 @@ static Tab *new_tab(const char *path, const char *text)
   gtk_source_buffer_set_language(
       tab->buffer, gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(), "c"));
   gtk_text_buffer_set_text(GTK_TEXT_BUFFER(tab->buffer), text, -1);
+  picker_test_tab = tab;
   return tab;
 }
 
@@ -223,6 +244,8 @@ static void free_tab(Tab *tab)
   editor_view_free(tab->view);
   g_object_unref(tab->page);
   g_free(tab->path);
+  if (picker_test_tab == tab)
+    picker_test_tab = NULL;
   g_free(tab);
 }
 
@@ -375,6 +398,59 @@ static void test_hover(void)
   g_free(params);
   g_free(position);
   free_tab(tab);
+}
+
+static gboolean workspace_answered(void)
+{
+  return picker_test_label || (picker_test_message && strcmp(picker_test_message, "Searching workspace symbols…"));
+}
+
+static void wait_workspace_answer(void)
+{
+  gint64 deadline = g_get_monotonic_time() + 5 * G_USEC_PER_SEC;
+
+  while (!workspace_answered() && g_get_monotonic_time() < deadline) {
+    g_main_context_iteration(NULL, FALSE);
+    g_usleep(1000);
+  }
+  g_assert_true(workspace_answered());
+}
+
+static void test_workspace_symbols(void)
+{
+  const char *path = "/tmp/t-code-test/target.c";
+  Tab *tab;
+
+  g_mkdir_with_parents("/tmp/t-code-test", 0700);
+  g_assert_true(g_file_set_contents(path, "    needleSymbol\n", -1, NULL));
+  tab = new_tab("/tmp/t-code-test/workspace.c", "int main(void) {}\n");
+  lsp_open(tab);
+  g_assert_true(server_agrees(tab));
+  go_to_workspace_symbol(tab);
+  g_assert_nonnull(picker_test_query);
+  g_assert_nonnull(picker_test_choose);
+
+  picker_test_query(&app, "needle", 1);
+  wait_workspace_answer();
+  g_assert_cmpstr(picker_test_label, ==, "needleSymbol");
+  g_assert_cmpstr(picker_test_detail, ==, "function in Box — target.c:2");
+  picker_test_choose(&app, picker_test_payload);
+  g_assert_cmpstr(opened_path, ==, path);
+  g_assert_cmpint(opened_line, ==, 2);
+  g_assert_cmpint(opened_column, ==, 5);
+
+  picker_test_clear_results();
+  picker_test_query(&app, "other", 2);
+  wait_workspace_answer();
+  g_assert_cmpstr(picker_test_message, ==, "No workspace symbols found");
+
+  picker_test_clear_results();
+  picker_test_query(&app, "fail", 3);
+  wait_workspace_answer();
+  g_assert_cmpstr(picker_test_message, ==, "Workspace symbol search failed");
+  lsp_close(tab);
+  free_tab(tab);
+  g_remove(path);
 }
 
 /* The cursor resting on a name, with no selection, highlights the server's uses of it. */
@@ -817,7 +893,7 @@ static void test_edits(void)
   char *text = edits_apply_text("int x;\nreturn x;\n", edits, FALSE), *buffer_text;
 
   g_assert_cmpstr(text, ==, "int value;\nABreturn value;\n");
-  edits_apply(tab, edits);
+  edits_apply(tab, edits, lsp_utf16(tab));
   buffer_text = text_of(tab);
   g_assert_cmpstr(buffer_text, ==, text);
   g_free(buffer_text);
@@ -834,9 +910,16 @@ static void test_edits_encodings(void)
   JsonNode *utf16 = json_of("[{\"range\":{\"start\":{\"line\":0,\"character\":3},\"end\":{\"line\":0,"
                             "\"character\":4}},\"newText\":\"Z\"}]");
   char *a = edits_apply_text("ğüx y", utf8, FALSE), *b = edits_apply_text("🙂x y", utf16, TRUE);
+  Tab *tab = new_tab("/tmp/t-code-test/edits-utf8.py", "ğüx y");
+  char *buffer_text;
 
   g_assert_cmpstr(a, ==, "ğüZ y");
   g_assert_cmpstr(b, ==, "🙂xZy");
+  edits_apply(tab, utf8, FALSE); /* Workspace edits use the requesting server's encoding. */
+  buffer_text = text_of(tab);
+  g_assert_cmpstr(buffer_text, ==, "ğüZ y");
+  g_free(buffer_text);
+  free_tab(tab);
   g_free(b);
   g_free(a);
   json_node_unref(utf16);
@@ -992,6 +1075,60 @@ static void test_semantic_delta(void)
   free_tab(tab); /* frees s */
 }
 
+static void test_language_routing(void)
+{
+  Tab *cpp = new_tab("/tmp/t-code-test/routing.cpp", "int value;\n");
+  Tab *python = new_tab("/tmp/t-code-test/routing.py", "value = 1\n");
+  Tab *go = new_tab("/tmp/t-code-test/routing.go", "package main\n");
+  Tab *rust = new_tab("/tmp/t-code-test/routing.rs", "fn main() {}\n");
+  gtk_source_buffer_set_language(python->buffer,
+                                gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(),
+                                                                        "python"));
+  gtk_source_buffer_set_language(go->buffer,
+                                gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(), "go"));
+  gtk_source_buffer_set_language(rust->buffer,
+                                gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(), "rust"));
+  gtk_source_buffer_set_language(cpp->buffer,
+                                gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(), "cpp"));
+
+  g_assert_true(lsp_wants(cpp));
+  g_assert_true(lsp_wants(python));
+  g_assert_true(lsp_wants(go));
+  g_assert_true(lsp_wants(rust));
+  lsp_open(cpp);
+  lsp_open(python);
+  lsp_open(go);
+  lsp_open(rust);
+  g_assert_true(server_agrees(cpp));
+  g_assert_true(server_agrees(python));
+  g_assert_true(server_agrees(go));
+  g_assert_true(server_agrees(rust));
+  g_assert_cmpint(doc_of(cpp)->lsp->kind, ==, SERVER_CLANGD);
+  g_assert_cmpint(doc_of(python)->lsp->kind, ==, SERVER_PYTHON);
+  g_assert_cmpint(doc_of(go)->lsp->kind, ==, SERVER_GO);
+  g_assert_cmpint(doc_of(rust)->lsp->kind, ==, SERVER_RUST);
+  g_assert_cmpstr(server_language(SERVER_PYTHON), ==, "python");
+  g_assert_cmpstr(server_language(SERVER_GO), ==, "go");
+  g_assert_cmpstr(server_language(SERVER_RUST), ==, "rust");
+  g_assert_true(doc_of(python)->lsp != doc_of(go)->lsp);
+  g_assert_true(doc_of(go)->lsp != doc_of(rust)->lsp);
+  Lsp *servers[] = { doc_of(cpp)->lsp, doc_of(python)->lsp, doc_of(go)->lsp, doc_of(rust)->lsp };
+  lsp_close(cpp);
+  lsp_close(python);
+  lsp_close(go);
+  lsp_close(rust);
+  run_for(2600);
+  for (guint i = 0; i < G_N_ELEMENTS(servers); i++)
+    g_assert_null(servers[i]->ch);
+  lsp_stop(&app);
+  g_assert_null(app.lsps);
+  g_assert_null(app.lsp);
+  free_tab(cpp);
+  free_tab(python);
+  free_tab(go);
+  free_tab(rust);
+}
+
 int main(int argc, char **argv)
 {
   if (argc > 1 && strcmp(argv[1], "--fake-server") == 0)
@@ -1031,5 +1168,7 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/signature-markup", test_signature_markup);
   g_test_add_func("/lsp/edits", test_edits);
   g_test_add_func("/lsp/edits-encodings", test_edits_encodings);
+  g_test_add_func("/lsp/workspace-symbols", test_workspace_symbols);
+  g_test_add_func("/lsp/language-routing", test_language_routing);
   return g_test_run();
 }

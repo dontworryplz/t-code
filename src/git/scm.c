@@ -15,6 +15,7 @@
 #include "editor/tabs.h"
 #include "git/compare.h"
 #include "git/gitstatus.h"
+#include "git/patch.h"
 #include "editor/preview.h"
 #include "files/files.h"
 #include "popups/contextmenu.h"
@@ -108,16 +109,19 @@ static void set_note(const char *text, gboolean error)
 typedef void (*GitDone)(gboolean ok, const char *out, const char *err, gpointer data);
 
 typedef struct {
-  char **argv; /* git and its arguments */
-  char *input; /* for its stdin, or NULL */
+  char **argv;          /* git and its arguments */
+  char *input;          /* for its stdin, or NULL */
   GitDone done;
   gpointer data;
-  gboolean quiet; /* a background read: runs at once and does not hold the buttons */
+  GDestroyNotify drop;  /* releases data if the call is canceled or git cannot start */
+  gboolean quiet;       /* a background read: runs at once and does not hold the buttons */
 } GitCall;
 
 /* Frees a GitCall. */
 static void git_call_free(GitCall *call)
 {
+  if (call->drop)
+    call->drop(call->data);
   g_strfreev(call->argv);
   g_free(call->input);
   g_free(call);
@@ -150,8 +154,10 @@ static void on_git_done(GObject *source, GAsyncResult *result, gpointer user)
   if (!call->quiet)
     scm.busy = FALSE;
   if (scm.app && !scm.app->closing) {
-    if (call->done)
+    if (call->done) {
+      call->drop = NULL; /* the callback now owns data */
       call->done(ok, out ? out : "", err ? g_strstrip(err) : "", call->data);
+    }
     if (!call->quiet)
       refresh_branch(scm.app);
   }
@@ -191,13 +197,18 @@ static gboolean start_git(GitCall *call)
 
 /* Runs git in the work tree with args (NULL-terminated); input goes to its stdin. Commands that
  * change the repository (not quiet) run one after another. */
-static void run_git(const char *const *args, const char *input, gboolean quiet, GitDone done, gpointer data)
+static void run_git_owned(const char *const *args, const char *input, gboolean quiet, GitDone done, gpointer data,
+                          GDestroyNotify drop)
 {
   GPtrArray *argv = g_ptr_array_new();
   GitCall *call;
 
-  if (!scm.app->project.git_top)
+  if (!scm.app->project.git_top) {
+    if (drop)
+      drop(data);
+    g_ptr_array_free(argv, TRUE);
     return;
+  }
   g_ptr_array_add(argv, g_strdup("git"));
   for (int i = 0; args[i]; i++)
     g_ptr_array_add(argv, g_strdup(args[i]));
@@ -207,11 +218,17 @@ static void run_git(const char *const *args, const char *input, gboolean quiet, 
   call->input = g_strdup(input);
   call->done = done;
   call->data = data;
+  call->drop = drop;
   call->quiet = quiet;
   if (!quiet && scm.busy)
     g_queue_push_tail(&scm.waiting, call);
   else
     start_git(call);
+}
+
+static void run_git(const char *const *args, const char *input, gboolean quiet, GitDone done, gpointer data)
+{
+  run_git_owned(args, input, quiet, done, data, NULL);
 }
 
 /* Shows git's complaint when a command fails. */
@@ -256,6 +273,151 @@ static void unstage(const Change *c)
   const char *first[] = { "rm", "--cached", "-r", "-q", "--", c->path, NULL };
   const char *args[] = { "restore", "--staged", "--", c->path, c->old_path, NULL };
   run_simple(scm.initial ? first : args, "Could not unstage the file");
+}
+
+typedef struct {
+  char *path;
+  char *root;
+  gboolean staged;
+} HunkRequest;
+
+typedef struct {
+  HunkRequest *request;
+  GPtrArray *patches;
+  char **buttons;
+} HunkChoice;
+
+static void hunk_request_free(HunkRequest *request)
+{
+  g_free(request->path);
+  g_free(request->root);
+  g_free(request);
+}
+
+static void hunk_choice_free(HunkChoice *choice)
+{
+  if (!choice)
+    return;
+  hunk_request_free(choice->request);
+  g_ptr_array_free(choice->patches, TRUE);
+  g_strfreev(choice->buttons);
+  g_free(choice);
+}
+
+static void on_hunk_applied(gboolean ok, const char *out G_GNUC_UNUSED, const char *err, gpointer data)
+{
+  HunkChoice *choice = data;
+
+  if (!scm.app->closing && g_strcmp0(scm.app->project.git_top, choice->request->root) == 0) {
+    if (!ok)
+      set_note(*err ? err : (choice->request->staged ? "Could not unstage this hunk" : "Could not stage this hunk"),
+               TRUE);
+    else
+      set_note(choice->request->staged ? "Hunk unstaged" : "Hunk staged", FALSE);
+  }
+  hunk_choice_free(choice);
+}
+
+static void on_hunk_chosen(GObject *dialog, GAsyncResult *result, gpointer data)
+{
+  HunkChoice *choice = data;
+  int chosen = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(dialog), result, NULL);
+
+  if (chosen < 0 || (guint)chosen >= choice->patches->len || scm.app->closing ||
+      g_strcmp0(scm.app->project.git_top, choice->request->root) != 0) {
+    hunk_choice_free(choice);
+    return;
+  }
+  const char *apply[] = { "apply", "--cached", NULL };
+  const char *unapply[] = { "apply", "--cached", "--reverse", NULL };
+  run_git_owned(choice->request->staged ? unapply : apply, g_ptr_array_index(choice->patches, chosen), FALSE,
+                on_hunk_applied, choice, (GDestroyNotify)hunk_choice_free);
+}
+
+static char *hunk_label(const char *patch, gboolean staged, guint index)
+{
+  const char *header = strstr(patch, "\n@@ ");
+  const char *end;
+
+  if (!header)
+    return g_strdup_printf("%s hunk %u", staged ? "Unstage" : "Stage", index + 1);
+  header++;
+  end = strchr(header, '\n');
+  return g_strdup_printf("%s hunk %u: %.*s", staged ? "Unstage" : "Stage", index + 1,
+                         (int)(end ? end - header : strlen(header)), header);
+}
+
+static void on_hunks_read(gboolean ok, const char *out, const char *err, gpointer data)
+{
+  HunkRequest *request = data;
+  GPtrArray *patches;
+  HunkChoice *choice;
+  GtkAlertDialog *dialog;
+
+  if (scm.app->closing || g_strcmp0(scm.app->project.git_top, request->root) != 0) {
+    hunk_request_free(request);
+    return;
+  }
+  if (!ok) {
+    set_note(*err ? err : "Could not read file hunks", TRUE);
+    hunk_request_free(request);
+    return;
+  }
+  patches = git_patch_hunks(out);
+  if (!patches->len) {
+    set_note("No text hunks to stage or unstage", FALSE);
+    g_ptr_array_free(patches, TRUE);
+    hunk_request_free(request);
+    return;
+  }
+  choice = g_new0(HunkChoice, 1);
+  choice->request = request;
+  choice->patches = patches;
+  choice->buttons = g_new0(char *, patches->len + 1);
+  for (guint i = 0; i < patches->len; i++)
+    choice->buttons[i] = hunk_label(g_ptr_array_index(patches, i), request->staged, i);
+  choice->buttons[patches->len] = g_strdup("Cancel");
+  dialog = gtk_alert_dialog_new("%s", request->staged ? "Unstage one hunk?" : "Stage one hunk?");
+  gtk_alert_dialog_set_detail(dialog, "Choose the hunk to change in the index.");
+  gtk_alert_dialog_set_buttons(dialog, (const char *const *)choice->buttons);
+  gtk_alert_dialog_set_cancel_button(dialog, patches->len);
+  gtk_alert_dialog_set_default_button(dialog, patches->len);
+  gtk_alert_dialog_choose(dialog, scm.app->window, NULL, on_hunk_chosen, choice);
+  g_object_unref(dialog);
+}
+
+static void read_hunks(HunkRequest *request)
+{
+  const char *unstaged[] = { "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=3", "--",
+                             request->path, NULL };
+  const char *staged[] = { "diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=3", "--",
+                           request->path, NULL };
+
+  run_git_owned(request->staged ? staged : unstaged, NULL, FALSE, on_hunks_read, request,
+                (GDestroyNotify)hunk_request_free);
+}
+
+static void on_saved_for_stage_hunk(App *t, gpointer data)
+{
+  HunkRequest *request = data;
+
+  if (!t->closing && g_strcmp0(t->project.git_top, request->root) == 0)
+    read_hunks(request);
+  else
+    hunk_request_free(request);
+}
+
+static void choose_hunk(const char *path, gboolean staged)
+{
+  HunkRequest *request = g_new0(HunkRequest, 1);
+
+  request->path = g_strdup(path);
+  request->root = g_strdup(scm.app->project.git_top);
+  request->staged = staged;
+  if (staged)
+    read_hunks(request);
+  else
+    save_all(scm.app, on_saved_for_stage_hunk, request);
 }
 
 /* Stage All: every change (after saving the editors). */
@@ -653,6 +815,8 @@ static void menu_open_file(gpointer data)
 /* clang-format off */
 static void menu_stage(gpointer data) { stage(((MenuChange *)data)->change.path); }
 static void menu_unstage(gpointer data) { unstage(&((MenuChange *)data)->change); }
+static void menu_stage_hunk(gpointer data) { choose_hunk(((MenuChange *)data)->change.path, FALSE); }
+static void menu_unstage_hunk(gpointer data) { choose_hunk(((MenuChange *)data)->change.path, TRUE); }
 static void menu_discard(gpointer data) { discard(&((MenuChange *)data)->change); }
 static void menu_copy_relative(gpointer data) { copy_to_clipboard(((MenuChange *)data)->change.path); }
 /* clang-format on */
@@ -681,7 +845,7 @@ static void on_changes_menu(GtkWidget *list, double x, double y, gpointer data G
 {
   GtkListBoxRow *row = gtk_list_box_get_row_at_y(GTK_LIST_BOX(list), (int)y);
   Change *c = row ? g_object_get_data(G_OBJECT(row), "change") : NULL;
-  MenuItem items[10];
+  MenuItem items[12];
   int n = 0;
 
   if (!c)
@@ -695,8 +859,12 @@ static void on_changes_menu(GtkWidget *list, double x, double y, gpointer data G
   items[n++] = (MenuItem){ NULL, NULL };
   if (m->staged) {
     items[n++] = (MenuItem){ "Unstage Changes", menu_unstage };
+    if (c->code == 'M')
+      items[n++] = (MenuItem){ "Unstage Hunk…", menu_unstage_hunk };
   } else {
     items[n++] = (MenuItem){ "Stage Changes", menu_stage };
+    if (c->code == 'M')
+      items[n++] = (MenuItem){ "Stage Hunk…", menu_stage_hunk };
     items[n++] = (MenuItem){ "Discard Changes…", menu_discard };
   }
   items[n++] = (MenuItem){ NULL, NULL };

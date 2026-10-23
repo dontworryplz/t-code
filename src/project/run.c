@@ -3,8 +3,8 @@
  * status bar buttons. The project is found from the current file upwards:
  *   CMakeLists.txt  configure + build in build/; run starts the project's executable there
  *                  (named after the project, else the newest one that is not a test)
+ *   meson.build     setup + compile in build/; run starts the newest non-test executable
  *   Makefile        make; run uses "make run" when the Makefile has a run target
- *   neither         compile the current C/C++ file alone (with ASan/UBSan) into build/
  * Other languages' files look for their own project files only (a tools/x.py in a C project runs
  * itself, not make; a .py next to a package.json is not npm's):
  *   .rs             Cargo.toml: cargo run (--bin / --example for src/bin/, examples/), else rustc
@@ -38,6 +38,7 @@ typedef enum {
   PROJECT_NONE,
   PROJECT_TASKS, /* .t-code/tasks.json or t-code.json */
   PROJECT_CMAKE,
+  PROJECT_MESON,
   PROJECT_MAKE,
   PROJECT_FILE, /* a C / C++ file alone */
   PROJECT_SCRIPT,
@@ -53,6 +54,7 @@ typedef enum {
   GOAL_BUILD,
   GOAL_RUN,
   GOAL_DEBUG, /* build, then hand the program to the debugger */
+  GOAL_TEST,
 } Goal;
 
 typedef struct {
@@ -208,6 +210,7 @@ typedef struct {
   char *build;
   char *run;
   char *debug;
+  char *test;
   char *args;
   char *env;
   char *cwd;
@@ -219,6 +222,7 @@ static void task_profile_clear(TaskProfile *tp)
   g_free(tp->build);
   g_free(tp->run);
   g_free(tp->debug);
+  g_free(tp->test);
   g_free(tp->args);
   g_free(tp->env);
   g_free(tp->cwd);
@@ -282,11 +286,13 @@ static gboolean load_task_profile_from_obj(JsonObject *obj, const char *name, Ta
     tp->run = g_strdup(json_object_get_string_member(obj, "run"));
   if (json_object_has_member(obj, "debug"))
     tp->debug = g_strdup(json_object_get_string_member(obj, "debug"));
+  if (json_object_has_member(obj, "test"))
+    tp->test = g_strdup(json_object_get_string_member(obj, "test"));
   if (json_object_has_member(obj, "cwd"))
     tp->cwd = g_strdup(json_object_get_string_member(obj, "cwd"));
   tp->args = parse_task_args(obj);
   tp->env = parse_task_env(obj);
-  return tp->build != NULL || tp->run != NULL || tp->debug != NULL;
+  return tp->build != NULL || tp->run != NULL || tp->debug != NULL || tp->test != NULL;
 }
 
 static gboolean load_task_profile(const char *root, TaskProfile *tp)
@@ -343,12 +349,13 @@ static gboolean load_task_profile(const char *root, TaskProfile *tp)
   return ok;
 }
 
-/* What to build: another language's file in its own project or alone; else tasks.json, CMake or Make from the
- * current file's folder upwards, or else the current C / C++ file alone. */
+/* What to build: another language's file in its own project or alone; else tasks.json, CMake,
+ * Meson or Make from the current file's folder upwards, or else the current C / C++ file alone. */
 static Project find_project(App *t)
 {
   static const char *const tasks[] = { ".t-code/tasks.json", "t-code.json", NULL };
   static const char *const cmake[] = { "CMakeLists.txt", NULL };
+  static const char *const meson[] = { "meson.build", NULL };
   static const char *const make[] = { "Makefile", "makefile", "GNUmakefile", NULL };
   static const char *const python[] = { ".py", NULL };
   Tab *tab = current_tab(t);
@@ -373,6 +380,8 @@ static Project find_project(App *t)
       p.python = python_root(start);
   } else if ((p.root = find_up(start, cmake)))
     p.kind = PROJECT_CMAKE;
+  else if ((p.root = find_up(start, meson)))
+    p.kind = PROJECT_MESON;
   else if ((p.root = find_up(start, make)))
     p.kind = PROJECT_MAKE;
   else if (is_source(file, &cxx)) {
@@ -400,7 +409,8 @@ static char *tasks_command(const char *root, Goal goal)
 {
   TaskProfile tp = { 0 };
   if (!load_task_profile(root, &tp))
-    return g_strdup("echo 't-code: could not read .t-code/tasks.json'");
+    return goal == GOAL_TEST ? g_strdup("echo 't-code: could not read .t-code/tasks.json'; false")
+                             : g_strdup("echo 't-code: could not read .t-code/tasks.json'");
 
   char *workdir =
       tp.cwd ? (g_path_is_absolute(tp.cwd) ? g_strdup(tp.cwd) : g_build_filename(root, tp.cwd, NULL)) : g_strdup(root);
@@ -412,6 +422,11 @@ static char *tasks_command(const char *root, Goal goal)
       cmd = g_strdup_printf("cd %s && %s", qdir, tp.build);
     else
       cmd = g_strdup("echo 'Build OK (no build command configured in tasks.json)'");
+  } else if (goal == GOAL_TEST) {
+    cmd = tp.test && *tp.test
+              ? g_strdup_printf("cd %s && %s%s%s", qdir, tp.env && *tp.env ? tp.env : "",
+                                tp.env && *tp.env ? " " : "", tp.test)
+              : g_strdup("echo 't-code: no test command configured in tasks.json'; false");
   } else if (goal == GOAL_RUN) {
     const char *run_cmd = tp.run ? tp.run : tp.debug;
     if (run_cmd) {
@@ -469,7 +484,14 @@ static char *cmake_command(const char *root, Goal goal)
                       " && cmake --build %s",
                       src, build, ninja ? "-G Ninja " : "", build);
 
-  if (goal != GOAL_BUILD) {
+  if (goal == GOAL_TEST) {
+    char *test = g_strdup_printf("%s && (cd %s && if ctest -N | grep -Eq 'Total Tests: [1-9][0-9]*';"
+                                 " then ctest --output-on-failure;"
+                                 " else echo 'No CTest tests configured'; false; fi)",
+                                 cmd, build);
+    g_free(cmd);
+    cmd = if_installed("ctest", test);
+  } else if (goal != GOAL_BUILD) {
     char *debug = goal == GOAL_DEBUG ? send_verb("debug", "\"$exe\"") : NULL;
     /* The executable named after the project (CMAKE_PROJECT_NAME) anywhere under build/
          * (targets may sit in build/bin, build/src); else the newest one that is not a test, else
@@ -496,20 +518,63 @@ static char *cmake_command(const char *root, Goal goal)
   return cmd;
 }
 
+/* Meson uses its conventional build/ tree; reuse it when configured, otherwise set it up first. */
+static char *meson_command(const char *root, Goal goal)
+{
+  char *build_dir = g_build_filename(root, "build", NULL);
+  char *src = g_shell_quote(root), *build = g_shell_quote(build_dir);
+  char *setup = g_strdup_printf("if test -f %s/meson-private/coredata.dat; then"
+                                " meson setup --reconfigure %s %s --buildtype=debug;"
+                                " else meson setup %s %s --buildtype=debug; fi"
+                                " && meson compile -C %s",
+                                build, build, src, build, src, build);
+  char *cmd = NULL;
+
+  if (goal == GOAL_TEST)
+    cmd = g_strdup_printf("%s && meson test -C %s --print-errorlogs", setup, build);
+  else if (goal == GOAL_BUILD)
+    cmd = g_strdup(setup);
+  else {
+    char *debug = goal == GOAL_DEBUG ? send_verb("debug", "\"$exe\"") : NULL;
+    cmd = g_strdup_printf("%s && exe=$(cd %s && {"
+                          " find . -type f -executable -not -path '*/meson-private/*'"
+                          " -not -path '*/meson-info/*' -not -name '*.so*'"
+                          " -printf '%%T@ %%p\\n' | sort -nr | cut -d' ' -f2- | grep -vi test;"
+                          " find . -type f -executable -not -path '*/meson-private/*'"
+                          " -not -path '*/meson-info/*' -not -name '*.so*'"
+                          " -printf '%%T@ %%p\\n' | sort -nr | cut -d' ' -f2-; } | head -1)"
+                          " && if [ -n \"$exe\" ]; then exe=%s/${exe#./} && %s;"
+                          " else echo 'No executable in Meson build/'; false; fi",
+                          setup, build, build, debug ? debug : "echo \"▶ $exe\" && \"$exe\"");
+    g_free(debug);
+  }
+  char *available = if_installed("meson", cmd);
+  g_free(cmd);
+  g_free(setup);
+  g_free(build);
+  g_free(src);
+  g_free(build_dir);
+  return available;
+}
+
 /* The shell command that runs make (and then "make run" when the Makefile has it, or the debugger). */
 static char *make_command(const char *root, Goal goal)
 {
   char *dir = g_shell_quote(root);
   char *debug = goal == GOAL_DEBUG ? send_verb("debug", dir) : NULL;
-  char *cmd =
-      debug ? g_strdup_printf("make --no-print-directory -C %s && %s", dir, debug)
-      : goal == GOAL_RUN
-          ? g_strdup_printf("make --no-print-directory -C %s"
-                            " && if make -C %s -n run >/dev/null 2>&1; then make -s --no-print-directory -C %s run;"
-                            " else echo \"Build OK (no 'run' target in Makefile)\"; fi",
-                            dir, dir, dir)
-          : g_strdup_printf("make --no-print-directory -C %s", dir);
+  char *cmd;
 
+  if (debug)
+    cmd = g_strdup_printf("make --no-print-directory -C %s && %s", dir, debug);
+  else if (goal == GOAL_TEST)
+    cmd = g_strdup_printf("make --no-print-directory -C %s test", dir);
+  else if (goal == GOAL_RUN)
+    cmd = g_strdup_printf("make --no-print-directory -C %s"
+                          " && if make -C %s -n run >/dev/null 2>&1; then make -s --no-print-directory -C %s run;"
+                          " else echo \"Build OK (no 'run' target in Makefile)\"; fi",
+                          dir, dir, dir);
+  else
+    cmd = g_strdup_printf("make --no-print-directory -C %s", dir);
   g_free(debug);
   g_free(dir);
   return cmd;
@@ -751,19 +816,19 @@ static const char *node_manager(const char *root)
   return "npm";
 }
 
-/* The first of names that package.json's "scripts" has, or NULL. */
-static const char *node_script(const char *root, const char *const *names)
+/* The first of names that package.json's "scripts" has, or NULL; the caller frees it. */
+static char *node_script(const char *root, const char *const *names)
 {
   char *path = g_build_filename(root, "package.json", NULL);
   JsonParser *parser = json_parser_new();
-  const char *found = NULL;
+  char *found = NULL;
 
   if (json_parser_load_from_file(parser, path, NULL)) {
     JsonNode *scripts = json_at(json_parser_get_root(parser), "scripts");
     JsonObject *object = scripts && JSON_NODE_HOLDS_OBJECT(scripts) ? json_node_get_object(scripts) : NULL;
     for (int i = 0; object && names[i] && !found; i++)
       if (json_object_has_member(object, names[i]))
-        found = names[i];
+        found = g_strdup(names[i]);
   }
   g_object_unref(parser);
   g_free(path);
@@ -796,7 +861,8 @@ static char *java_class(const char *file)
 /* The shell command for another language's project: Cargo, Go, Node, Maven or Gradle. */
 static char *language_command(const Project *p, Goal goal)
 {
-  static const char *const starts[] = { "start", "dev", NULL }, *const builds[] = { "build", NULL };
+  static const char *const starts[] = { "start", "dev", NULL }, *const builds[] = { "build", NULL },
+                     *const tests[] = { "test", NULL };
   char *qroot = g_shell_quote(p->root), *dir = g_path_get_dirname(p->file), *qdir = g_shell_quote(dir);
   char *qfile = g_shell_quote(p->file), *cmd = NULL;
   const char *program = NULL;
@@ -805,7 +871,10 @@ static char *language_command(const Project *p, Goal goal)
     case PROJECT_CARGO: {
       char *target = cargo_target(p->root, p->file), *where = cargo_root(p->root), *qwhere = g_shell_quote(where);
       program = "cargo";
-      cmd = g_strdup_printf("(cd %s && cargo %s%s)", qwhere, goal == GOAL_RUN ? "run" : "build", target);
+      cmd = goal == GOAL_TEST ? g_strdup_printf("(cd %s && cargo test)", qwhere)
+            : goal == GOAL_RUN
+                ? g_strdup_printf("(cd %s && cargo run%s)", qwhere, target)
+                : g_strdup_printf("(cd %s && cargo build%s)", qwhere, target);
       g_free(qwhere);
       g_free(where);
       g_free(target);
@@ -813,35 +882,47 @@ static char *language_command(const Project *p, Goal goal)
     }
     case PROJECT_GO: /* the file's package, which go finds the module of */
       program = "go";
-      cmd = g_strdup_printf("(cd %s && go %s .)", qdir, goal == GOAL_RUN ? "run" : "vet");
+      cmd = goal == GOAL_TEST ? g_strdup_printf("(cd %s && go test ./...)", qroot)
+            : goal == GOAL_RUN ? g_strdup_printf("(cd %s && go run .)", qdir)
+                              : g_strdup_printf("(cd %s && go vet .)", qdir);
       break;
     case PROJECT_NODE: {
-      const char *manager = node_manager(p->root), *script = node_script(p->root, goal == GOAL_RUN ? starts : builds);
+      const char *manager = node_manager(p->root);
+      const char *const *wanted = goal == GOAL_TEST ? tests : goal == GOAL_RUN ? starts : builds;
+      char *script = node_script(p->root, wanted);
       program = manager;
       if (script)
-        cmd = g_strdup_printf("(cd %s && %s run %s)", qroot, manager, script);
-      else if (goal == GOAL_RUN) { /* no start script: the file itself */
+        cmd = goal == GOAL_TEST ? g_strdup_printf("(cd %s && %s test)", qroot, manager)
+              : g_strdup_printf("(cd %s && %s run %s)", qroot, manager, script);
+      else if (goal == GOAL_RUN) {
         program = "node";
         cmd = g_strdup_printf("(cd %s && node %s)", qroot, qfile);
-      } else
+      } else if (goal == GOAL_TEST)
+        cmd = g_strdup("echo 't-code: no test script in package.json'; false");
+      else
         cmd = g_strdup("echo 't-code: no build script in package.json'");
+      g_free(script);
       break;
     }
     case PROJECT_MAVEN: {
-      char *class = java_class(p->file), *qclass = g_shell_quote(class);
       program = "mvn";
-      cmd = goal == GOAL_RUN ? g_strdup_printf("(cd %s && mvn -q compile && java -cp target/classes %s)", qroot, qclass)
-                             : g_strdup_printf("(cd %s && mvn -q compile)", qroot);
-      g_free(qclass);
-      g_free(class);
+      if (goal == GOAL_TEST)
+        cmd = g_strdup_printf("(cd %s && mvn test)", qroot);
+      else {
+        char *class = java_class(p->file), *qclass = g_shell_quote(class);
+        cmd = goal == GOAL_RUN ? g_strdup_printf("(cd %s && mvn -q compile && java -cp target/classes %s)", qroot, qclass)
+                               : g_strdup_printf("(cd %s && mvn -q compile)", qroot);
+        g_free(qclass);
+        g_free(class);
+      }
       break;
     }
     case PROJECT_GRADLE: {
       char *wrapper = g_build_filename(p->root, "gradlew", NULL);
       gboolean own = g_file_test(wrapper, G_FILE_TEST_IS_EXECUTABLE);
       program = own ? NULL : "gradle";
-      cmd =
-          g_strdup_printf("(cd %s && %s %s)", qroot, own ? "./gradlew" : "gradle", goal == GOAL_RUN ? "run" : "build");
+      cmd = g_strdup_printf("(cd %s && %s %s)", qroot, own ? "./gradlew" : "gradle",
+                            goal == GOAL_TEST ? "test" : goal == GOAL_RUN ? "run" : "build");
       g_free(wrapper);
       break;
     }
@@ -869,6 +950,7 @@ char *project_summary(App *t)
   switch (p.kind) {
     case PROJECT_TASKS: text = g_strdup_printf("Task: %s", p.task_name ? p.task_name : name); break;
     case PROJECT_CMAKE: text = g_strdup_printf("CMake: %s", name); break;
+    case PROJECT_MESON: text = g_strdup_printf("Meson: %s", name); break;
     case PROJECT_MAKE: text = g_strdup_printf("Make: %s", name); break;
     case PROJECT_FILE: text = g_strdup_printf("gcc: %s", name); break;
     case PROJECT_RUSTC: text = g_strdup_printf("rustc: %s", name); break;
@@ -934,18 +1016,39 @@ static char *goal_command(App *t, Goal goal, char **cwd)
   switch (p.kind) {
     case PROJECT_TASKS: command = tasks_command(p.root, goal); break;
     case PROJECT_CMAKE: command = cmake_command(p.root, goal); break;
+    case PROJECT_MESON: command = meson_command(p.root, goal); break;
     case PROJECT_MAKE: command = make_command(p.root, goal); break;
-    case PROJECT_FILE: command = file_command(p.root, goal); break;
-    case PROJECT_SCRIPT: command = script_command(&p, goal); break;
-    case PROJECT_RUSTC: command = rustc_command(p.root, goal); break;
+    case PROJECT_FILE:
+      command = goal == GOAL_TEST ? g_strdup("echo 't-code: no test runner detected for this file'; false")
+                                  : file_command(p.root, goal);
+      break;
+    case PROJECT_SCRIPT:
+      if (goal == GOAL_TEST && p.python) {
+        char *python = venv_python(p.python);
+        char *qroot = g_shell_quote(p.python), *qpython = g_shell_quote(python ? python : "python3");
+        char *test = g_strdup_printf("(cd %s && %s -m pytest)", qroot, qpython);
+        command = python ? test : if_installed("python3", test);
+        g_free(qpython);
+        g_free(qroot);
+        g_free(python);
+      } else if (goal == GOAL_TEST)
+        command = g_strdup("echo 't-code: no Python test project found'; false");
+      else
+        command = script_command(&p, goal);
+      break;
+    case PROJECT_RUSTC:
+      command = goal == GOAL_TEST ? g_strdup("echo 't-code: no test runner detected for this file'; false")
+                                  : rustc_command(p.root, goal);
+      break;
     case PROJECT_CARGO:
     case PROJECT_GO:
     case PROJECT_NODE:
     case PROJECT_MAVEN:
     case PROJECT_GRADLE: command = language_command(&p, goal); break;
     default:
-      command = g_strdup("echo 't-code: nothing to build here (open a C file, or add a Makefile or CMakeLists.txt)'");
-      break;
+      command = goal == GOAL_TEST
+                    ? g_strdup("echo 't-code: no test runner detected for this project'; false")
+                    : g_strdup("echo 't-code: nothing to build here (open a C file, or add a Makefile or CMakeLists.txt)'");
   }
   gboolean alone = p.kind == PROJECT_FILE || p.kind == PROJECT_SCRIPT || p.kind == PROJECT_RUSTC; /* root: the file */
   if (cwd) /* the file's folder, as run does; the project's otherwise */
@@ -969,11 +1072,16 @@ char *project_command(App *t, gboolean run)
   return goal_command(t, run ? GOAL_RUN : GOAL_BUILD, NULL);
 }
 
+char *project_test_command(App *t)
+{
+  return goal_command(t, GOAL_TEST, NULL);
+}
+
 gboolean project_can_debug(App *t)
 {
   Project p = find_project(t);
-  gboolean c = p.kind == PROJECT_NONE || p.kind == PROJECT_TASKS || p.kind == PROJECT_CMAKE || p.kind == PROJECT_MAKE ||
-               p.kind == PROJECT_FILE;
+  gboolean c = p.kind == PROJECT_NONE || p.kind == PROJECT_TASKS || p.kind == PROJECT_CMAKE ||
+               p.kind == PROJECT_MESON || p.kind == PROJECT_MAKE || p.kind == PROJECT_FILE;
 
   project_clear(&p);
   return c;
@@ -983,6 +1091,11 @@ void build_project(App *t, gboolean run)
 {
   /* Every changed file is saved first. */
   save_all(t, run_saved, project_command(t, run));
+}
+
+void run_project_tests(App *t)
+{
+  save_all(t, run_saved, project_test_command(t));
 }
 
 char *build_for_debug(App *t)

@@ -1,13 +1,7 @@
 /*
- * The language server client (see client.h). One server (clangd) per window, in the project folder:
- *   - it starts when the first C or C++ editor opens, and is told about each editor (didOpen);
- *   - every insert and delete in an open editor becomes a change with its range, sent in batches
- *     (didChange) a moment later, or at once before a request about that file;
- *   - until it has answered initialize nothing about the files is sent: then they go whole, with
- *     positions in the encoding it chose (UTF-8 bytes, or UTF-16 units);
- *   - a minute after the last editor closes it stops (clangd holds hundreds of MB); a crash
- *     restarts it, up to MAX_CRASHES times.
- * It reads EOF on its stdin when t-code goes, and exits.
+ * Per-language LSP clients (see client.h): clangd for C/C++, pylsp for Python, gopls for Go and
+ * rust-analyzer for Rust. Each starts on first use, keeps a small LRU of open documents and stops
+ * one minute after its last editor closes; a crash restarts that server up to MAX_CRASHES times.
  */
 #include "lsp/client.h"
 
@@ -29,7 +23,7 @@
 #define FLUSH_MS 50 /* changes typed within this go in one didChange */
 #endif
 #ifndef MAX_OPEN_DOCS
-#define MAX_OPEN_DOCS 5 /* at most this many files stay didOpen in clangd at once (LRU) */
+#define MAX_OPEN_DOCS 5 /* per-server LRU of open documents */
 #endif
 #define MAX_CRASHES 3
 
@@ -41,11 +35,50 @@
 #else
 #define MALLOC_TRIM /* glibc's malloc_trim(): clangd built on musl has no such flag and exits on it */
 #endif
+typedef enum {
+  SERVER_CLANGD,
+  SERVER_PYTHON,
+  SERVER_GO,
+  SERVER_RUST,
+  SERVER_NONE,
+} ServerKind;
+
 #ifndef SERVER_ARGV /* tests run a fake server */
-#define SERVER_ARGV "clangd", "--background-index", "--pch-storage=disk", "-j=2", "--limit-results=50", MALLOC_TRIM
-#define TIDY_FLAG /* --clang-tidy or not, from the settings */
+static const char *const clangd_argv[] = { "clangd", "--background-index", "--pch-storage=disk", "-j=2",
+                                          "--limit-results=50", MALLOC_TRIM NULL };
+static const char *const python_argv[] = { "pylsp", NULL };
+static const char *const go_argv[] = { "gopls", NULL };
+static const char *const rust_argv[] = { "rust-analyzer", NULL };
+#define TIDY_FLAG
+#else
+static const char *const fake_argv[] = { SERVER_ARGV NULL };
 #endif
-static const char *const server_argv[] = { SERVER_ARGV NULL };
+
+static const char *const *server_command(ServerKind kind)
+{
+#ifdef SERVER_ARGV
+  return fake_argv;
+#else
+  switch (kind) {
+    case SERVER_CLANGD: return clangd_argv;
+    case SERVER_PYTHON: return python_argv;
+    case SERVER_GO: return go_argv;
+    case SERVER_RUST: return rust_argv;
+    default: return NULL;
+  }
+#endif
+}
+
+static const char *server_language(ServerKind kind)
+{
+  switch (kind) {
+    case SERVER_CLANGD: return NULL; /* C or C++ comes from GtkSourceView */
+    case SERVER_PYTHON: return "python";
+    case SERVER_GO: return "go";
+    case SERVER_RUST: return "rust";
+    default: return NULL;
+  }
+}
 /* Where the system headers are looked for (tests use a folder of their own). */
 static const char *sysroot = "/";
 
@@ -60,6 +93,7 @@ typedef struct {
   guint flush_id;
   gboolean include_missing; /* clangd's last diagnostics had an #include it cannot find */
 } Doc;
+static Doc *doc_of(Tab *tab);
 
 /* A request waiting for its answer. */
 typedef struct {
@@ -74,6 +108,8 @@ typedef struct {
 } Pending;
 
 struct Lsp {
+  ServerKind kind;
+  char *workspace; /* the project folder, retained while the server is idle */
   App *app;
   GSubprocess *process;
   Channel *ch;
@@ -121,20 +157,22 @@ static void position_of(Lsp *l, const GtkTextIter *iter, int *line, int *charact
     *character += gtk_text_iter_get_char(&walk) >= 0x10000 ? 2 : 1;
 }
 
-gboolean lsp_utf16(App *t)
+gboolean lsp_utf16(Tab *tab)
 {
-  return t->lsp && t->lsp->utf16;
+  GPtrArray *servers = tab->app->lsps;
+
+  for (guint i = 0; servers && i < servers->len; i++) {
+    Lsp *l = g_ptr_array_index(servers, i);
+    Doc *doc = g_hash_table_lookup(l->docs, tab);
+    if (doc)
+      return l->ready ? l->utf16 : TRUE;
+  }
+  return TRUE; /* LSP's default position encoding is UTF-16. */
 }
 
-void lsp_iter_at(Tab *tab, JsonNode *position, GtkTextIter *iter)
-{
-  lsp_iter_at_position(tab, json_int_at(position, "line", 0), json_int_at(position, "character", 0), iter);
-}
-
-void lsp_iter_at_position(Tab *tab, gint64 line, gint64 character, GtkTextIter *iter)
+static void iter_at_position(Tab *tab, gint64 line, gint64 character, GtkTextIter *iter, gboolean utf16)
 {
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
-  gboolean utf16 = lsp_utf16(tab->app);
 
   if (line >= gtk_text_buffer_get_line_count(buffer)) {
     gtk_text_buffer_get_end_iter(buffer, iter);
@@ -151,6 +189,21 @@ void lsp_iter_at_position(Tab *tab, gint64 line, gint64 character, GtkTextIter *
   }
 }
 
+void lsp_iter_at(Tab *tab, JsonNode *position, GtkTextIter *iter)
+{
+  lsp_iter_at_encoding(tab, position, iter, lsp_utf16(tab));
+}
+
+void lsp_iter_at_encoding(Tab *tab, JsonNode *position, GtkTextIter *iter, gboolean utf16)
+{
+  iter_at_position(tab, json_int_at(position, "line", 0), json_int_at(position, "character", 0), iter, utf16);
+}
+
+void lsp_iter_at_position(Tab *tab, gint64 line, gint64 character, GtkTextIter *iter)
+{
+  iter_at_position(tab, line, character, iter, lsp_utf16(tab));
+}
+
 char *lsp_document_params(Tab *tab)
 {
   char *uri = lsp_path_to_uri(tab->path), *quoted = json_quote(uri ? uri : "");
@@ -164,10 +217,11 @@ char *lsp_document_params(Tab *tab)
 char *lsp_position_params(Tab *tab, const GtkTextIter *iter)
 {
   char *document = lsp_document_params(tab), *params;
+  Doc *doc = doc_of(tab);
   int line = gtk_text_iter_get_line(iter), character = gtk_text_iter_get_line_index(iter);
 
-  if (tab->app->lsp)
-    position_of(tab->app->lsp, iter, &line, &character);
+  if (doc)
+    position_of(doc->lsp, iter, &line, &character);
   params = g_strdup_printf("%s,\"position\":{\"line\":%d,\"character\":%d}", document, line, character);
   g_free(document);
   return params;
@@ -267,7 +321,14 @@ static void send_request(Lsp *l, Tab *tab, const char *method, const char *param
 
 static Doc *doc_of(Tab *tab)
 {
-  return tab->app->lsp ? g_hash_table_lookup(tab->app->lsp->docs, tab) : NULL;
+  GPtrArray *servers = tab->app->lsps;
+
+  for (guint i = 0; servers && i < servers->len; i++) {
+    Doc *doc = g_hash_table_lookup(((Lsp *)g_ptr_array_index(servers, i))->docs, tab);
+    if (doc)
+      return doc;
+  }
+  return NULL;
 }
 
 /* Sends the changes collected for a document. */
@@ -331,7 +392,9 @@ static char *range_json(Lsp *l, const GtkTextIter *start, const GtkTextIter *end
 
 char *lsp_range(Tab *tab, const GtkTextIter *start, const GtkTextIter *end)
 {
-  return tab->app->lsp ? range_json(tab->app->lsp, start, end) : g_strdup("null");
+  Doc *doc = doc_of(tab);
+
+  return doc ? range_json(doc->lsp, start, end) : g_strdup("null");
 }
 
 /* Before the buffer takes the text (the signal's default handler inserts it). */
@@ -388,8 +451,8 @@ static void close_on_server(Doc *doc)
   doc->opened = FALSE;
 }
 
-/* Keeps at most MAX_OPEN_DOCS files open in clangd: the least recently used hidden ones get
- * didClose, and didOpen again when their tab is shown. */
+/* Keeps at most MAX_OPEN_DOCS files open per server: least-recently-used hidden tabs get didClose
+ * and didOpen again when shown. */
 static void evict_docs(Lsp *l)
 {
   for (;;) {
@@ -428,9 +491,13 @@ static void send_document(Doc *doc)
     params = g_strdup_printf("{%s,\"version\":%d},\"contentChanges\":[{\"text\":%s}]}", document, ++doc->version, text);
     notify(doc->lsp, "textDocument/didChange", params);
   } else {
-    const char *id = gtk_source_language_get_id(gtk_source_buffer_get_language(doc->tab->buffer));
-    params = g_strdup_printf("{%s,\"languageId\":\"%s\",\"version\":%d,\"text\":%s}}", document,
-                             g_str_has_prefix(id, "cpp") ? "cpp" : "c", ++doc->version, text);
+    const char *id = server_language(doc->lsp->kind);
+    if (!id) {
+      const char *source_id = gtk_source_language_get_id(gtk_source_buffer_get_language(doc->tab->buffer));
+      id = g_str_has_prefix(source_id, "cpp") ? "cpp" : "c";
+    }
+    params = g_strdup_printf("{%s,\"languageId\":\"%s\",\"version\":%d,\"text\":%s}}", document, id,
+                             ++doc->version, text);
     notify(doc->lsp, "textDocument/didOpen", params);
     doc->opened = TRUE;
     evict_docs(doc->lsp);
@@ -452,18 +519,72 @@ static void doc_free(Doc *doc)
 
 /* The server ------------------------------------------------------------------------------- */
 
-static void server_start(Lsp *l);
-
-/* The window's server state, made on first use. */
-static Lsp *lsp_of(App *t)
+static ServerKind server_kind_for_tab(Tab *tab)
 {
-  if (!t->lsp) {
-    t->lsp = g_new0(Lsp, 1);
-    t->lsp->app = t;
-    t->lsp->pending = g_hash_table_new(g_int64_hash, g_int64_equal);
-    t->lsp->docs = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)doc_free);
+  GtkSourceLanguage *language = tab && tab->kind == TAB_EDITOR
+                                    ? gtk_source_buffer_get_language(tab->buffer)
+                                    : NULL;
+  const char *id = language ? gtk_source_language_get_id(language) : "";
+  const char *path = tab ? tab->path : "";
+
+  if (strcmp(id, "c") == 0 || strcmp(id, "chdr") == 0 || strcmp(id, "cpp") == 0 || strcmp(id, "cpphdr") == 0)
+    return SERVER_CLANGD;
+  if (g_str_has_suffix(path, ".py"))
+    return SERVER_PYTHON;
+  if (g_str_has_suffix(path, ".go"))
+    return SERVER_GO;
+  if (g_str_has_suffix(path, ".rs"))
+    return SERVER_RUST;
+  return SERVER_NONE;
+}
+
+static gboolean server_installed(ServerKind kind)
+{
+#ifdef SERVER_ARGV
+  return kind != SERVER_NONE;
+#else
+  if (kind == SERVER_CLANGD)
+    return TRUE;
+  if (kind == SERVER_NONE)
+    return FALSE;
+  const char *const *argv = server_command(kind);
+  char *path = g_find_program_in_path(argv[0]);
+  gboolean found = path != NULL;
+
+  g_free(path);
+  return found;
+#endif
+}
+
+/* Gets or creates the language server for this tab's language and project. */
+static Lsp *lsp_of(Tab *tab)
+{
+  App *t = tab->app;
+  ServerKind kind = server_kind_for_tab(tab);
+  Lsp *l;
+
+  if (kind == SERVER_NONE)
+    return NULL;
+  if (!t->lsps)
+    t->lsps = g_ptr_array_new();
+  for (guint i = 0; i < t->lsps->len; i++) {
+    l = g_ptr_array_index(t->lsps, i);
+    if (l->kind == kind && g_strcmp0(l->workspace, t->project.root) == 0) {
+      if (kind == SERVER_CLANGD)
+        t->lsp = l;
+      return l;
+    }
   }
-  return t->lsp;
+  l = g_new0(Lsp, 1);
+  l->app = t;
+  l->kind = kind;
+  l->workspace = g_strdup(t->project.root);
+  l->pending = g_hash_table_new(g_int64_hash, g_int64_equal);
+  l->docs = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)doc_free);
+  g_ptr_array_add(t->lsps, l);
+  if (kind == SERVER_CLANGD)
+    t->lsp = l;
+  return l;
 }
 
 /* Stops the server: stdin closes, and it exits. Requests get NULL; the files are sent again to the
@@ -622,7 +743,7 @@ static void answer_server(Lsp *l, JsonNode *message)
   GString *result = g_string_new("null");
 
   if (g_strcmp0(method, "workspace/applyEdit") == 0) { /* a quick fix run as a command */
-    navigate_apply_edit(l->app, json_at(message, "params.edit"), FALSE);
+    navigate_apply_edit(l->app, json_at(message, "params.edit"), FALSE, l->utf16);
     g_string_assign(result, "{\"applied\":true}");
   } else if (g_strcmp0(method, "workspace/configuration") == 0 && items && JSON_NODE_HOLDS_ARRAY(items)) {
     g_string_assign(result, "[");
@@ -718,6 +839,7 @@ static void set_malloc_arenas(GSubprocessLauncher *launcher)
 /* Starts the server in the project folder and sends initialize; the files follow its answer. */
 static void server_start(Lsp *l)
 {
+  const char *const *server_argv = server_command(l->kind);
   GSubprocessLauncher *launcher = g_subprocess_launcher_new(
       G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
   GPtrArray *argv = g_ptr_array_new();
@@ -727,11 +849,13 @@ static void server_start(Lsp *l)
   for (int i = 0; server_argv[i]; i++)
     g_ptr_array_add(argv, (char *)server_argv[i]);
 #ifdef TIDY_FLAG
-  g_ptr_array_add(argv, l->app->settings.clang_tidy ? "--clang-tidy" : "--clang-tidy=false");
+  if (l->kind == SERVER_CLANGD)
+    g_ptr_array_add(argv, l->app->settings.clang_tidy ? "--clang-tidy" : "--clang-tidy=false");
 #endif
   g_ptr_array_add(argv, NULL);
-  g_subprocess_launcher_set_cwd(launcher, l->app->project.root);
-  set_malloc_arenas(launcher);
+  g_subprocess_launcher_set_cwd(launcher, l->workspace);
+  if (l->kind == SERVER_CLANGD)
+    set_malloc_arenas(launcher);
   l->process = g_subprocess_launcher_spawnv(launcher, (const char *const *)argv->pdata, &error);
   g_object_unref(launcher);
   g_ptr_array_free(argv, TRUE);
@@ -741,10 +865,12 @@ static void server_start(Lsp *l)
     g_clear_error(&error);
     return;
   }
-  l->root = g_strdup(l->app->project.root);
-  if (!l->written)
-    l->written = g_string_new(NULL);
-  watch_databases(l);
+  l->root = g_strdup(l->workspace);
+  if (l->kind == SERVER_CLANGD) {
+    if (!l->written)
+      l->written = g_string_new(NULL);
+    watch_databases(l);
+  }
   l->ch = channel_new(g_subprocess_get_stdout_pipe(l->process), g_subprocess_get_stdin_pipe(l->process),
                       G_OBJECT(l->process), l);
   l->ch->message = on_message;
@@ -792,15 +918,12 @@ static gboolean idle_stop(gpointer data)
 
 /* Editors ------------------------------------------------------------------------------------ */
 
-/* C and C++ go to clangd; old versions in a comparison do not (away from the project's build
- * setup it would only report noise). */
+/* C/C++ use clangd; other supported languages use their server when installed. */
 gboolean lsp_wants(Tab *tab)
 {
-  GtkSourceLanguage *language = tab->kind == TAB_EDITOR ? gtk_source_buffer_get_language(tab->buffer) : NULL;
-  const char *id = language ? gtk_source_language_get_id(language) : "";
+  ServerKind kind = server_kind_for_tab(tab);
 
-  return !tab->view->readonly && !tab->compare.with &&
-         (strcmp(id, "c") == 0 || strcmp(id, "chdr") == 0 || strcmp(id, "cpp") == 0 || strcmp(id, "cpphdr") == 0);
+  return !tab->view->readonly && !tab->compare.with && kind != SERVER_NONE && server_installed(kind);
 }
 
 void lsp_open(Tab *tab)
@@ -810,8 +933,8 @@ void lsp_open(Tab *tab)
 
   if (!lsp_wants(tab))
     return;
-  l = lsp_of(tab->app);
-  if (l->missing)
+  l = lsp_of(tab);
+  if (!l || l->missing)
     return;
   doc = g_hash_table_lookup(l->docs, tab);
   if (!doc) {
@@ -828,7 +951,7 @@ void lsp_open(Tab *tab)
     g_source_remove(l->idle_id);
     l->idle_id = 0;
   }
-  if (l->ch && g_strcmp0(l->root, tab->app->project.root) != 0) /* another project now */
+  if (l->ch && g_strcmp0(l->root, l->workspace) != 0)
     server_stop(l);
   if (!l->ch)
     server_start(l); /* the file goes once it has answered initialize */
@@ -891,31 +1014,35 @@ gboolean lsp_has(Tab *tab)
 
 void lsp_stop(App *t)
 {
-  Lsp *l = t->lsp;
-
-  if (!l)
+  if (!t->lsps) {
+    t->lsp = NULL;
     return;
-  server_stop(l);
-  if (l->idle_id)
-    g_source_remove(l->idle_id);
-  if (l->restart_id)
-    g_source_remove(l->restart_id);
-  g_hash_table_destroy(l->docs);
-  g_hash_table_destroy(l->pending);
-  if (l->written)
-    g_string_free(l->written, TRUE);
-  g_free(l);
+  }
+  for (guint i = 0; i < t->lsps->len; i++) {
+    Lsp *l = g_ptr_array_index(t->lsps, i);
+
+    server_stop(l);
+    if (l->idle_id)
+      g_source_remove(l->idle_id);
+    if (l->restart_id)
+      g_source_remove(l->restart_id);
+    g_hash_table_destroy(l->docs);
+    g_hash_table_destroy(l->pending);
+    if (l->written)
+      g_string_free(l->written, TRUE);
+    g_free(l->workspace);
+    g_free(l);
+  }
+  g_ptr_array_free(t->lsps, TRUE);
+  t->lsps = NULL;
   t->lsp = NULL;
 }
 
-void lsp_restart(App *t)
+static void restart_one(Lsp *l)
 {
-  Lsp *l = t->lsp;
   GHashTableIter iter;
   gpointer doc;
 
-  if (!l)
-    return; /* no C or C++ file was opened yet: the next one starts it */
   if (l->idle_id)
     g_source_remove(l->idle_id);
   if (l->restart_id)
@@ -924,11 +1051,33 @@ void lsp_restart(App *t)
   server_stop(l);
   l->crashes = 0;
   l->missing = FALSE; /* it may have been installed meanwhile */
-  g_hash_table_iter_init(&iter, l->docs);
-  while (g_hash_table_iter_next(&iter, NULL, &doc))
-    ((Doc *)doc)->include_missing = FALSE;
+  if (l->kind == SERVER_CLANGD) {
+    g_hash_table_iter_init(&iter, l->docs);
+    while (g_hash_table_iter_next(&iter, NULL, &doc))
+      ((Doc *)doc)->include_missing = FALSE;
+  }
   if (g_hash_table_size(l->docs) > 0)
     server_start(l); /* else the next file starts it */
+}
+
+void lsp_restart(App *t)
+{
+  if (!t->lsps)
+    return;
+  for (guint i = 0; i < t->lsps->len; i++)
+    restart_one(g_ptr_array_index(t->lsps, i));
+  update_status(t);
+}
+
+void lsp_restart_clangd(App *t)
+{
+  if (!t->lsps)
+    return;
+  for (guint i = 0; i < t->lsps->len; i++) {
+    Lsp *l = g_ptr_array_index(t->lsps, i);
+    if (l->kind == SERVER_CLANGD)
+      restart_one(l);
+  }
   update_status(t);
 }
 
@@ -964,7 +1113,7 @@ char *lsp_flags_hint(App *t, const char **problem)
                              "  • Debian / Ubuntu: sudo apt install build-essential\n"
                              "  • Arch Linux: sudo pacman -S --needed base-devel\n"
                              "  • Void Linux: sudo xbps-install base-devel\n\n"
-                             "Then run \"clangd: Restart Language Server\".",
+                             "Then run \"Restart Language Servers\".",
                              name);
       g_free(name);
       return hint;
@@ -981,7 +1130,7 @@ char *lsp_flags_hint(App *t, const char **problem)
       char *found = g_path_get_basename(misnamed);
       hint = g_strdup_printf("clangd cannot find the headers %s includes, as it has no compile flags for it.\n\n"
                              "clangd does not read \"%s\": rename it to %s, then run "
-                             "\"clangd: Restart Language Server\".",
+                             "\"Restart Language Servers\".",
                              name, found,
                              g_str_has_suffix(found, ".json") ? "compile_commands.json" : "compile_flags.txt");
       g_free(found);
@@ -992,7 +1141,7 @@ char *lsp_flags_hint(App *t, const char **problem)
                              "  • make: bear -- make (writes compile_commands.json)\n"
                              "  • CMake: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n"
                              "  • or compile_flags.txt with one flag per line (-I/usr/include/glib-2.0)\n\n"
-                             "Then run \"clangd: Restart Language Server\".",
+                             "Then run \"Restart Language Servers\".",
                              name);
     }
     g_free(name);
@@ -1017,7 +1166,7 @@ void lsp_request(Tab *tab, const char *method, const char *params, GCancellable 
 
 JsonNode *lsp_capability(Tab *tab, const char *path)
 {
-  Lsp *l = tab->app->lsp;
+  Doc *doc = doc_of(tab);
 
-  return l && l->capabilities ? json_at(l->capabilities, path) : NULL;
+  return doc && doc->lsp->capabilities ? json_at(doc->lsp->capabilities, path) : NULL;
 }

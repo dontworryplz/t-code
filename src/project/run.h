@@ -1,17 +1,23 @@
 /*
- * Build (Ctrl+Shift+B), Run (Ctrl+F5) and the build before debugging (F5) in the shell pane, for the project found from the current
- * file upwards: CMake, a Makefile, or else the C/C++ file alone; other languages' files run in their own project
- * (Cargo, Go, Node, Maven, Gradle, a Python root) or alone with their interpreter.
+ * Build (Ctrl+Shift+B), Run (Ctrl+F5), Test (command palette) and build before debugging (F5) in
+ * the shell pane. Projects are detected from the current file upwards: CMake, Meson, Make, Cargo,
+ * Go, Node, Maven, Gradle, Python, or a task profile.
  */
 #pragma once
 
 #include "app.h"
 
-/* Saves every changed file, then builds (and with run, runs) the project in the shell. */
+/* Saves changed files, then builds (and with run, runs) the project in the shell. */
 void build_project(App *t, gboolean run);
 
 /* The shell command build_project() types (free it). */
 char *project_command(App *t, gboolean run);
+
+/* The detected or configured project test command, before sending it to the shell. */
+char *project_test_command(App *t);
+
+/* Saves changed files, then runs the project test command in the shell. */
+void run_project_tests(App *t);
 
 /* Whether F5 can debug what Build builds: C / C++ (CMake, Make, a file alone; with nothing to build
  * it says so), not another language's file or project, which Ctrl+F5 runs. */

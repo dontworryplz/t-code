@@ -54,6 +54,7 @@ typedef struct {
 /* clang-format off */
 static void build(App *t) { build_project(t, FALSE); }
 static void run(App *t) { build_project(t, TRUE); }
+static void test_project(App *t) { run_project_tests(t); }
 static void next_tab(App *t) { step_tab(t, 1); }
 static void prev_tab(App *t) { step_tab(t, -1); }
 static void focus_left(App *t) { focus_group(t, 0); }
@@ -141,6 +142,7 @@ static void rename_it(App *t) { Tab *tab = current_editor(t); if (tab) rename_sy
 static void switch_header(App *t) { Tab *tab = current_editor(t); if (tab) switch_source_header(tab); }
 static void fix(App *t) { Tab *tab = current_editor(t); if (tab) quick_fix(tab); }
 static void symbols(App *t) { Tab *tab = current_editor(t); if (tab) go_to_symbol(tab); }
+static void workspace_symbols(App *t) { Tab *tab = current_editor(t); if (tab) go_to_workspace_symbol(tab); }
 static void suggest(App *t) { Tab *tab = current_editor(t); if (tab) completion_show(tab); }
 static void parameter_hints(App *t) { Tab *tab = current_editor(t); if (tab) signature_show(tab); }
 static void toggle_breakpoint(App *t) { Tab *tab = current_editor(t); if (tab) breakpoint_toggle_at_cursor(tab); }
@@ -263,12 +265,14 @@ static const Command commands[] = {
   { "Quick Fix…", "<Control>period", "Ctrl+.", fix, TRUE, FALSE, FALSE },
   { "Go to Symbol in File…", "<Control><Shift>period|<Control><Shift>greater", "Ctrl+Shift+.", symbols, TRUE, FALSE,
     FALSE },
+  { "Go to Symbol in Workspace…", NULL, NULL, workspace_symbols, TRUE, FALSE, FALSE },
   { "Switch Source / Header", "<Alt>o", "Alt+O", switch_header, TRUE, FALSE, FALSE },
   { "Rename Symbol", "F2", "F2", rename_it, TRUE, FALSE, FALSE },
   { "Format Document", "<Shift><Alt>f|<Alt>f", "Shift+Alt+F", format, TRUE, FALSE, FALSE },
   { "Trigger Suggest", "<Control>space", "Ctrl+Space", suggest, TRUE, FALSE, FALSE },
   { "Trigger Parameter Hints", "<Control><Shift>space", "Ctrl+Shift+Space", parameter_hints, TRUE, FALSE, FALSE },
   { "Build", "<Control><Shift>b", "Ctrl+Shift+B", build, FALSE, FALSE, FALSE },
+  { "Test", NULL, NULL, test_project, FALSE, FALSE, FALSE },
   { "Run Without Debugging", "<Control>F5", "Ctrl+F5", run, FALSE, FALSE, FALSE },
   { "Debug: Start Debugging / Continue", "F5", "F5", debug_start_or_continue, FALSE, FALSE, FALSE },
   { "Debug: Toggle Breakpoint", "F9", "F9", toggle_breakpoint, TRUE, FALSE, FALSE },
@@ -302,7 +306,7 @@ static const Command commands[] = {
   { "Toggle Shell", "<Control>j", "Ctrl+J", toggle_shell, FALSE, FALSE, FALSE },
   { "Source Control", "<Control><Shift>g", "Ctrl+Shift+G", show_scm, FALSE, FALSE, FALSE },
   { "Toggle Code Coloring", "F7", "F7", toggle_syntax, FALSE, TRUE, FALSE },
-  { "clangd: Restart Language Server", NULL, NULL, lsp_restart, FALSE, FALSE, FALSE },
+  { "Restart Language Servers", NULL, NULL, lsp_restart, FALSE, FALSE, FALSE },
   { "Change Indentation for This Project…", NULL, NULL, status_pick_indent, FALSE, FALSE, FALSE },
   { "Zoom In", "<Control>equal|<Control>plus|<Control>KP_Add", "Ctrl+=", zoom_in, FALSE, TRUE, FALSE },
   { "Zoom Out", "<Control>minus|<Control>KP_Subtract", "Ctrl+-", zoom_out, FALSE, TRUE, FALSE },

@@ -1,9 +1,8 @@
 /*
- * The language server client: one clangd per window, started in the project folder when the first
- * C or C++ file opens and stopped a minute after the last one closes (its memory comes back).
- * Open editors are kept in sync with it change by change (only what changed is sent); what it
- * says about them comes back as diagnostics (lsp/diagnostics.c). Other modules ask it things
- * (hover, completion, definition) with lsp_request().
+ * Language servers are created lazily per language and project: clangd for C/C++, plus pylsp,
+ * gopls and rust-analyzer when installed. Open editors are kept in sync with their server
+ * change by change; what it says comes back as diagnostics (lsp/diagnostics.c). Other modules ask
+ * it things (hover, completion, definition) with lsp_request().
  */
 #pragma once
 
@@ -13,8 +12,8 @@
 
 /* Documents ---------------------------------------------------------------------------------- */
 
-/* An editor's file was loaded (or loaded again): the server gets it, when it is C or C++ and not a
- * read-only old version. */
+/* An editor's file was loaded (or loaded again): its language server gets it, when supported;
+ * optional servers must be installed, and read-only old versions are not sent. */
 void lsp_open(Tab *tab);
 
 /* The editor was shown: marks it most recently used, and re-opens it on the server if it was
@@ -30,12 +29,14 @@ void lsp_close(Tab *tab);
 /* Whether the server has the editor's file open (it can answer about it). */
 gboolean lsp_has(Tab *tab);
 
-/* Stops the window's server (t-code quits). */
+/* Stops all language servers when the project closes or t-code quits. */
 void lsp_stop(App *t);
 
 /* Starts the server again with the open files (its settings changed, or the user asked: it reads
  * the compile flags again); one that gave up after crashing or was not found is tried again. */
 void lsp_restart(App *t);
+/* Restarts only clangd, for clang-specific settings and compile-flag hints. */
+void lsp_restart_clangd(App *t);
 
 /* Why clangd cannot find an open file's #include, for the status bar: the C library's headers are
  * not installed (problem "No C headers"), or no compilation database applies to the file ("No
@@ -43,7 +44,7 @@ void lsp_restart(App *t);
  * problem is set only with a hint. */
 char *lsp_flags_hint(App *t, const char **problem);
 
-/* Whether an editor's file goes to the server (C or C++, not a read-only old version). */
+/* Whether an editor's file is routed to an LSP (optional servers must be installed). */
 gboolean lsp_wants(Tab *tab);
 
 /* Requests ----------------------------------------------------------------------------------- */
@@ -72,11 +73,13 @@ char *lsp_document_params(Tab *tab);
 /* '{"start": ..., "end": ...}' of the text from start to end, in the server's positions. */
 char *lsp_range(Tab *tab, const GtkTextIter *start, const GtkTextIter *end);
 
-/* Whether the server counts positions in UTF-16 units (else in UTF-8 bytes). */
-gboolean lsp_utf16(App *t);
+/* Whether the tab's server counts positions in UTF-16 units (else in UTF-8 bytes). */
+gboolean lsp_utf16(Tab *tab);
 
 /* The place in the buffer of an LSP position ({"line": ., "character": .}), kept inside the text. */
 void lsp_iter_at(Tab *tab, JsonNode *position, GtkTextIter *iter);
+/* Like lsp_iter_at(), with the originating server's position encoding. */
+void lsp_iter_at_encoding(Tab *tab, JsonNode *position, GtkTextIter *iter, gboolean utf16);
 
 /* The same from the line and character. */
 void lsp_iter_at_position(Tab *tab, gint64 line, gint64 character, GtkTextIter *iter);

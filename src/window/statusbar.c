@@ -199,7 +199,7 @@ static GtkWidget *status_button(GtkWidget *bar, const char *text, const char *to
 static void on_flags_answer(GObject *dialog, GAsyncResult *result, gpointer data)
 {
   if (gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(dialog), result, NULL) == 1)
-    lsp_restart(data);
+    lsp_restart_clangd(data);
 }
 
 /* "No compile flags" / "No C headers": what clangd lacks and how to give it, with a button that

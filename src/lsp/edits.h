@@ -8,9 +8,9 @@
 
 #include <json-glib/json-glib.h>
 
-/* Applies a list of TextEdits to an editor as one undo step. Their ranges are all taken first, so
- * each edit lands where the server meant it, whatever the others do to the text. */
-void edits_apply(Tab *tab, JsonNode *edits);
+/* Applies a list of TextEdits to an editor as one undo step, using the requesting server's position
+ * encoding. Their ranges are all taken first, so each edit lands where the server meant it. */
+void edits_apply(Tab *tab, JsonNode *edits, gboolean utf16);
 
 /* The same on a file's text (positions counted in UTF-16 units when utf16, else in bytes); returns
  * the new text. */
