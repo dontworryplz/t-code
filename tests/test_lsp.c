@@ -213,6 +213,7 @@ static int fake_server(void)
       }
       fake_send(reply);
       g_free(reply);
+    }
     g_object_unref(parser);
     g_free(body);
   }
