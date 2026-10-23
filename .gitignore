@@ -1,6 +1,7 @@
 build/
 .clangd
 .vscode/
+.cache/
 CLAUDE.md
 review/
 REVIEW_GUIDE.md

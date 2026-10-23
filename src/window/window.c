@@ -18,6 +18,7 @@
 #include "project/project.h"
 #include "project/session.h"
 #include "project/userfiles.h"
+#include "lsp/problems.h"
 #include "search/search.h"
 #include "update/update.h"
 #include "window/commands.h"
@@ -31,8 +32,8 @@
 
 /* Panes -------------------------------------------------------------------------------------- */
 
-const char *const panel_names[PANELS] = { "files", "scm", "search", "shell", "debug", "run" };
-const int panel_default_docks[PANELS] = { 0, 0, 0, 4, 4, 0 };
+const char *const panel_names[PANELS] = { "files", "scm", "search", "shell", "debug", "run", "problems" };
+const int panel_default_docks[PANELS] = { 0, 0, 0, 4, 4, 0, 4 };
 
 static void queue_panel_buttons(App *t);
 
@@ -48,6 +49,8 @@ static const char *panel_icon(const char *page)
     return "system-run-symbolic";
   if (strcmp(page, "run") == 0)
     return "media-playback-start-symbolic";
+  if (strcmp(page, "problems") == 0)
+    return "dialog-warning-symbolic";
   return "utilities-terminal-symbolic";
 }
 
@@ -76,7 +79,8 @@ static void focus_panel(App *t, const char *page)
     gtk_widget_grab_focus(t->scm);
   else if (strcmp(page, "shell") == 0)
     gtk_widget_grab_focus(GTK_WIDGET(t->shell.term));
-}
+  else if (strcmp(page, "problems") == 0)
+    problems_focus(t);
 
 int panel_dock(App *t, const char *page)
 {
@@ -1109,7 +1113,8 @@ static void create_docks(App *t)
   add_dock_panel(t, 4, GTK_WIDGET(t->shell.term), "shell", "Terminal (Alt+3 / Ctrl+J)");
   add_dock_panel(t, 4, debug_panel(t), "debug", "Debug (F5)");
   add_dock_panel(t, 0, clip_box(debug_view(t), TRUE), "run", "Run and Debug (Ctrl+Shift+D)");
-
+  t->problems = problems_panel(t);
+  add_dock_panel(t, 4, clip_box(t->problems, TRUE), "problems", "Problems (Ctrl+Shift+M)");
   t->layout.left = build_side_chain(t, 0, GTK_ORIENTATION_VERTICAL, 320);
   t->layout.bottom = build_side_chain(t, 1, GTK_ORIENTATION_HORIZONTAL, 480);
   t->layout.right = build_side_chain(t, 2, GTK_ORIENTATION_VERTICAL, 320);
@@ -1156,7 +1161,7 @@ static GtkWidget *header_bar(App *t)
 {
   static const char *const tips[PANELS] = {
     "Files (Alt+1)", "Source Control (Ctrl+Shift+G)", "Search (Ctrl+Shift+F)", "Terminal (Ctrl+J)",
-    "Debug (F5)",    "Run and Debug (Ctrl+Shift+D)"
+    "Debug (F5)",    "Run and Debug (Ctrl+Shift+D)",   "Problems (Ctrl+Shift+M)"
   };
   GtkWidget *panels = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
   GtkWidget *header = gtk_header_bar_new();

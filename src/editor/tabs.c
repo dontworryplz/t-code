@@ -14,6 +14,7 @@
 #include "git/compare.h"
 #include "popups/contextmenu.h"
 #include "window/statusbar.h"
+#include "lsp/problems.h"
 
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -190,6 +191,7 @@ void remove_tab(Tab *tab)
 
   unpair(tab);
   gtk_notebook_remove_page(group, gtk_notebook_page_num(group, frame_of(tab))); /* both sides of a comparison */
+  problems_update(t);
   focus_current_tab(t);
 }
 

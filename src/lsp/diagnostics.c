@@ -9,16 +9,17 @@
 #include "lsp/client.h"
 #include "window/statusbar.h"
 #include "window/palette.h"
+#include "lsp/problems.h"
 
 /* LSP's severities. */
 enum { SEVERITY_ERROR = 1, SEVERITY_WARNING, SEVERITY_INFO, SEVERITY_HINT };
 
-typedef struct {
+struct Diagnostic {
   GtkTextMark *start, *end;
   int severity;
   char *message;
   char *json; /* as the server sent it, for a quick fix request */
-} Diagnostic;
+};
 
 /* The error, warning and info colors, from the color theme. */
 static const PalColor colors[] = { PAL_ERROR, PAL_ERROR, PAL_WARNING, PAL_INFO, PAL_INFO };
@@ -69,6 +70,7 @@ void diagnostics_clear(Tab *tab)
 {
   remove_all(tab);
   g_clear_pointer(&tab->view->diagnostics, g_ptr_array_unref);
+  problems_update(tab->app);
 }
 
 /* A range with nothing in it (a missing ";") gets the character after it, or else the one before:
@@ -114,6 +116,7 @@ void diagnostics_show(Tab *tab, JsonNode *list)
   }
   editor_view_show_problems(tab);
   update_status(tab->app);
+  problems_update(tab->app);
 }
 
 char *diagnostics_at(Tab *tab, const GtkTextIter *iter, gboolean markup)
@@ -267,4 +270,36 @@ char *diagnostics_json(Tab *tab, int first, int last)
   }
   g_string_append_c(list, ']');
   return g_string_free(list, FALSE);
+}
+
+GPtrArray *diagnostics_of(Tab *tab)
+{
+  return (tab && tab->view) ? tab->view->diagnostics : NULL;
+}
+
+void diagnostic_position(Tab *tab, const Diagnostic *d, int *line, int *column)
+{
+  if (line)
+    *line = 1;
+  if (column)
+    *column = 1;
+  if (!tab || !tab->buffer || !d || !d->start)
+    return;
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER(tab->buffer);
+  GtkTextIter iter;
+  gtk_text_buffer_get_iter_at_mark(buffer, &iter, d->start);
+  if (line)
+    *line = gtk_text_iter_get_line(&iter) + 1;
+  if (column)
+    *column = gtk_text_iter_get_line_offset(&iter) + 1;
+}
+
+int diagnostic_severity(const Diagnostic *d)
+{
+  return d ? d->severity : 1;
+}
+
+const char *diagnostic_message(const Diagnostic *d)
+{
+  return (d && d->message) ? d->message : "";
 }

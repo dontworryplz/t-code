@@ -39,6 +39,19 @@ test_distro() {
     useradd -m tester
     runuser -u tester -- env VERSION=$VERSION NO_FONT_PACKAGE=${NO_FONT[$distro]:-} bash /src/packaging/smoke-test.sh"
 }
+test_appimage() {
+  local out="$OUT/appimage"
+  local appimage_file="$out/t-code-$VERSION-x86_64.AppImage"
+  [[ -e "$appimage_file" ]] || die "No built AppImage in $out, run packaging/appimage.sh"
+  info "Testing the AppImage package in a fresh ${IMAGE[appimage]}"
+  run_in_container appimage "$out" bash -c "
+    set -euo pipefail
+    { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb dbus python3 procps desktop-file-utils; } >/tmp/install.log 2>&1 || { tail -40 /tmp/install.log; exit 1; }
+    useradd -m tester
+    chmod +x /out/t-code-\$VERSION-x86_64.AppImage
+    runuser -u tester -- env VERSION=\$VERSION APPIMAGE_EXTRACT_AND_RUN=1 TCODE_BIN=/out/t-code-\$VERSION-x86_64.AppImage bash /src/packaging/smoke-test.sh"
+}
+
 
 targets=("$@")
 ((${#targets[@]})) || targets=(all)
@@ -47,10 +60,7 @@ failed=()
 for distro in "${targets[@]}"; do
   case "$distro" in
     fedora | arch | debian | void | void-musl) test_distro "$distro" || failed+=("$distro") ;;
-    # The AppImage has no package manager behind it (build_appimage checks its file exists and
-    # gives its SHA256SUMS; it itself is tried out when it is started).
-    appimage) [[ -e "$OUT/appimage/t-code-$VERSION-x86_64.AppImage" ]] ||
-      { warn "No built AppImage in $OUT/appimage, run packaging/appimage.sh"; failed+=("appimage"); } ;;
+    appimage) test_appimage || failed+=("appimage") ;;
     *) die "Unknown target '$distro' (fedora, arch, debian, void, void-musl, appimage or all)" ;;
   esac
 done

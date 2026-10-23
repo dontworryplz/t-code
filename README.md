@@ -177,12 +177,42 @@ AddressSanitizer, which also fails on memory leaks. `.clang-format` is the code'
 running t-code costs in memory and CPU (`tools/proc-report.sh`), or run it invisibly to measure a
 change (`tools/headless.sh`).
 
+## Plugins
+
+t-code features a native, out-of-process Plugin System with zero idle memory overhead. Plugins are discovered in `~/.local/share/t-code/plugins/<plugin_id>/` and `/usr/share/t-code/plugins/<plugin_id>/`.
+
+Each plugin provides a `plugin.json` manifest:
+
+```json
+{
+  "name": "Word Count",
+  "version": "1.0.0",
+  "description": "Counts words in active editor",
+  "executable": "wordcount.sh",
+  "commands": [
+    {
+      "id": "count",
+      "name": "Word Count: Count Words in Current Tab"
+    }
+  ]
+}
+```
+
+When a plugin command is triggered from the Command Palette (`Ctrl+Shift+P`):
+1. The executable is launched asynchronously with environment variables:
+   - `TCODE_SOCKET`: UNIX control socket path.
+   - `TCODE_PLUGIN_ID`: plugin identifier.
+   - `TCODE_COMMAND_ID`: executed command identifier.
+   - `TCODE_ACTIVE_FILE`: absolute path to active editor file.
+   - `TCODE_PROJECT_ROOT`: root directory of the current project.
+2. The plugin can interact with t-code via `$TCODE_SOCKET` (e.g., `say <message>`, `get-file`, `get-project`, `get-text`, `replace-all <text>`, `insert <text>`, `append <text>`, `save`).
+3. Plugins terminate immediately upon completion, maintaining zero background resource usage.
+
+Manage plugins via `Ctrl+Shift+P` > **Plugins: Reload Installed Plugins** or **Plugins: Open Plugins Folder**, or from Settings ("Edit by Hand" > "Plugins folder"). Detailed design and socket protocol documentation is in [`docs/plugins.md`](docs/plugins.md).
+
 ## Contributing
 
 If you want to contribute, all contributions will be gladly accepted. Please open a pull request.
-A plugin system is being thought out in [`docs/plugins.md`](docs/plugins.md) — comments there are
-as welcome as code.
-
 ## AI Usage in Project  
 
 Most of the structure and code written with using AI coding agent. Every single line of code is reviewed or currently under review. I did not spend enough time to write just myself because I just want an ide that uses not much ram as immediately as possible, the editor I used was using too much then I got angry and tada... BUT I will review every detail of this project and after than I will continue to add new features as I wish.
@@ -210,6 +240,7 @@ palette) finds any command by name.
 | anywhere    | `F9`, `F10` / `F11` / `Shift+F11`      | breakpoint / step over / into / out (debugging) |
 | anywhere    | `Shift+F5` / `Ctrl+Shift+F5` / `F6`    | stop / restart / pause (debugging)        |
 | anywhere    | `Ctrl+Shift+D` / `Ctrl+Shift+G`        | Run and Debug / Source Control panel      |
+| anywhere    | `Ctrl+Shift+M`                         | Problems panel (errors and warnings across files) |
 | anywhere    | `Ctrl+Alt+D` / `Ctrl+Alt+H`            | compare with the last commit / with a commit from the file's history |
 | anywhere    | `Ctrl+Shift+V`                         | markdown preview of the current file      |
 | anywhere    | `Ctrl+Shift+O`                         | open another project folder               |

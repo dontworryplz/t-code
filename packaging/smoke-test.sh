@@ -13,13 +13,16 @@ check() { # <description> <command...>
   if "$@" >/dev/null 2>&1; then pass "$what"; else fail "$what"; fi
 }
 
+TCODE_BIN="${TCODE_BIN:-t-code}"
 share=/usr/share/t-code
 
 echo "Installed files"
-check "t-code --version prints 't-code $VERSION'" test "$(t-code --version)" = "t-code $VERSION"
-check "the editor's style scheme in $share/styles" test -f "$share/styles/dark-classic.xml"
-check "desktop entry is valid" desktop-file-validate /usr/share/applications/io.github.tcode.desktop
-check "icon installed" test -f /usr/share/icons/hicolor/scalable/apps/io.github.tcode.svg
+check "t-code --version prints 't-code $VERSION'" test "$("$TCODE_BIN" --version)" = "t-code $VERSION"
+if [[ "$TCODE_BIN" == "t-code" ]]; then
+  check "the editor's style scheme in $share/styles" test -f "$share/styles/dark-classic.xml"
+  check "desktop entry is valid" desktop-file-validate /usr/share/applications/io.github.tcode.desktop
+  check "icon installed" test -f /usr/share/icons/hicolor/scalable/apps/io.github.tcode.svg
+fi
 for cmd in clangd git; do
   check "dependency '$cmd' installed" command -v "$cmd"
 done
@@ -40,13 +43,14 @@ git -C "$project" init -q
 Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &
 xvfb=$!
 sleep 2
-(cd "$project" && exec dbus-run-session -- t-code "$project"/{a,b,c,d}.c "$project/main.c") > /tmp/t-code.log 2>&1 &
+(cd "$project" && exec dbus-run-session -- "$TCODE_BIN" "$project"/{a,b,c,d}.c "$project/main.c") > /tmp/t-code.log 2>&1 &
 app=$!
 # clangd starts when the shown C file has loaded; give it time. (clangd names its main thread
 # "clangd.main", so it is found by its command line.)
 for _ in $(seq 30); do pgrep -u "$USER" -f '^clangd ' >/dev/null && break; sleep 1; done
 
 tcode=$(pgrep -u "$USER" -x t-code | head -1)
+[[ -z "$tcode" ]] && tcode=$(pgrep -u "$USER" -f 't-code' | head -1)
 check "t-code is running" test -n "$tcode"
 check "clangd started" pgrep -u "$USER" -f '^clangd '
 check "one clangd for all five editors" test "$(pgrep -u "$USER" -fc '^clangd ')" -eq 1
@@ -61,7 +65,7 @@ sleep 1
 check "Markdown preview opens in-process" kill -0 "$tcode"
 kill -TERM "${tcode:-0}" 2>/dev/null
 for _ in $(seq 10); do kill -0 "$app" 2>/dev/null || break; sleep 1; done
-check "t-code quits on SIGTERM" sh -c "! pgrep -u $USER -x t-code"
+check "t-code quits on SIGTERM" sh -c "! kill -0 ${tcode:-0} 2>/dev/null"
 check "control socket removed on quit" sh -c "! ls $XDG_RUNTIME_DIR/t-code-*.sock"
 check "no GTK criticals in the log" sh -c "! grep -E 'CRITICAL|segfault|Segmentation' /tmp/t-code.log"
 kill "$xvfb" 2>/dev/null

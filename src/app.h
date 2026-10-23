@@ -67,7 +67,7 @@ typedef struct Tab {
 #define GROUPS 3
 #define WINDOW_GROUP 2
 #define DOCKS 12 /* 0..3: left stacked, 4..7: bottom side-by-side, 8..11: right stacked */
-#define PANELS 6 /* the panels that go into the docks (window.h's panel_names) */
+#define PANELS 7 /* the panels that go into the docks (window.h's panel_names) */
 
 struct App {
   GtkWindow *window;
@@ -143,6 +143,7 @@ struct App {
   GSocketService *service;
   Lsp *lsp; /* the language server (clangd), while C or C++ files are open */
   GPtrArray *plugins; /* installed plugins (plugins/plugins.h) */
+  GtkWidget *problems; /* the Problems panel widget (lsp/problems.h) */
 
   /* debugging */
   struct {

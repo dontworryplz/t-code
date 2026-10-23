@@ -67,6 +67,7 @@ static void toggle_shell(App *t) { toggle_pane(t, GTK_WIDGET(t->shell.term)); }
 static void show_scm(App *t) { show_sidebar_page(t, "scm"); }
 static void show_search(App *t) { show_sidebar_page(t, "search"); }
 static void show_run(App *t) { show_sidebar_page(t, "run"); }
+static void show_problems_cmd(App *t) { toggle_panel(t, "problems"); }
 /* clang-format on */
 
 /* Alt+1: the file manager, showing the sidebar. */
@@ -278,6 +279,7 @@ static const Command commands[] = {
   { "Debug: Stop", "<Shift>F5", "Shift+F5", debug_stop, FALSE, FALSE, TRUE },
   { "Debug: Restart", "<Control><Shift>F5", "Ctrl+Shift+F5", debug_restart, FALSE, FALSE, TRUE },
   { "View: Run and Debug", "<Control><Shift>d", "Ctrl+Shift+D", show_run, FALSE, FALSE, FALSE },
+  { "View: Toggle Problems", "<Control><Shift>m", "Ctrl+Shift+M", show_problems_cmd, FALSE, FALSE, FALSE },
   { "Debug: Add to Watch", NULL, NULL, add_to_watch, TRUE, FALSE, FALSE },
   { "Debug: Open Disassembly View", NULL, NULL, disassembly_open, FALSE, FALSE, FALSE },
   { "Debug: Remove All Breakpoints", NULL, NULL, breakpoints_remove_all, FALSE, FALSE, FALSE },

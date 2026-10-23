@@ -27,3 +27,17 @@ void diagnostics_clear(Tab *tab);
 
 /* The diagnostics touching lines first to last (0-based), as a JSON list the server sent them in. */
 char *diagnostics_json(Tab *tab, int first, int last);
+
+typedef struct Diagnostic Diagnostic;
+
+/* The diagnostics list for a tab, or NULL. */
+GPtrArray *diagnostics_of(Tab *tab);
+
+/* Gets line and column (1-based) of diagnostic d. */
+void diagnostic_position(Tab *tab, const Diagnostic *d, int *line, int *column);
+
+/* Gets diagnostic severity (1 = Error, 2 = Warning, 3 = Info, 4 = Hint). */
+int diagnostic_severity(const Diagnostic *d);
+
+/* Gets diagnostic message. */
+const char *diagnostic_message(const Diagnostic *d);

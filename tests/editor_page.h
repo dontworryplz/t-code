@@ -24,6 +24,9 @@
 #include "lsp/compiledb.c"
 #include "lsp/completion.c"
 #include "lsp/diagnostics.c"
+/* Problems is a window page; the focused editor tests only exercise diagnostics. */
+#include "lsp/problems.c"
+
 #include "lsp/edits.c"
 #include "lsp/hover.c"
 #include "lsp/navigate.c"
@@ -37,6 +40,8 @@ void debug_hover_attach(Tab *tab G_GNUC_UNUSED) {}
 gboolean disassembly_is(App *t G_GNUC_UNUSED, Tab *tab G_GNUC_UNUSED) { return FALSE; }
 gboolean disassembly_breakpoint_at(App *t G_GNUC_UNUSED, int line G_GNUC_UNUSED) { return FALSE; }
 void disassembly_toggle_breakpoint(App *t G_GNUC_UNUSED, int line G_GNUC_UNUSED) {}
+void show_sidebar_page(App *t G_GNUC_UNUSED, const char *page G_GNUC_UNUSED) {}
+
 void status_show_indent(App *t G_GNUC_UNUSED) {}
 int tab_count(App *t G_GNUC_UNUSED) { return 0; }
 Tab *tab_nth(App *t G_GNUC_UNUSED, int index G_GNUC_UNUSED) { return NULL; }
