@@ -105,15 +105,15 @@ build/test-about: tests/test_about.c src/dialogs/about.c $(APP_HDR) build/licens
 	  $(shell pkg-config --libs $(PKGS))
 build/test-plugins: tests/test_plugins.c src/plugins/plugins.c src/plugins/plugins.h $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_plugins.c src/plugins/plugins.c \
-	  $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+	  $(shell pkg-config --libs $(PKGS))
 
 build/test-update: tests/test_update.c src/update/update.c src/update/update.h $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ tests/test_update.c src/update/update.c \
-	  $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+	  $(shell pkg-config --libs $(PKGS))
 
 build/test-recovery: tests/test_recovery.c src/editor/recovery.c src/editor/recovery.h $(APP_HDR) | build
 	$(CC) $(CFLAGS) $(APP_CFLAGS) -o $@ tests/test_recovery.c src/editor/recovery.c \
-	  $(shell pkg-config --libs gtk4 gio-2.0 2>/dev/null)
+	  $(shell pkg-config --libs $(PKGS))
 
 
 test: build/test-searchmatch build/test-detect build/test-linediff build/test-fileops build/test-lsp build/test-debug \
@@ -160,14 +160,14 @@ test-asan: | build
 	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags json-glib-1.0 gio-2.0) -o build/asan/test-debug \
 	  tests/test_debug.c $(DAP_SRC) $(shell pkg-config --libs json-glib-1.0 gio-2.0)
 	$(ASAN_ENV) build/asan/test-debug
-	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gtk4 json-glib-1.0 gio-2.0) -o build/asan/test-plugins \
-	  tests/test_plugins.c src/plugins/plugins.c $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+	$(CC) $(ASAN_FLAGS) $(APP_CFLAGS) -o build/asan/test-plugins \
+	  tests/test_plugins.c src/plugins/plugins.c $(shell pkg-config --libs $(PKGS) 2>/dev/null)
 	$(ASAN_ENV) build/asan/test-plugins
-	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gtk4 json-glib-1.0 gio-2.0) -DTCODE_VERSION='"$(VERSION)"' -o build/asan/test-update \
-	  tests/test_update.c src/update/update.c $(shell pkg-config --libs gtk4 json-glib-1.0 gio-2.0)
+	$(CC) $(ASAN_FLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o build/asan/test-update \
+	  tests/test_update.c src/update/update.c $(shell pkg-config --libs $(PKGS) 2>/dev/null)
 	$(ASAN_ENV) build/asan/test-update
-	$(CC) $(ASAN_FLAGS) $(shell pkg-config --cflags gtk4 gio-2.0 2>/dev/null) -o build/asan/test-recovery \
-	  tests/test_recovery.c src/editor/recovery.c $(shell pkg-config --libs gtk4 gio-2.0 2>/dev/null)
+	$(CC) $(ASAN_FLAGS) $(APP_CFLAGS) -o build/asan/test-recovery \
+	  tests/test_recovery.c src/editor/recovery.c $(shell pkg-config --libs $(PKGS) 2>/dev/null)
 	$(ASAN_ENV) build/asan/test-recovery
 
 # System-wide install, used by the packages in packaging/ (install.sh installs into ~/.local).

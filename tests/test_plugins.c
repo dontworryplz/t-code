@@ -6,6 +6,19 @@
 #include <string.h>
 
 static char *tmp_dir;
+static void test_plugin_free(gpointer data)
+{
+  Plugin *plugin = data;
+  g_free(plugin->id);
+  g_free(plugin->name);
+  g_free(plugin->version);
+  g_free(plugin->description);
+  g_free(plugin->dir);
+  g_free(plugin->executable);
+  g_ptr_array_free(plugin->commands, TRUE);
+  g_free(plugin);
+}
+
 Tab *current_tab(App *t)
 {
   (void)t;
@@ -77,7 +90,7 @@ static void test_empty_dir(void)
   char *empty = g_build_filename(tmp_dir, "empty", NULL);
   g_mkdir_with_parents(empty, 0755);
 
-  app.plugins = g_ptr_array_new();
+  app.plugins = g_ptr_array_new_with_free_func(test_plugin_free);
   plugins_scan_dir(&app, empty);
   g_assert_cmpuint(app.plugins->len, ==, 0);
 
@@ -103,7 +116,7 @@ static void test_valid_plugin(void)
   write_file("valid/test-plug/run.sh", "#!/bin/sh\nexit 0\n", 0755);
 
   char *scan_path = g_build_filename(tmp_dir, "valid", NULL);
-  app.plugins = g_ptr_array_new();
+  app.plugins = g_ptr_array_new_with_free_func(test_plugin_free);
   plugins_scan_dir(&app, scan_path);
 
   g_assert_cmpuint(app.plugins->len, ==, 1);
@@ -160,8 +173,11 @@ static void test_invalid_plugins(void)
   write_file("invalid/p6/run.sh", "#!/bin/sh\nexit 0\n", 0644); /* Not executable */
 
   char *scan_path = g_build_filename(tmp_dir, "invalid", NULL);
-  app.plugins = g_ptr_array_new();
+  app.plugins = g_ptr_array_new_with_free_func(test_plugin_free);
+  for (int i = 0; i < 5; i++)
+    g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*");
   plugins_scan_dir(&app, scan_path);
+  g_test_assert_expected_messages();
 
   g_assert_cmpuint(app.plugins->len, ==, 0);
 
@@ -193,7 +209,7 @@ static void test_subprocess_execution(void)
   app.project.root = g_strdup("/home/user/project");
 
   char *scan_path = g_build_filename(tmp_dir, "exec", NULL);
-  app.plugins = g_ptr_array_new();
+  app.plugins = g_ptr_array_new_with_free_func(test_plugin_free);
   plugins_scan_dir(&app, scan_path);
   g_assert_cmpuint(app.plugins->len, ==, 1);
 
@@ -228,7 +244,7 @@ static void test_palette_query(void)
 {
   App app = { 0 };
   char *scan_path = g_build_filename(tmp_dir, "valid", NULL);
-  app.plugins = g_ptr_array_new();
+  app.plugins = g_ptr_array_new_with_free_func(test_plugin_free);
   plugins_scan_dir(&app, scan_path);
 
   if (test_picker_rows) {
