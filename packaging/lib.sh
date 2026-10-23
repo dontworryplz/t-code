@@ -13,6 +13,7 @@ declare -A IMAGE=(
   ["arch"]=docker.io/library/archlinux:latest
   ["debian"]=docker.io/library/debian:trixie
   ["void"]=ghcr.io/void-linux/void-glibc-full:latest
+  ["void-musl"]=ghcr.io/void-linux/void-musl-full:latest
   ["appimage"]=docker.io/library/debian:trixie
   ["aur"]=docker.io/library/archlinux:latest
 )
