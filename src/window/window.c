@@ -81,6 +81,8 @@ static void focus_panel(App *t, const char *page)
     gtk_widget_grab_focus(GTK_WIDGET(t->shell.term));
   else if (strcmp(page, "problems") == 0)
     problems_focus(t);
+}
+
 
 int panel_dock(App *t, const char *page)
 {
