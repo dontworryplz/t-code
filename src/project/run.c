@@ -470,6 +470,7 @@ static char *tasks_command(const char *root, Goal goal)
   return cmd ? cmd : g_strdup("true");
 }
 
+static char *if_installed(const char *program, char *what);
 /* The shell command that configures and builds with CMake (and then runs or debugs the program). */
 static char *cmake_command(const char *root, Goal goal)
 {
