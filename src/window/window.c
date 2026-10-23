@@ -25,6 +25,7 @@
 #include "window/statusbar.h"
 #include "window/terminal.h"
 #include "window/theme.h"
+#include "plugins/plugins.h"
 
 #include <string.h>
 
@@ -419,6 +420,7 @@ static void on_window_destroy(GtkWidget *window G_GNUC_UNUSED, App *t)
 {
   g_clear_handle_id(&t->dock.buttons_id, g_source_remove);
   memset(t->dock.panel_buttons, 0, sizeof t->dock.panel_buttons);
+  plugins_stop(t);
 }
 
 void reset_panel_layout(App *t)
@@ -1237,6 +1239,7 @@ void build_window(App *t, GtkApplication *app)
   gtk_source_init();
   find_files(t);
   start_socket(t);
+  plugins_init(t);
   gtk_icon_theme_add_search_path(gtk_icon_theme_get_for_display(gdk_display_get_default()), t->paths.icons);
   gtk_window_set_default_icon_name("io.github.tcode");
 

@@ -108,7 +108,7 @@ On Void Linux, xbps installs from a repository, so the downloaded package is ind
 the folder it is in; use the `x86_64-musl` file on musl):
 
 ```sh
-xbps-rindex -a t-code-0.2.1_1.x86_64.xbps
+xbps-rindex -a t-code-0.3.0_1.x86_64.xbps
 sudo xbps-install --repository="$PWD" t-code
 ```
 

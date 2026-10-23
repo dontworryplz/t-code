@@ -28,6 +28,7 @@
 #include "project/run.h"
 #include "project/userfiles.h"
 #include "update/update.h"
+#include "plugins/plugins.h"
 #include "window/secondwindow.h"
 #include "window/statusbar.h"
 #include "window/window.h"
@@ -313,6 +314,8 @@ static const Command commands[] = {
   { "Keyboard Shortcuts", NULL, NULL, show_keybinds, FALSE, FALSE, FALSE },
   { "About t-code", NULL, NULL, show_about, FALSE, FALSE, FALSE },
   { "Check for Updates Now", NULL, NULL, check_updates_now, FALSE, FALSE, FALSE },
+  { "Plugins: Reload Installed Plugins", NULL, NULL, plugins_reload, FALSE, FALSE, FALSE },
+  { "Plugins: Open Plugins Folder", NULL, NULL, open_plugins_folder, FALSE, FALSE, FALSE },
 };
 
 void run_command(App *t, const char *name)
@@ -416,13 +419,16 @@ static void query(App *t, const char *text, guint generation)
     picker_add(t, generation, c->name, c->keys, index);
     g_free(index);
   }
-  if (n == 0)
+  int plugin_matches = plugins_palette_query(t, text, generation);
+  if (n == 0 && plugin_matches == 0)
     picker_message(t, generation, "No matching commands");
 }
 
 /* PickerChoose: runs the picked command (its index in the table). */
 static void choose(App *t, const char *index)
 {
+  if (plugins_palette_choose(t, index))
+    return;
   commands[atoi(index)].run(t);
 }
 

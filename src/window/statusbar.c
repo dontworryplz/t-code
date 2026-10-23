@@ -164,6 +164,13 @@ void status_show_branch(App *t, const char *branch, gboolean dirty)
   gtk_widget_set_visible(GTK_WIDGET(t->status.branch), branch != NULL);
 }
 
+void status_say(App *t, const char *message)
+{
+  if (!t || !t->status.build || t->closing)
+    return;
+  gtk_label_set_text(t->status.build, message ? message : "");
+}
+
 /* Widgets ------------------------------------------------------------------------------------ */
 
 static GtkLabel *status_label(GtkWidget *bar, gboolean dim)

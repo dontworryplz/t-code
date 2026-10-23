@@ -15,6 +15,7 @@
 #include "project/project.h"
 #include "project/session.h"
 #include "window/window.h"
+#include "plugins/plugins.h"
 
 #include <gio/gunixsocketaddress.h>
 #include <glib-unix.h>
@@ -119,6 +120,7 @@ static void on_shutdown(GApplication *app G_GNUC_UNUSED, App *t)
   files_stop(t);
   lsp_stop(t);
   remove_temp_dir(t);
+  plugins_stop(t);
 }
 
 /* SIGTERM / SIGINT: save the session and quit normally, so the socket file is removed. The window
@@ -219,6 +221,7 @@ int main(int argc, char **argv)
 
   g_object_unref(app);
   g_clear_object(&t.service);
+  plugins_stop(&t);
   g_free(t.paths.socket);
   g_free(t.paths.styles);
   g_free(t.paths.icons);

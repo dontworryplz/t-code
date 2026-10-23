@@ -1,0 +1,12 @@
+{
+  "name": "Word Count",
+  "version": "1.0.0",
+  "description": "Counts words in the active editor buffer",
+  "executable": "wordcount.sh",
+  "commands": [
+    {
+      "id": "count",
+      "name": "Word Count: Count Words in Current Tab"
+    }
+  ]
+}

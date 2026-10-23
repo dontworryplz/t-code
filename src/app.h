@@ -142,6 +142,7 @@ struct App {
 
   GSocketService *service;
   Lsp *lsp; /* the language server (clangd), while C or C++ files are open */
+  GPtrArray *plugins; /* installed plugins (plugins/plugins.h) */
 
   /* debugging */
   struct {

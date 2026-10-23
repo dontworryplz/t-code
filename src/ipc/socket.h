@@ -1,7 +1,8 @@
 /*
  * The control socket scripts and tools send requests to, one per line (or ended by a NUL byte):
  *   open <path>, open-side <path>, open-window <path>, preview <path>, project <dir>, compare <path>,
- *   history <path>, terminal <dir>, copy <text>
+ *   history <path>, terminal <dir>, copy <text>, say <text>, insert <text>, append <text>,
+ *   replace-all <text>, get-file, get-project, get-text, save
  * Its path is in $TCODE_SOCKET for every program t-code starts.
  */
 #pragma once

@@ -4,7 +4,8 @@
  * (a path may hold a line break: printf 'open %s\0' "$path") ends them all that way:
  *   open <path>        open-side <path>    open-window <path> preview <path>     project <dir>
  *   compare <path>     history <path>      terminal <dir>     copy <text>
- *   debug <path>       debug-failed <dir>
+ *   debug <path>       debug-failed <dir>  say <text>         insert <text>      append <text>
+ *   replace-all <text> get-file            get-project        get-text           save
  * Paths are absolute. "compare" and "history" are git comparisons (git/compare.c), "terminal"
  * does cd in the shell, "copy" puts text on the clipboard, "debug" starts the debugger on a program
  * that was just built for it (t-code --send, from project/run.c; a folder: pick one in it), "debug-failed"
@@ -17,18 +18,89 @@
 #include "editor/preview.h"
 #include "git/compare.h"
 #include "project/project.h"
+#include "editor/tabs.h"
 #include "window/secondwindow.h"
+#include "window/statusbar.h"
 #include "window/terminal.h"
-
 #include <gio/gunixsocketaddress.h>
 #include <string.h>
 #include <unistd.h>
 
 /* One request (see the top of this file). */
-static void handle(App *t, const char *command, const char *arg)
+static void handle(App *t, const char *command, const char *arg, GOutputStream *out)
 {
+  if (strcmp(command, "say") == 0) {
+    status_say(t, arg);
+    return;
+  }
+  if (strcmp(command, "insert") == 0) {
+    Tab *tab = current_tab(t);
+    if (tab && tab->kind == TAB_EDITOR && tab->buffer)
+      gtk_text_buffer_insert_at_cursor(GTK_TEXT_BUFFER(tab->buffer), arg, -1);
+    return;
+  }
+  if (strcmp(command, "append") == 0) {
+    Tab *tab = current_tab(t);
+    if (tab && tab->kind == TAB_EDITOR && tab->buffer) {
+      GtkTextIter end;
+      gtk_text_buffer_get_end_iter(GTK_TEXT_BUFFER(tab->buffer), &end);
+      gtk_text_buffer_insert(GTK_TEXT_BUFFER(tab->buffer), &end, arg, -1);
+    }
+    return;
+  }
+  if (strcmp(command, "replace-all") == 0) {
+    Tab *tab = current_tab(t);
+    if (tab && tab->kind == TAB_EDITOR && tab->buffer)
+      gtk_text_buffer_set_text(GTK_TEXT_BUFFER(tab->buffer), arg, -1);
+    return;
+  }
+  if (strcmp(command, "get-file") == 0) {
+    if (out) {
+      Tab *tab = current_tab(t);
+      const char *path = (tab && tab->kind == TAB_EDITOR && tab->path) ? tab->path : "";
+      g_output_stream_write_all(out, path, strlen(path), NULL, NULL, NULL);
+      g_output_stream_write_all(out, "\n", 1, NULL, NULL, NULL);
+      g_output_stream_flush(out, NULL, NULL);
+    }
+    return;
+  }
+  if (strcmp(command, "get-project") == 0) {
+    if (out) {
+      const char *root = t->project.root ? t->project.root : "";
+      g_output_stream_write_all(out, root, strlen(root), NULL, NULL, NULL);
+      g_output_stream_write_all(out, "\n", 1, NULL, NULL, NULL);
+      g_output_stream_flush(out, NULL, NULL);
+    }
+    return;
+  }
+  if (strcmp(command, "get-text") == 0) {
+    if (out) {
+      Tab *tab = current_tab(t);
+      if (tab && tab->kind == TAB_EDITOR && tab->buffer) {
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(tab->buffer), &start, &end);
+        char *text = gtk_text_buffer_get_text(GTK_TEXT_BUFFER(tab->buffer), &start, &end, TRUE);
+        if (text) {
+          g_output_stream_write_all(out, text, strlen(text), NULL, NULL, NULL);
+          g_free(text);
+        }
+      }
+      g_output_stream_flush(out, NULL, NULL);
+    }
+    return;
+  }
+  if (strcmp(command, "save") == 0) {
+    Tab *tab = current_tab(t);
+    if (tab && tab->kind == TAB_EDITOR)
+      save_editor(tab);
+    return;
+  }
   if (strcmp(command, "copy") == 0) {
     gdk_clipboard_set_text(gtk_widget_get_clipboard(GTK_WIDGET(t->window)), arg);
+    return;
+  }
+  if (strcmp(command, "debug-failed") == 0) {
+    debug_build_failed(t);
     return;
   }
   if (!g_path_is_absolute(arg))
@@ -51,8 +123,6 @@ static void handle(App *t, const char *command, const char *arg)
     cd_in_shell(t, arg);
   else if (strcmp(command, "debug") == 0)
     debug_launch(t, arg);
-  else if (strcmp(command, "debug-failed") == 0)
-    debug_build_failed(t);
 }
 
 static void read_request(GDataInputStream *in, App *t);
@@ -75,10 +145,17 @@ static void on_request(GObject *source, GAsyncResult *result, gpointer data)
     return;
   }
   g_clear_error(&error);
-  char *space = strchr(request, ' ');
-  if (space && g_utf8_validate(request, length, NULL)) {
-    *space = '\0';
-    handle(t, request, space + 1);
+  GSocketConnection *conn = g_object_get_data(G_OBJECT(in), "connection");
+  GOutputStream *out = conn ? g_io_stream_get_output_stream(G_IO_STREAM(conn)) : NULL;
+
+  if (g_utf8_validate(request, length, NULL)) {
+    char *space = strchr(request, ' ');
+    if (space) {
+      *space = '\0';
+      handle(t, request, space + 1, out);
+    } else {
+      handle(t, request, "", out);
+    }
   }
   g_free(request);
   read_request(in, t);
