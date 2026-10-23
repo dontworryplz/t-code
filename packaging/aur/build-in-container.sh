@@ -2,7 +2,8 @@
 # Builds the source-based AUR recipe in the Arch Linux container.
 set -euo pipefail
 
-pacman -Syu --noconfirm --needed base-devel
+pacman -Syu --noconfirm --needed base-devel gtk4 gtksourceview5 json-glib vte4 md4c clang git \
+  ttf-cascadia-code hicolor-icon-theme
 useradd -m builder
 work=/home/builder/t-code-aur
 install -d -o builder -g builder "$work"
