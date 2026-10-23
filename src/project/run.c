@@ -550,7 +550,6 @@ static char *meson_command(const char *root, Goal goal)
     g_free(debug);
   }
   char *available = if_installed("meson", cmd);
-  g_free(cmd);
   g_free(setup);
   g_free(build);
   g_free(src);
