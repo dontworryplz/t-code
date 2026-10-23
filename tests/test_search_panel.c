@@ -243,6 +243,10 @@ static void test_limit(void)
 {
   reset_options();
   search_for("many");
+  gint64 until = g_get_monotonic_time() + 20 * G_USEC_PER_SEC;
+  while (!strstr(summary(), "search stopped there") && g_get_monotonic_time() < until)
+    g_main_context_iteration(NULL, TRUE);
+  g_assert_cmpint(g_get_monotonic_time(), <, until);
   g_assert_cmpstr(summary(), ==, "2000 results in 1 file (search stopped there)");
   g_assert_cmpint(rows(FALSE, FALSE), ==, 2000);
 }

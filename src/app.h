@@ -141,8 +141,8 @@ struct App {
   } paths;
 
   GSocketService *service;
-  Lsp *lsp; /* the language server (clangd), while C or C++ files are open */
-  GPtrArray *plugins; /* installed plugins (plugins/plugins.h) */
+  Lsp *lsp;            /* the language server (clangd), while C or C++ files are open */
+  GPtrArray *plugins;  /* installed plugins (plugins/plugins.h) */
   GtkWidget *problems; /* the Problems panel widget (lsp/problems.h) */
 
   /* debugging */

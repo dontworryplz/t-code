@@ -83,7 +83,6 @@ static void focus_panel(App *t, const char *page)
     problems_focus(t);
 }
 
-
 int panel_dock(App *t, const char *page)
 {
   for (int d = 0; d < DOCKS; d++)
@@ -1162,8 +1161,8 @@ static void on_panel_button(GtkButton *button, App *t)
 static GtkWidget *header_bar(App *t)
 {
   static const char *const tips[PANELS] = {
-    "Files (Alt+1)", "Source Control (Ctrl+Shift+G)", "Search (Ctrl+Shift+F)", "Terminal (Ctrl+J)",
-    "Debug (F5)",    "Run and Debug (Ctrl+Shift+D)",   "Problems (Ctrl+Shift+M)"
+    "Files (Alt+1)", "Source Control (Ctrl+Shift+G)", "Search (Ctrl+Shift+F)",  "Terminal (Ctrl+J)",
+    "Debug (F5)",    "Run and Debug (Ctrl+Shift+D)",  "Problems (Ctrl+Shift+M)"
   };
   GtkWidget *panels = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
   GtkWidget *header = gtk_header_bar_new();

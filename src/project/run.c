@@ -291,11 +291,8 @@ static gboolean load_task_profile_from_obj(JsonObject *obj, const char *name, Ta
 
 static gboolean load_task_profile(const char *root, TaskProfile *tp)
 {
-  char *paths[] = {
-    g_build_filename(root, ".t-code", "tasks.json", NULL),
-    g_build_filename(root, "t-code.json", NULL),
-    NULL
-  };
+  char *paths[] = { g_build_filename(root, ".t-code", "tasks.json", NULL), g_build_filename(root, "t-code.json", NULL),
+                    NULL };
   char *chosen = NULL;
   for (int i = 0; paths[i]; i++) {
     if (g_file_test(paths[i], G_FILE_TEST_IS_REGULAR)) {
@@ -319,9 +316,8 @@ static gboolean load_task_profile(const char *root, TaskProfile *tp)
         JsonNode *pnode = json_object_get_member(root_obj, "profiles");
         if (JSON_NODE_HOLDS_OBJECT(pnode)) {
           JsonObject *profiles_obj = json_node_get_object(pnode);
-          const char *target = json_object_has_member(root_obj, "default")
-                                   ? json_object_get_string_member(root_obj, "default")
-                                   : NULL;
+          const char *target =
+              json_object_has_member(root_obj, "default") ? json_object_get_string_member(root_obj, "default") : NULL;
           JsonObject *target_obj = NULL;
           if (target && json_object_has_member(profiles_obj, target)) {
             target_obj = json_object_get_object_member(profiles_obj, target);
@@ -406,8 +402,8 @@ static char *tasks_command(const char *root, Goal goal)
   if (!load_task_profile(root, &tp))
     return g_strdup("echo 't-code: could not read .t-code/tasks.json'");
 
-  char *workdir = tp.cwd ? (g_path_is_absolute(tp.cwd) ? g_strdup(tp.cwd) : g_build_filename(root, tp.cwd, NULL))
-                         : g_strdup(root);
+  char *workdir =
+      tp.cwd ? (g_path_is_absolute(tp.cwd) ? g_strdup(tp.cwd) : g_build_filename(root, tp.cwd, NULL)) : g_strdup(root);
   char *qdir = g_shell_quote(workdir);
   char *cmd = NULL;
 
@@ -458,7 +454,6 @@ static char *tasks_command(const char *root, Goal goal)
   task_profile_clear(&tp);
   return cmd ? cmd : g_strdup("true");
 }
-
 
 /* The shell command that configures and builds with CMake (and then runs or debugs the program). */
 static char *cmake_command(const char *root, Goal goal)
@@ -977,7 +972,8 @@ char *project_command(App *t, gboolean run)
 gboolean project_can_debug(App *t)
 {
   Project p = find_project(t);
-  gboolean c = p.kind == PROJECT_NONE || p.kind == PROJECT_TASKS || p.kind == PROJECT_CMAKE || p.kind == PROJECT_MAKE || p.kind == PROJECT_FILE;
+  gboolean c = p.kind == PROJECT_NONE || p.kind == PROJECT_TASKS || p.kind == PROJECT_CMAKE || p.kind == PROJECT_MAKE ||
+               p.kind == PROJECT_FILE;
 
   project_clear(&p);
   return c;
