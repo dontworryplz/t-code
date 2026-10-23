@@ -15,10 +15,17 @@ APP_CFLAGS := $(shell pkg-config --cflags $(PKGS)) -Isrc -Ibuild
 
 all: build/t-code build/compile_commands.json
 
-build/t-code: $(APP_SRC) $(APP_HDR) build/license.h Makefile | build
-	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -o $@ $(APP_SRC) $(LDFLAGS) \
-	  $(shell pkg-config --libs $(PKGS))
+APP_OBJ := $(patsubst src/%.c,build/obj/%.o,$(APP_SRC))
+APP_DEP := $(APP_OBJ:.o=.d)
 
+build/obj/%.o: src/%.c build/license.h | build
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(APP_CFLAGS) -DTCODE_VERSION='"$(VERSION)"' -MMD -MP -c -o $@ $<
+
+build/t-code: $(APP_OBJ) Makefile | build
+	$(CC) $(CFLAGS) -o $@ $(APP_OBJ) $(LDFLAGS) $(shell pkg-config --libs $(PKGS))
+
+-include $(APP_DEP)
 # LICENSE as a C string for the About window (src/dialogs/about.c).
 build/license.h: LICENSE | build
 	sed 's/\\/\\\\/g; s/"/\\"/g; s/.*/"&\\n"/' $< > $@
