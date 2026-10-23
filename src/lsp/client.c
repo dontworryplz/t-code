@@ -586,6 +586,7 @@ static Lsp *lsp_of(Tab *tab)
     t->lsp = l;
   return l;
 }
+static void server_start(Lsp *l);
 
 /* Stops the server: stdin closes, and it exits. Requests get NULL; the files are sent again to the
  * next one. */

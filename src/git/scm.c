@@ -343,8 +343,8 @@ static char *hunk_label(const char *patch, gboolean staged, guint index)
     return g_strdup_printf("%s hunk %u", staged ? "Unstage" : "Stage", index + 1);
   header++;
   end = strchr(header, '\n');
-  return g_strdup_printf("%s hunk %u: %.*s", staged ? "Unstage" : "Stage", index + 1,
-                         (int)(end ? end - header : strlen(header)), header);
+  int length = end ? (int)(end - header) : (int)strlen(header);
+  return g_strdup_printf("%s hunk %u: %.*s", staged ? "Unstage" : "Stage", index + 1, length, header);
 }
 
 static void on_hunks_read(gboolean ok, const char *out, const char *err, gpointer data)
