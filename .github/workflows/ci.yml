@@ -21,13 +21,19 @@ jobs:
       # Gtk tests need a session bus and headless display; cairo disables the container Vulkan renderer.
       - name: Tests
         run: |
+          ulimit -c unlimited
           runtime_dir=$(mktemp -d)
           chmod 700 "$runtime_dir"
           trap 'rm -rf "$runtime_dir"' EXIT
           if ! LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 XDG_RUNTIME_DIR="$runtime_dir" GSK_RENDERER=cairo \
             dbus-run-session -- xvfb-run -a make -j"$(nproc)" test; then
-            LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 XDG_RUNTIME_DIR="$runtime_dir" GSK_RENDERER=cairo \
-              dbus-run-session -- xvfb-run -a gdb --batch -ex run -ex bt --args build/test-lsp
+            core=$(find . -maxdepth 3 -type f -name 'core*' -print -quit)
+            if [ -n "$core" ]; then
+              gdb --batch -ex 'thread apply all bt full' build/test-lsp "$core"
+            else
+              LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 XDG_RUNTIME_DIR="$runtime_dir" GSK_RENDERER=cairo \
+                dbus-run-session -- xvfb-run -a gdb --batch -ex run -ex bt --args build/test-lsp
+            fi
             exit 1
           fi
   asan:
