@@ -44,6 +44,8 @@ Output names are deterministic:
 
 The recipe fixes the app version, base, architecture and GCC major, and fetches no floating application source. Ubuntu security updates and GNOME/base/content snap revisions still change over time. Keep the manifest and environment record with each artifact; this is not a claim of byte-for-byte reproducibility across archive or Store updates. For locked release rebuilds, retain the resolved apt packages and snap revisions in a controlled package/snap proxy or build environment.
 
+The Snapcraft recipe adds Ubuntu Resolute's official `main` and `universe` archive as a package source and pins its Ubuntu Archive Automatic Signing Key fingerprint. APT verifies repository metadata and packages against that key; never omit the `key-id` to silence Snapcraft's validation.
+
 The `gnome` extension supplies desktop integration, GTK4 and the desktop runtime. core24's GNOME 46 runtime cannot satisfy GtkSourceView 5.16's GTK >= 4.17 requirement without rebuilding GTK too; core26 avoids that additional stack. The recipe checks GtkSourceView >= 5.16 and VTE >= 0.78 during its build.
 
 ## Install and smoke test

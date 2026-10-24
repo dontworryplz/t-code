@@ -19,6 +19,7 @@ issues: https://github.com/suacayipkisi/t-code/issues
 package-repositories:
   - type: apt
     url: https://archive.ubuntu.com/ubuntu
+    key-id: F6ECB3762474EDA9D21B7022871920D1991BC93C
     suites: [resolute]
     components: [main, universe]
 
