@@ -19,6 +19,7 @@
 typedef struct TokensRequest TokensRequest;
 
 struct Semantic {
+  gatomicrefcount refs;
   Tab *tab;
   guint update_id;
   TokensRequest *request;
@@ -34,6 +35,20 @@ struct TokensRequest {
   Semantic *semantic;
   guint changes; /* the buffer's change count when it was asked */
 };
+
+static Semantic *semantic_ref(Semantic *s)
+{
+  g_atomic_ref_count_inc(&s->refs);
+  return s;
+}
+
+static void semantic_unref(gpointer data)
+{
+  Semantic *s = data;
+
+  if (g_atomic_ref_count_dec(&s->refs))
+    g_free(s);
+}
 
 /* The kinds of colored tokens: a tag each ("semantic-function", ...), in the color theme's color. */
 typedef enum { KIND_FUNCTION, KIND_TYPE, KIND_MACRO, KIND_CONSTANT, KIND_VARIABLE, KINDS } Kind;
@@ -425,13 +440,14 @@ void semantic_update(Tab *tab)
   }
   if (!s) {
     s = tab->view->semantic = g_new0(Semantic, 1);
+    g_atomic_ref_count_init(&s->refs);
     s->tab = tab;
     g_signal_connect(gtk_text_buffer_get_tag_table(GTK_TEXT_BUFFER(tab->buffer)), "tag-added", G_CALLBACK(on_tag_added),
                      NULL);
   }
   if (s->update_id)
     g_source_remove(s->update_id);
-  s->update_id = g_timeout_add(UPDATE_MS, update_now, s);
+  s->update_id = g_timeout_add_full(G_PRIORITY_DEFAULT, UPDATE_MS, update_now, semantic_ref(s), semantic_unref);
 }
 
 void semantic_free(Semantic *s)
@@ -453,7 +469,7 @@ void semantic_free(Semantic *s)
   if (s->data)
     g_array_unref(s->data);
   g_free(s->result_id);
-  g_free(s); /* the marks go with the buffer */
+  semantic_unref(s); /* the marks go with the buffer */
 }
 
 void semantic_inactive(Tab *tab, JsonNode *regions)

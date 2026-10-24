@@ -1074,6 +1074,7 @@ static void test_semantic_delta(void)
   JsonNode *full = json_of("{\"resultId\":\"1\",\"data\":[0,4,1,0,0, 1,4,1,1,0, 1,4,1,1,0]}");
   JsonNode *delta, *nothing;
   GtkTextIter at;
+  g_atomic_ref_count_init(&s->refs);
 
   lsp_open(tab);
   g_assert_true(server_agrees(tab));
