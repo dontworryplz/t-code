@@ -57,7 +57,6 @@ parts:
       - libmd4c0
       - fonts-cascadia-code
       - hicolor-icon-theme
-      - bash
     override-build: |
       set -eu
       pkg-config --atleast-version=5.16 gtksourceview-5
