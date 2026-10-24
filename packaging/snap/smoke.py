@@ -116,10 +116,10 @@ def main():
         run("cmake", "-S", str(project), "-B", str(project / "cmake-build"), "-G", "Ninja")
         run("cmake", "--build", str(project / "cmake-build"))
         require(run(str(project / "cmake-build/cmake-main")).strip() == "snap-c", "CMake and Ninja build")
-        (project / "meson.build").write_text("project('snap-smoke', 'c')\nexecutable('meson-main', 'main.c')\n")
+        (project / "meson.build").write_text("project('snap-smoke', 'c')\nexecutable('smoke-meson', 'main.c')\n")
         run("meson", "setup", str(project / "meson-build"), str(project))
         run("meson", "compile", "-C", str(project / "meson-build"))
-        require(run(str(project / "meson-build/meson-main")).strip() == "snap-c", "Meson uses bundled Python")
+        require(run(str(project / "meson-build/smoke-meson")).strip() == "snap-c", "Meson uses bundled Python")
         require("snap-python-ok" in run("gdb", "--batch", "-ex", "python print('snap-python-ok')"), "GDB has working embedded Python (not ptrace)")
 
         preview = project / "README.md"
