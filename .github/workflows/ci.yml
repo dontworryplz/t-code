@@ -32,7 +32,7 @@ jobs:
               gdb --batch -ex 'thread apply all bt full' build/test-lsp "$core"
             else
               LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 XDG_RUNTIME_DIR="$runtime_dir" GSK_RENDERER=cairo \
-                dbus-run-session -- xvfb-run -a gdb --batch -ex run -ex bt --args build/test-lsp
+                dbus-run-session -- xvfb-run -a gdb --batch -ex run -ex 'thread apply all bt full' --args build/test-lsp
             fi
             exit 1
           fi
