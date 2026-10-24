@@ -2,6 +2,8 @@ name: t-code
 base: core26
 version: '0.3.0'
 summary: Native C and C++ IDE with clangd and an integrated terminal
+title: t-code
+contact: https://github.com/suacayipkisi/t-code/issues
 description: |
   t-code is a GTK4 IDE with a file tree, editor tabs, clangd completion,
   Git integration, Markdown previews, project builds and a terminal.

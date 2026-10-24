@@ -27,11 +27,20 @@ for themes in gtk-3-themes icon-themes sound-themes; do
 done
 sudo -n snap connect t-code:home
 sudo -n snap connect t-code:network
+# Snap needs the systemd user manager to track confined app processes. CI's runner account is a
+# service account, not a PAM login, so create the same lingering session a normal login provides.
+uid="$(id -u)"
+runtime_dir="/run/user/$uid"
+sudo -n loginctl enable-linger "$(id -un)"
+sudo -n systemctl start "user@$uid.service"
+[[ -S "$runtime_dir/bus" ]] || {
+  echo "No systemd user bus at $runtime_dir/bus after starting user@$uid.service" >&2
+  exit 1
+}
+export XDG_RUNTIME_DIR="$runtime_dir"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus"
 # Exercise the normal app entry point, command chain and security label, not --shell/devmode.
 run=(env TCODE_SNAP_SMOKE_TEST=1 GSK_RENDERER=cairo snap run t-code)
-if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
-  run=(dbus-run-session -- "${run[@]}")
-fi
 if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
   run=(xvfb-run -a -s '-screen 0 1600x1000x24' env GDK_BACKEND=x11 "${run[@]}")
 fi
