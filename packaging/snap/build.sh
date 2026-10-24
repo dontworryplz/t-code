@@ -37,7 +37,15 @@ case "$build_mode" in
 esac
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+
+cleanup() {
+  if [[ "$build_mode" == destructive ]]; then
+    sudo rm -rf -- "$work"
+  else
+    rm -rf -- "$work"
+  fi
+}
+trap cleanup EXIT
 # Use a clean copy; never let host objects, previous packages or Snapcraft state enter the build.
 tar -C "$source" --exclude='./.git' --exclude='./build' --exclude='./parts' \
   --exclude='./stage' --exclude='./prime' --exclude='./.snapcraft' \

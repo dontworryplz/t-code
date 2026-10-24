@@ -51,7 +51,6 @@ parts:
       - libmd4c-dev
     stage-packages:
       - libgtksourceview-5-0
-      - libgtksourceview-5-common
       - libjson-glib-1.0-0
       - libvte-2.91-gtk4-0
       - libvte-2.91-common
