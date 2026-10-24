@@ -14,9 +14,27 @@ grep -qx "version: '$version'" "$source/packaging/snap/snapcraft.yaml" || {
   exit 1
 }
 [[ "$(uname -m)" == x86_64 && "$(uname -s)" == Linux ]] || {
-  echo 'Build on a Linux amd64 host/VM with Snapcraft 9 and initialized LXD' >&2
+  echo 'Build on Linux amd64 with Snapcraft 9' >&2
   exit 1
 }
+
+build_mode="${SNAPCRAFT_BUILD_MODE:-lxd}"
+case "$build_mode" in
+  lxd)
+    build_args=(--use-lxd)
+    ;;
+  destructive)
+    grep -qx 'ID=ubuntu' /etc/os-release && grep -qx 'VERSION_ID="26.04"' /etc/os-release || {
+      echo 'Destructive mode requires an Ubuntu 26.04 host matching core26' >&2
+      exit 1
+    }
+    build_args=(--destructive-mode)
+    ;;
+  *)
+    echo "Unsupported SNAPCRAFT_BUILD_MODE: $build_mode (use lxd or destructive)" >&2
+    exit 1
+    ;;
+esac
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -28,16 +46,24 @@ tar -C "$source" --exclude='./.git' --exclude='./build' --exclude='./parts' \
 mkdir -p "$work/snap"
 cp "$work/packaging/snap/snapcraft.yaml" "$work/snap/snapcraft.yaml"
 
-# Record the tools/providers used for this build; package manifests retain resolved apt versions.
 {
   snapcraft --version
   snap list snapcraft
   snap version
-  lxc version
+  if [[ "$build_mode" == lxd ]]; then
+    lxc version
+  else
+    grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
+  fi
 } > "$output/build-environment.txt"
 (
   cd "$work"
-  SNAPCRAFT_BUILD_INFO=1 snapcraft pack --use-lxd --output "$output/"
+  if [[ "$build_mode" == destructive ]]; then
+    SNAPCRAFT_BUILD_INFO=1 sudo --preserve-env=SNAPCRAFT_BUILD_INFO \
+      snapcraft pack "${build_args[@]}" --output "$output/"
+  else
+    SNAPCRAFT_BUILD_INFO=1 snapcraft pack "${build_args[@]}" --output "$output/"
+  fi
 )
 artifact="$output/t-code_${version}_amd64.snap"
 [[ -f "$artifact" ]] || { echo "Snapcraft did not produce $artifact" >&2; exit 1; }

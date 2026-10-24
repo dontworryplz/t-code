@@ -4,7 +4,7 @@ This directory packages t-code 0.3.0 as `t-code` for Linux amd64, with desktop/a
 
 ## Build
 
-Use a Linux amd64 host or VM with Snapcraft 9, working snapd, GNU tar, `sha256sum`, `unsquashfs` (`squashfs-tools`) and initialized LXD. The build uses Snapcraft's managed LXD environment for Ubuntu 26.04 LTS (`core26`), not a Snapcraft OCI image. There is no dependency on a published `snapcraft-rocks:core26` image. Ordinary unprivileged Docker/Podman containers are not a supported build or install-test environment.
+Use a Linux amd64 host with Snapcraft 9, working snapd, GNU tar, `sha256sum` and `unsquashfs` (`squashfs-tools`). The default build uses Snapcraft's managed LXD environment for Ubuntu 26.04 LTS (`core26`), not a Snapcraft OCI image. GitHub Actions instead uses an Ubuntu 26.04 runner with destructive mode, which matches `core26` and avoids relying on nested LXD networking. There is no dependency on a published `snapcraft-rocks:core26` image. Ordinary unprivileged Docker/Podman containers are not a supported build or install-test environment.
 
 Example setup on a dedicated Ubuntu CI runner with passwordless sudo:
 
@@ -19,7 +19,7 @@ sg lxd -c 'bash packaging/snap/build.sh "$PWD" "$PWD/packaging/packages/snap"'
 bash packaging/snap/test.sh "$PWD/packaging/packages/snap/t-code_0.3.0_amd64.snap"
 ```
 
-Skip installation/init commands for already provisioned tools. Membership in `lxd` grants administrative access to the host; use an isolated CI runner. `--classic` above applies only to the **Snapcraft build tool**, never to t-code. Recent snapd with core26 support and access to the Snap Store/Ubuntu archives are required.
+Skip installation/init commands for already provisioned tools. Membership in `lxd` grants administrative access to the host; use an isolated CI runner. `--classic` above applies only to the **Snapcraft build tool**, never to t-code. Recent snapd with core26 support and access to the Snap Store/Ubuntu archives are required. `SNAPCRAFT_BUILD_MODE=destructive` is reserved for a disposable Ubuntu 26.04 host because Snapcraft may install build dependencies there.
 
 The build interface is:
 
@@ -27,17 +27,19 @@ The build interface is:
 bash packaging/snap/build.sh /absolute/source/tree /absolute/output/directory
 ```
 
-It accepts a checkout or an extracted source release, requires the manifest version to match `Makefile`, copies source to a temporary workspace excluding existing build/package output, and runs:
+It accepts a checkout or an extracted source release, requires the manifest version to match `Makefile`, and copies source to a temporary workspace excluding existing build/package output. By default it uses LXD:
 
 ```sh
 SNAPCRAFT_BUILD_INFO=1 snapcraft pack --use-lxd --output /absolute/output/directory/
 ```
 
+For a disposable Ubuntu 26.04 host, set `SNAPCRAFT_BUILD_MODE=destructive`; the helper verifies the host version and runs Snapcraft with root privileges. This mode changes the host by installing build dependencies. The package workflow uses it on GitHub's `ubuntu-26.04` runner.
+
 Output names are deterministic:
 
 - `t-code_0.3.0_amd64.snap`
 - `SHA256SUMS`
-- `build-environment.txt`: Snapcraft version/revision, snapd version and LXD version
+- `build-environment.txt`: Snapcraft and snapd versions, plus LXD version or host Ubuntu release
 - `build-manifest.yaml`: Snapcraft's embedded build manifest, including resolved package/build-snap provenance
 
 The recipe fixes the app version, base, architecture and GCC major, and fetches no floating application source. Ubuntu security updates and GNOME/base/content snap revisions still change over time. Keep the manifest and environment record with each artifact; this is not a claim of byte-for-byte reproducibility across archive or Store updates. For locked release rebuilds, retain the resolved apt packages and snap revisions in a controlled package/snap proxy or build environment.
@@ -75,4 +77,4 @@ It does not claim a successful ptrace/debug session or exercise every interactiv
 
 ## Shared integration hand-off
 
-Call `build.sh <source-tree> <output-dir>` from a native Snapcraft/LXD CI job, collect the four output files, then call `test.sh <snap-file>` on a clean fully confined Linux runner. Capture its final `snap list`/`snap connections` output with CI logs for runtime revision provenance. Do not route this target through the existing ordinary OCI container helper. Release version checks should include `version` in `snapcraft.yaml`; the smoke compares the binary with snapd's `SNAP_VERSION` rather than duplicating the version.
+Call `build.sh <source-tree> <output-dir>` from a native Snapcraft/LXD job, or set `SNAPCRAFT_BUILD_MODE=destructive` on a disposable Ubuntu 26.04 runner. Collect the four output files, then call `test.sh <snap-file>` on a clean fully confined Linux runner. Capture its final `snap list`/`snap connections` output with CI logs for runtime revision provenance. Do not route this target through the existing ordinary OCI container helper. Release version checks should include `version` in `snapcraft.yaml`; the smoke compares the binary with snapd's `SNAP_VERSION` rather than duplicating the version.

@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   packages:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -22,15 +22,12 @@ jobs:
       - name: Install package builders and smoke-test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman flatpak flatpak-builder jq desktop-file-utils xvfb xauth dbus-x11 squashfs-tools acl
-      - name: Set up Snapcraft and LXD for strict core26 packaging
-        run: |
-          sudo snap install lxd
-          sudo snap install snapcraft --classic --channel=9.x/stable
-          sudo lxd init --auto
-          sudo lxd waitready
-          sudo setfacl -m "u:$(id -u):rw" /var/snap/lxd/common/lxd/unix.socket
+          sudo apt-get install -y podman flatpak flatpak-builder jq desktop-file-utils xvfb xauth dbus-x11 squashfs-tools
+      - name: Install Snapcraft for core26
+        run: sudo snap install snapcraft --classic --channel=9.x/stable
       - name: Build every package and collect release artifacts
+        env:
+          SNAPCRAFT_BUILD_MODE: destructive
         run: packaging/build.sh
       - name: Package smoke tests
         run: packaging/test.sh
