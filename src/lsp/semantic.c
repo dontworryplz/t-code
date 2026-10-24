@@ -387,7 +387,7 @@ static gboolean update_now(gpointer data)
   gboolean ask_delta;
 
   s->update_id = 0;
-  if (!lsp_has(s->tab) || !lsp_capability(s->tab, "semanticTokensProvider"))
+  if (!s->tab || !lsp_has(s->tab) || !lsp_capability(s->tab, "semanticTokensProvider"))
     return G_SOURCE_REMOVE;
   delta = lsp_capability(s->tab, "semanticTokensProvider.full.delta");
   ask_delta = s->result_id && s->data && delta && JSON_NODE_HOLDS_VALUE(delta) && json_node_get_boolean(delta);
@@ -438,8 +438,12 @@ void semantic_free(Semantic *s)
 {
   if (!s)
     return;
-  if (s->update_id)
-    g_source_remove(s->update_id);
+  s->tab = NULL;
+  if (s->update_id) {
+    guint update_id = s->update_id;
+    s->update_id = 0;
+    g_source_remove(update_id);
+  }
   if (s->request)
     s->request->semantic = NULL;
   if (s->cancel) {

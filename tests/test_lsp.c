@@ -1033,6 +1033,17 @@ static void test_semantic_colors(void)
   free_tab(tab);
 }
 
+static void test_semantic_timeout_close(void)
+{
+  Tab *tab = new_tab("/tmp/t-code-test/semantic-timeout.c", "");
+
+  semantic_update(tab);
+  g_assert_nonnull(tab->view->semantic);
+  g_assert_cmpuint(tab->view->semantic->update_id, !=, 0);
+  free_tab(tab);
+  run_for(UPDATE_MS + 50);
+}
+
 /* The color named "semantic-<color>" at offset, or NULL for none. */
 static const char *semantic_color_at(Tab *tab, int offset)
 {
@@ -1194,6 +1205,7 @@ int main(int argc, char **argv)
   g_test_add_func("/lsp/column-in", test_column_in);
   g_test_add_func("/lsp/snippet-text", test_snippet_text);
   g_test_add_func("/lsp/semantic-colors", test_semantic_colors);
+  g_test_add_func("/lsp/semantic-timeout-close", test_semantic_timeout_close);
   g_test_add_func("/lsp/semantic-delta", test_semantic_delta);
   g_test_add_func("/lsp/problem-end", test_problem_end);
   g_test_add_func("/lsp/completion-items", test_completion_items);

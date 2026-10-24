@@ -593,10 +593,11 @@ void editor_view_free(EditorView *v)
   if (!v)
     return;
   g_cancellable_cancel(v->cancel); /* loads and saves in flight drop their answer */
+  signature_free(v->signature);
+  semantic_free(v->semantic);      /* cancel debounce before closing its LSP document */
+  v->semantic = NULL;
   lsp_close(v->tab);
   diagnostics_clear(v->tab);
-  signature_free(v->signature);
-  semantic_free(v->semantic);
   occurrences_free(v->occurrences);
   findbar_free(v->find);
   diff_gutter_free(v->diff);
