@@ -41,6 +41,7 @@ cd /tmp
   --appdir /AppDir \
   --executable /AppDir/usr/bin/t-code \
   --library /usr/lib/x86_64-linux-gnu/libfribidi.so.0 \
+  --library /usr/lib/x86_64-linux-gnu/libharfbuzz.so.0 \
   --desktop-file /AppDir/usr/share/applications/io.github.tcode.desktop \
   --icon-file /AppDir/usr/share/icons/hicolor/256x256/apps/io.github.tcode.png \
   --plugin gtk \

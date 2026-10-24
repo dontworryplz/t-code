@@ -22,7 +22,11 @@ def require(condition, message):
 
 
 def run(*args, cwd=None):
-    return subprocess.run(args, cwd=cwd, check=True, text=True, capture_output=True, timeout=60).stdout
+    result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=60)
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"command {args!r} exited {result.returncode}: {detail}")
+    return result.stdout
 
 
 def request(path, command, terminator=None):
@@ -89,7 +93,8 @@ def main():
     # A nonhidden host-home project exercises the actual home interface, including nested .git.
     home = Path(os.environ["SNAP_REAL_HOME"])
     with tempfile.TemporaryDirectory(prefix="t-code-snap-smoke-", dir=home) as temporary:
-        project = Path(temporary)
+        project = Path(temporary) / "project"
+        project.mkdir()
         source = project / "main.c"
         source.write_text('#include <stdio.h>\nint main(void) { puts("snap-c"); return 0; }\n')
         cpp = project / "main.cpp"
