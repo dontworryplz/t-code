@@ -58,12 +58,13 @@ cp "$work/packaging/snap/snapcraft.yaml" "$work/snap/snapcraft.yaml"
   snapcraft --version
   snap list snapcraft
   snap version
+  apt-cache policy libvte-2.91-gtk4-0
   if [[ "$build_mode" == lxd ]]; then
     lxc version
   else
     grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
   fi
-} > "$output/build-environment.txt"
+} | tee "$output/build-environment.txt"
 (
   cd "$work"
   if [[ "$build_mode" == destructive ]]; then
