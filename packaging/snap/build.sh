@@ -65,17 +65,22 @@ cp "$work/packaging/snap/snapcraft.yaml" "$work/snap/snapcraft.yaml"
     grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
   fi
 } | tee "$output/build-environment.txt"
+build_artifact="$work/t-code_${version}_amd64.snap"
 (
   cd "$work"
   if [[ "$build_mode" == destructive ]]; then
     SNAPCRAFT_BUILD_INFO=1 sudo --preserve-env=SNAPCRAFT_BUILD_INFO \
-      snapcraft pack "${build_args[@]}" --output "$output/"
+      snapcraft pack "${build_args[@]}" --output "$work/"
   else
-    SNAPCRAFT_BUILD_INFO=1 snapcraft pack "${build_args[@]}" --output "$output/"
+    SNAPCRAFT_BUILD_INFO=1 snapcraft pack "${build_args[@]}" --output "$work/"
   fi
 )
-artifact="$output/t-code_${version}_amd64.snap"
-[[ -f "$artifact" ]] || { echo "Snapcraft did not produce $artifact" >&2; exit 1; }
+[[ -f "$build_artifact" ]] || {
+  echo "Snapcraft did not produce $build_artifact" >&2
+  exit 1
+}
+artifact="$output/${build_artifact##*/}"
+cp -- "$build_artifact" "$artifact"
 unsquashfs -cat "$artifact" snap/manifest.yaml > "$output/build-manifest.yaml"
 (
   cd "$output"
