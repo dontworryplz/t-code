@@ -1107,11 +1107,13 @@ static void test_semantic_delta(void)
 
 static void test_language_routing(void)
 {
-  Tab *cpp = new_tab("/tmp/t-code-test/routing.cpp", "int value;\n");
-  Tab *python = new_tab("/tmp/t-code-test/routing.py", "value = 1\n");
-  Tab *go = new_tab("/tmp/t-code-test/routing.go", "package main\n");
-  Tab *rust = new_tab("/tmp/t-code-test/routing.rs", "fn main() {}\n");
+  Tab *cpp, *python, *go, *rust;
+
   lsp_stop(&app); /* Earlier integration tests can leave idle servers in the shared App. */
+  cpp = new_tab("/tmp/t-code-test/routing.cpp", "int value;\n");
+  python = new_tab("/tmp/t-code-test/routing.py", "value = 1\n");
+  go = new_tab("/tmp/t-code-test/routing.go", "package main\n");
+  rust = new_tab("/tmp/t-code-test/routing.rs", "fn main() {}\n");
   gtk_source_buffer_set_language(python->buffer,
                                 gtk_source_language_manager_get_language(gtk_source_language_manager_get_default(),
                                                                         "python"));
