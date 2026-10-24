@@ -135,7 +135,7 @@
             "name": "t-code",
             "buildsystem": "simple",
             "build-commands": [
-                "env PKG_CONFIG_PATH=\"/app/lib64/pkgconfig:/app/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}\" make -j${FLATPAK_BUILDER_N_JOBS} CC=gcc build/t-code",
+                "env PKG_CONFIG_PATH=\"/app/lib64/pkgconfig:/app/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}\" LDFLAGS=\"-Wl,-rpath-link,/app/lib64${LDFLAGS:+ $LDFLAGS}\" make -j${FLATPAK_BUILDER_N_JOBS} CC=gcc build/t-code",
                 "make CC=gcc PREFIX=/app install",
                 "install -Dm644 io.github.tcode.desktop /app/share/applications/io.github.tcode.desktop",
                 "install -Dm644 io.github.tcode.metainfo.xml /app/share/metainfo/io.github.tcode.metainfo.xml",
