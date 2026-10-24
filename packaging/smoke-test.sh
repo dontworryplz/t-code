@@ -33,7 +33,7 @@ else
 fi
 
 echo "Running t-code"
-export XDG_RUNTIME_DIR="/tmp/runtime-$USER" DISPLAY=:99 GDK_BACKEND=x11 GSK_RENDERER=cairo
+export XDG_RUNTIME_DIR="/tmp/runtime-$USER" DISPLAY=:99 GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none
 mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 project="$HOME/project"
 mkdir -p "$project"
@@ -49,8 +49,7 @@ app=$!
 # "clangd.main", so it is found by its command line.)
 for _ in $(seq 30); do pgrep -u "$USER" -f '^clangd ' >/dev/null && break; sleep 1; done
 
-tcode=$(pgrep -u "$USER" -x t-code | head -1)
-[[ -z "$tcode" ]] && tcode=$(pgrep -u "$USER" -f 't-code' | head -1)
+tcode=$(pgrep -u "$USER" -x "${TCODE_PROCESS_NAME:-t-code}" | head -1)
 check "t-code is running" test -n "$tcode"
 check "clangd started" pgrep -u "$USER" -f '^clangd '
 check "one clangd for all five editors" test "$(pgrep -u "$USER" -fc '^clangd ')" -eq 1

@@ -20,6 +20,8 @@ tar -C "$work" --strip-components=1 -xzf "/out/t-code-$VERSION.tar.gz"
 cd "$work"
 make -j"$(nproc)" all
 make install PREFIX=/usr DESTDIR=/AppDir
+# GtkSourceView's language definitions and RelaxNG schemas are runtime data, not GTK plugin assets.
+cp -a /usr/share/gtksourceview-5 /AppDir/usr/share/
 mkdir -p /AppDir/usr/share/icons/hicolor/256x256/apps
 rsvg-convert /AppDir/usr/share/icons/hicolor/scalable/apps/io.github.tcode.svg \
   -w 256 -h 256 -o /AppDir/usr/share/icons/hicolor/256x256/apps/io.github.tcode.png

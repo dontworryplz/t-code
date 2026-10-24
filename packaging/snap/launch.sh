@@ -5,7 +5,9 @@ set -eu
 export XDG_CONFIG_HOME="$SNAP_USER_COMMON/.config"
 export XDG_DATA_HOME="$SNAP_USER_COMMON/.local/share"
 export XDG_CACHE_HOME="$SNAP_USER_COMMON/.cache"
-mkdir -p "$XDG_CONFIG_HOME/t-code/plugins" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+mkdir -p "$XDG_CONFIG_HOME/t-code/plugins" "$XDG_CONFIG_HOME/git" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_CONFIG_GLOBAL="$XDG_CONFIG_HOME/git/config"
 
 # snapd supplies /run/user/<uid>/snap.t-code; do not move IPC into the host runtime.
 : "${XDG_RUNTIME_DIR:?snapd must provide XDG_RUNTIME_DIR}"

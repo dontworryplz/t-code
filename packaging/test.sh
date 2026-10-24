@@ -52,7 +52,7 @@ test_appimage() {
     { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb dbus python3 procps desktop-file-utils clangd git fontconfig fonts-dejavu-core; } >/tmp/install.log 2>&1 || { tail -40 /tmp/install.log; exit 1; }
     useradd -m tester
     chmod +x /out/t-code-\$VERSION-x86_64.AppImage
-    runuser -u tester -- env VERSION=\$VERSION NO_FONT_PACKAGE=1 APPIMAGE_EXTRACT_AND_RUN=1 TCODE_BIN=/out/t-code-\$VERSION-x86_64.AppImage bash /src/packaging/smoke-test.sh"
+    runuser -u tester -- env VERSION=\$VERSION NO_FONT_PACKAGE=1 APPIMAGE_EXTRACT_AND_RUN=1 TCODE_BIN=/out/t-code-\$VERSION-x86_64.AppImage TCODE_PROCESS_NAME=AppRun.wrapped bash /src/packaging/smoke-test.sh"
 }
 
 test_flatpak() {
